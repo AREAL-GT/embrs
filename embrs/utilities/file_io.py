@@ -509,6 +509,7 @@ class SimFolderSelector(FileSelectBase):
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.wind_forecast = tk.StringVar()
+        self.wind_forecast_type = tk.StringVar()
         self.time_step = tk.IntVar()
         self.cell_size = tk.IntVar()
         self.sim_time = tk.DoubleVar()
@@ -532,6 +533,7 @@ class SimFolderSelector(FileSelectBase):
         self.num_runs.set(1)
         self.viz_on.set(False)
         self.time_unit.set("hours")
+        self.wind_forecast_type.set("Domain Average Wind")
         self.zero_wind.set(False)
 
         frame = self.create_frame(self.root)
@@ -544,9 +546,15 @@ class SimFolderSelector(FileSelectBase):
 
         # Create frame for wind file selection
         _, self.wind_entry, self.wind_button, self.wind_frame = self.create_file_selector(frame, "Wind forecast: ", self.wind_forecast, [("JavaScript Object Notation","*.JSON")])
-
         tk.Checkbutton(self.wind_frame, text='No Wind',
                        variable=self.zero_wind).grid(row=0, column=3)
+
+        # Create frame for user class selection
+        forecast_type_frame = tk.Frame(frame)
+        forecast_type_frame.pack(padx=10,pady=5)
+        tk.Label(forecast_type_frame, text="Wind forecast type:").grid(row=0, column=0)
+        self.forecast_type_menu = tk.OptionMenu(forecast_type_frame, self.wind_forecast_type, "Domain Average Wind", "Point Wind", "wxModel")
+        self.forecast_type_menu.grid(row=0, column=1)
 
         # Create frame for time step selection
         self.create_spinbox_with_two_labels(frame, "Time step:     ", 100, self.time_step, "seconds")
@@ -772,10 +780,14 @@ class SimFolderSelector(FileSelectBase):
             self.wind_button.configure(state='disabled')
             self.wind_entry.configure(state='disabled')
             self.wind_forecast.set("")
+            self.forecast_type_menu.configure(state='disabled')
+            self.wind_forecast_type.set("")
 
         else:
             self.wind_button.configure(state='normal')
             self.wind_entry.configure(state='normal')
+            self.forecast_type_menu.configure(state='normal')
+            self.wind_forecast_type.set("Domain Average Wind")
 
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
@@ -805,6 +817,7 @@ class SimFolderSelector(FileSelectBase):
             "input": self.map_folder.get(),
             "log": self.log_folder.get(),
             "wind": self.wind_forecast.get(),
+            "wind_type": self.wind_forecast_type.get(),
             "t_step": self.time_step.get(),
             "cell_size": self.cell_size.get(),
             "sim_time": sim_time,
