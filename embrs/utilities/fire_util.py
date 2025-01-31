@@ -6,9 +6,6 @@
 .. autoclass:: CellStates
     :members:
 
-.. autoclass:: FireTypes
-    :members:
-
 .. autoclass:: FuelConstants
     :members:
 
@@ -73,17 +70,6 @@ class CellStates:
     """
     # Cell States:
     BURNT, FUEL, FIRE = 0, 1, 2
-
-class FireTypes: # TODO: deprecate
-    """Enumeration of the possible fire types.
-
-    Attributes:
-        - **WILD** (int): Represents a fire that occurred naturally.
-        - **PRESCRIBED** (int): Represents a fire that was started in a controlled manner, burns with lower intensity.
-
-    """
-    # Fire Types:
-    WILD, PRESCRIBED = 0, 1
 
 # TODO: all this should be with the fuel model class
 class FuelConstants:

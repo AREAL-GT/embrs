@@ -16,7 +16,7 @@ from matplotlib.axes import Axes
 from matplotlib import cm
 import numpy as np
 
-from embrs.utilities.fire_util import CellStates, FireTypes
+from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import FuelConstants as fc
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import UtilFuncs as util
@@ -79,7 +79,6 @@ class Visualizer:
             low_poly = mpatches.RegularPolygon((-10,-10), numVertices=6, radius=r, orientation=0)
             high_poly = mpatches.RegularPolygon((-10,-10), numVertices=6, radius=r, orientation=0)
             fire_patches = [low_poly, high_poly]
-            prescribe_patches = [low_poly, high_poly]
             tree_patches = [low_poly, high_poly]
             fire_breaks = [low_poly, high_poly]
 
@@ -110,11 +109,8 @@ class Visualizer:
                         tree_patches.append(polygon)
 
                     elif curr_cell.state == CellStates.FIRE:
-                        if curr_cell.fire_type == FireTypes.WILD:
-                            fire_patches.append(polygon)
-                            # alpha_arr.append(curr_cell.fuel_content)
-                        else:
-                            prescribe_patches.append(polygon)
+                        fire_patches.append(polygon)
+                        # alpha_arr.append(curr_cell.fuel_content)
 
                     else:
                         burnt_patches.append(polygon)
@@ -131,20 +127,16 @@ class Visualizer:
             #     alpha_arr = [float(i)/sum(alpha_arr) for i in alpha_arr]
             #     fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
 
-            prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='b')
-
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
             self.collections = [copy.copy(breaks_coll), copy.copy(tree_coll),
-                                copy.copy(fire_coll), copy.copy(burnt_coll),
-                                copy.copy(prescribe_coll)]
+                                copy.copy(fire_coll), copy.copy(burnt_coll)]
 
             # Add collections to plot
             h_ax.add_collection(breaks_coll)
             h_ax.add_collection(tree_coll)
             h_ax.add_collection(fire_coll)
             h_ax.add_collection(burnt_coll)
-            h_ax.add_collection(prescribe_coll)
 
             # Create time display
             time_box_x = 0
@@ -332,7 +324,6 @@ class Visualizer:
         high_poly = mpatches.RegularPolygon((-10, -10), numVertices=6, radius=r,orientation=0)
         fire_patches = [low_poly, high_poly]
         tree_patches = [low_poly, high_poly]
-        prescribe_patches = [low_poly, high_poly]
 
         soak_xs = []
         soak_ys = []
@@ -357,11 +348,7 @@ class Visualizer:
                     c_vals.append(c_val)
 
             elif c.state == CellStates.FIRE:
-                if c.fire_type == FireTypes.WILD:
-                    fire_patches.append(polygon)
-                    # alpha_arr.append(c.fuel_content)
-                else:
-                    prescribe_patches.append(polygon)
+                fire_patches.append(polygon)
 
             else:
                 burnt_patches.append(polygon)
@@ -372,7 +359,6 @@ class Visualizer:
 
         tree_patches = np.array(tree_patches)
         fire_patches = np.array(fire_patches)
-        prescribe_patches = np.array(prescribe_patches)
         burnt_patches = np.array(burnt_patches)
         # alpha_arr = np.array(alpha_arr)
 
@@ -382,15 +368,11 @@ class Visualizer:
         # if len(alpha_arr) > 0:
         #     fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
 
-        prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='pink')
-
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
         self.h_ax.add_collection(tree_coll)
         self.h_ax.add_collection(fire_coll)
         self.h_ax.add_collection(burnt_coll)
-        self.h_ax.add_collection(prescribe_coll)
-
 
         sim_time_s = sim.time_step*sim.iters
         time_str = util.get_time_str(sim_time_s)

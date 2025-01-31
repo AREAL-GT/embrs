@@ -13,8 +13,8 @@ Classes:
 import numpy as np
 from shapely.geometry import Polygon
 
-from embrs.utilities.fire_util import CellStates, FireTypes
-from embrs.utilities.fuel_models import Fuel
+from embrs.utilities.fire_util import CellStates
+from embrs.utilities.fuel_models import Fuel, Anderson13
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
@@ -37,7 +37,6 @@ class Cell:
         fuel_type (Fuel): Fuel classification based on the 13 Anderson FBFMs.
         fuel_content (float): Remaining fuel fraction (0.0 to 1.0).
         state (CellStates): Current fire state (FUEL, FIRE, BURNT).
-        fire_type (FireTypes): Type of fire present (PRESCRIBED, WILD).
         neighbors (dict): Dictionary of adjacent cell neighbors.
         burnable_neighbors (dict): Subset of `neighbors` that are in a burnable state.
         dead_m (float): Dead fuel moisture fraction (0.0 to 1.0).
@@ -69,7 +68,6 @@ class Cell:
                 - `_cell_area`: Computed area of the hexagonal cell.
                 - `_x_pos`, `_y_pos`: Computed global coordinates.
                 - `_fuel_type`: Assigned fuel model.
-                - `_fire_type`: Tracks fire classification.
                 - `_state`: Set to `CellStates.FUEL` if burnable, otherwise `CellStates.BURNT`.
                 - `_neighbors`, `_burnable_neighbors`: Dictionaries for tracking adjacency.
                 - `_dead_m`: Default dead fuel moisture content (0.08).
@@ -110,9 +108,6 @@ class Cell:
 
         # Set Fuel type
         self._fuel_type = fuel_type
-
-        # Variable that tracks which type of fire a burning cell is
-        self._fire_type = -1
 
         # Set state for non burnable types to BURNT
         if self._fuel_type.burnable:
@@ -339,14 +334,6 @@ class Cell:
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
             self.I_ss = np.zeros(len(self.directions))
-            
-    def _set_fire_type(self, fire_type: FireTypes): # TODO: Deprecate
-        """Set the type of fire at a cell
-
-        :param fire_type: Fire type to set, either :py:attr:`FireTypes.WILD` or :py:attr:`FireTypes.PRESCRIBED`
-        :type fire_type: :class:`~utilities.fire_util.FireTypes`
-        """
-        self._fire_type = fire_type
 
     def _set_dead_m(self, dead_m: float):
         """Sets the dead fuel moisture content at the cell.
@@ -424,17 +411,11 @@ class Cell:
             dict: A dictionary with the following keys:
                 - `"id"` (int): The unique ID of the cell.
                 - `"state"` (CellStates): The current state of the cell.
-
-            If the cell is on fire (`CellStates.FIRE`), the dictionary also includes:
-                - `"fire_type"` (FireTypes): The type of fire in the cell.
         """
         cell_data = {
             "id": self.id,
             "state": self._state,
         }
-
-        if self.state == CellStates.FIRE:
-            cell_data['fire_type'] = self._fire_type
 
         return cell_data
 
@@ -547,14 +528,6 @@ class Cell:
         Can be :py:attr:`CellStates.FUEL`, :py:attr:`CellStates.BURNT`, or :py:attr:`CellStates.FIRE`.
         """
         return self._state
-
-    @property
-    def fire_type(self) -> FireTypes:
-        """Current type of fire burning at the cell.
-        
-        Either :py:attr:`FireTypes.PRESCRIBED` or :py:attr:`FireTypes.WILD`, `-1` if not currently in state :py:attr:`CellStates.FIRE`.
-        """
-        return self._fire_type
 
     @property
     def neighbors(self) -> dict:

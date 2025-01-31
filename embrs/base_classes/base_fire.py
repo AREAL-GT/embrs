@@ -11,7 +11,7 @@ from typing import Tuple
 from shapely.geometry import Point
 import numpy as np
 
-from embrs.utilities.fire_util import CellStates, FireTypes
+from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import HexGridMath as hex
 from embrs.utilities.sim_input import SimInput
@@ -111,8 +111,8 @@ class BaseFireSim:
         self._set_state_in_polygons(self.initial_ignition, CellStates.FIRE)
 
         # Set burnt cells
-        if not self.burnt_cells is None:
-            self._set_state_in_polygons(self.burnt_cells, CellStates.BURNT)
+        # if not self._burnt_cells is None:
+        #     self._set_state_in_polygons(self.burnt_cells, CellStates.BURNT)
 
         # Apply fire breaks
         self._set_firebreaks()
@@ -383,8 +383,8 @@ class BaseFireSim:
         :rtype: Tuple[float, float]
         """
 
-        x_coords = np.array([cell.x_pos for cell in self._burning_cells if cell.fire_type == FireTypes.WILD])
-        y_coords = np.array([cell.y_pos for cell in self._burning_cells if cell.fire_type == FireTypes.WILD])
+        x_coords = np.array([cell.x_pos for cell in self._burning_cells])
+        y_coords = np.array([cell.y_pos for cell in self._burning_cells])
 
         return np.mean(x_coords), np.mean(y_coords)
 
@@ -503,9 +503,7 @@ class BaseFireSim:
         :param y_m: y position of the desired point in meters
         :type y_m: float
         :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
-                      :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`) if set to
-                      :py:attr:`CellStates.FIRE`, fire_type will default to
-                      :py:attr:`FireTypes.WILD`
+                      :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`)
         :type state: :class:`~utilities.fire_util.CellStates`
         """
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -523,33 +521,25 @@ class BaseFireSim:
         :type col: int
         :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
                       :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`) if set to
-                      :py:attr:`CellStates.FIRE`, fire_type will default to
-                      :py:attr:`FireTypes.WILD`
+                      :py:attr:`CellStates.FIRE`
         :type state: :class:`~utilities.fire_util.CellStates`
         """
         cell = self.get_cell_from_indices(row, col)
         self.set_state_at_cell(cell, state)
 
-    def set_state_at_cell(self, cell: Cell, state: CellStates, fire_type=FireTypes.WILD):
+    def set_state_at_cell(self, cell: Cell, state: CellStates):
         """Set the state of the specified cell
 
         :param cell: :class:`~fire_simulator.cell.Cell` object whose state is to be changed
         :type cell: :class:`~fire_simulator.cell.Cell`
         :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
                       :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`) if set to
-                      :py:attr:`CellStates.FIRE`, fire_type will default to
-                      :py:attr:`FireTypes.WILD`
+                      :py:attr:`CellStates.FIRE`
         :type state: :class:`~utilities.fire_util.CellStates`
-        :param fire_type: type of fire, only relevant if state = :py:attr:`CellStates.FIRE`,
-                          options: (:py:attr:`FireTypes.WILD`, :py:attr:`FireTypes.PRESCRIBED`),
-                          defaults to :py:attr:`FireTypes.WILD`
-        :type fire_type: :class:`~utilities.fire_util.FireTypes`, optional
         :raises TypeError: if 'cell' is not of type :class:`~fire_simulator.cell.Cell`
         :raises ValueError: if 'cell' is not a valid :class:`~fire_simulator.cell.Cell` in the 
                             current fire Sim
         :raises TypeError: if 'state' is not a valid :class:`~utilities.fire_util.CellStates` value
-        :raises TypeError: if 'fire_type' is not a valid :class:`~utilities.fire_util.FireTypes`
-                           value
         """
         if not isinstance(cell, Cell):
             msg = f"'cell' must be of type 'Cell' not {type(cell)}"
@@ -582,22 +572,12 @@ class BaseFireSim:
             
             raise TypeError(msg)
 
-        if not isinstance(fire_type, int) or 0 > fire_type > 1:
-            msg = (f"{fire_type} is not a valid fire type. Must be of type int. "
-                f"Valid states: fireUtil.FireTypes.WILD, fireUtil.FireTypes.PRESCRIBED or 0, 1")
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_state_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise TypeError(msg)
-
         
         # Set new state
         cell._set_state(state)
 
     # Functions for setting wild fires
-    def set_wild_fire_at_xy(self, x_m: float, y_m: float):
+    def set_ignition_at_xy(self, x_m: float, y_m: float):
         """Set a wild fire in the cell at position (x_m, y_m) in the Cartesian plane.
 
         :param x_m: x position of the desired wildfire ignition point in meters
@@ -608,7 +588,7 @@ class BaseFireSim:
         cell = self.get_cell_from_xy(x_m, y_m)
         self.set_wild_fire_at_cell(cell)
 
-    def set_wild_fire_at_indices(self, row: int, col: int):
+    def set_ignition_at_indices(self, row: int, col: int):
         """Set a wild fire in the cell at indices [row, col] in 
         :py:attr:`~fire_simulator.fire.FireSim.cell_grid`
 
@@ -620,47 +600,13 @@ class BaseFireSim:
         cell = self.get_cell_from_indices(row, col)
         self.set_wild_fire_at_cell(cell)
 
-    def set_wild_fire_at_cell(self, cell: Cell):
+    def set_ignition_at_cell(self, cell: Cell):
         """Set a wild fire at a specific cell
 
         :param cell: :class:`~fire_simulator.cell.Cell` object to set a wildfire in
         :type cell: :class:`~fire_simulator.cell.Cell`
         """
-        self.set_state_at_cell(cell, CellStates.FIRE, fire_type=FireTypes.WILD)
-
-    # Functions for setting prescribed fires
-    def set_prescribed_fire_at_xy(self, x_m: float, y_m: float):
-        """Set a prescribed fire in the cell at position x_m, y_m in the Cartesian plane.
-
-        :param x_m: x position of the desired prescribed ignition point in meters
-        :type x_m: float
-        :param y_m: y position of the desired prescribed ignition point in meters
-        :type y_m: float
-        """
-        cell = self.get_cell_from_xy(x_m, y_m, oob_ok = True)
-
-        if cell is not None:
-            self.set_prescribed_fire_at_cell(cell)
-
-    def set_prescribed_fire_at_indices(self, row: int, col: int):
-        """Set a prescribed fire in the cell at indices [row, col] in the sim's backing array
-
-        :param row: row index of the desired prescribed ignition cell
-        :type row: int
-        :param col: col index of the desired prescribed ignition cell
-        :type col: int
-        """
-        cell = self.get_cell_from_indices(row, col)
-        self.set_prescribed_fire_at_cell(cell)
-
-    def set_prescribed_fire_at_cell(self, cell: Cell):
-        """Set a prescribed fire at a specific cell.
-
-        :param cell: :class:`~fire_simulator.cell.Cell` object to set a prescribed fire in
-        :type cell: :class:`~fire_simulator.cell.Cell`
-        """
-        if cell.state != CellStates.FIRE: # Prevent calling this more than once on a cell
-            self.set_state_at_cell(cell, CellStates.FIRE, fire_type=FireTypes.PRESCRIBED)
+        self.set_state_at_cell(cell, CellStates.FIRE)
 
     # Functions for setting fuel content
     def set_fuel_content_at_xy(self, x_m: float, y_m: float, fuel_content: float):

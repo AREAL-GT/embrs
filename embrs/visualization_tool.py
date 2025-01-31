@@ -18,7 +18,7 @@ import numpy as np
 import msgpack
 
 from embrs.utilities.file_io import VizFolderSelector, LoaderWindow
-from embrs.utilities.fire_util import CellStates, FireTypes
+from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import FuelConstants as fc, RoadConstants as rc, UtilFuncs as util
 
 
@@ -124,7 +124,6 @@ class VisualizationTool:
                                             radius=1/np.sqrt(3),orientation=0)
 
         fire_patches = [low_poly, high_poly]
-        prescribe_patches = [low_poly, high_poly]
         tree_patches = [low_poly, high_poly]
         burnt_patches = []
         fire_breaks = [low_poly, high_poly]
@@ -156,12 +155,9 @@ class VisualizationTool:
                     tree_patches.append(polygon)
 
             elif curr_cell.state == CellStates.FIRE:
-                if curr_cell.fire_type == FireTypes.WILD:
-                    fire_patches.append(polygon)
-                    alpha_arr.append(curr_cell.fuel_content)
-                else:
-                    prescribe_patches.append(polygon)
-
+                fire_patches.append(polygon)
+                alpha_arr.append(curr_cell.fuel_content)
+                
             else:
                 burnt_patches.append(polygon)
 
@@ -175,10 +171,6 @@ class VisualizationTool:
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
             fire_coll.set(array=np.array(alpha_arr), cmap=mpl.colormaps["gist_heat"])
             h_ax.add_collection(fire_coll)
-        if prescribe_patches:
-            prescribe_patches = np.array(prescribe_patches)
-            prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='pink')
-            h_ax.add_collection(prescribe_coll)
         if burnt_patches:
             burnt_patches = np.array(burnt_patches)
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
@@ -347,7 +339,6 @@ class VisualizationTool:
         fire_patches = [low_poly, high_poly]
         tree_patches = [low_poly, high_poly]
         burnt_patches = []
-        prescribe_patches = [low_poly, high_poly]
 
         alpha_arr = [0,1]
 
@@ -380,12 +371,8 @@ class VisualizationTool:
                     c_vals.append(c_val)
 
             elif cell['state'] == CellStates.FIRE:
-                if cell['fire_type'] == FireTypes.WILD:
-                    fire_patches.append(polygon)
-                    alpha_arr.append(cell['fuel_content'])
-                else:
-                    prescribe_patches.append(polygon)
-
+                fire_patches.append(polygon)
+                alpha_arr.append(cell['fuel_content'])
             else:
                 burnt_patches.append(polygon)
 
@@ -408,11 +395,6 @@ class VisualizationTool:
             fire_coll.set(array=np.array(alpha_arr), cmap=mpl.colormaps["gist_heat"])
             self.h_ax.add_collection(fire_coll)
             artists.append(fire_coll)
-        if prescribe_patches:
-            prescribe_patches = np.array(prescribe_patches)
-            prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='pink')
-            self.h_ax.add_collection(prescribe_coll)
-            artists.append(prescribe_coll)
         if burnt_patches:
             burnt_patches = np.array(burnt_patches)
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')

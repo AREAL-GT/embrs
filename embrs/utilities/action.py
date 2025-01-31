@@ -19,7 +19,6 @@ sequences.
 """
 
 from embrs.base_classes.base_fire import BaseFireSim
-from embrs.utilities.fire_util import CellStates, FireTypes
 
 class Action:
     """Base class which all other actions implement.
@@ -118,13 +117,9 @@ class SetIgnition(Action):
     :type x: float
     :param y: y location in meters where the action takes place.
     :type y: float
-    :param fire_type: The type of fire to be ignited, either :py:attr:`~FireTypes.PRESCRIBED` or
-                      :py:attr:`~FireTypes.WILD`
-    :type fire_type: FireTypes
     """
-    def __init__(self, time: float, x: float, y: float, fire_type: FireTypes):
+    def __init__(self, time: float, x: float, y: float):
         super().__init__(time, x, y)
-        self.fire_type = fire_type
 
     def perform(self, fire: BaseFireSim):
         """Function that carries out the SetIgnition action defined by the object, it should
@@ -137,8 +132,4 @@ class SetIgnition(Action):
 
         cell = fire.get_cell_from_xy(self.loc[0], self.loc[1], oob_ok=True)
         if cell is not None:
-            if self.fire_type == FireTypes.PRESCRIBED:
-                fire.set_prescribed_fire_at_xy(self.loc[0], self.loc[1])
-
-            else:
-                fire.set_wild_fire_at_xy(self.loc[0], self.loc[1])
+            fire.set_wild_fire_at_xy(self.loc[0], self.loc[1])

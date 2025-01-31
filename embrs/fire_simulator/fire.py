@@ -17,7 +17,7 @@ from tqdm import tqdm
 import numpy as np
 
 from embrs.base_classes.base_fire import BaseFireSim
-from embrs.utilities.fire_util import CellStates, FireTypes, FuelConstants, UtilFuncs, HexGridMath
+from embrs.utilities.fire_util import CellStates, FuelConstants, UtilFuncs, HexGridMath
 from embrs.utilities.sim_input import SimInput
 from embrs.fire_simulator.cell import Cell
 
@@ -40,7 +40,6 @@ class FireSim(BaseFireSim):
         progress_bar (Optional[tqdm]): A progress bar for tracking simulation steps.
         _updated_cells (dict): Stores cells that have been modified during the current iteration.
         _curr_updates (list): A list of updates to be logged.
-        _partially_burnt (list): Tracks cells that are in an intermediate burning state.
         _soaked (list): Stores cells that have been suppressed or extinguished.
         _burning_cells (list): Contains all currently burning cells.
         _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
@@ -81,7 +80,6 @@ class FireSim(BaseFireSim):
                 - `_curr_updates` (list): Stores updates to be logged.
 
             - **Cell State Management:**
-                - `_partially_burnt` (list): Tracks cells that are actively burning.
                 - `_soaked` (list): Stores cells affected by suppression efforts.
                 - `_burning_cells` (list): Contains currently burning cells.
                 - `_new_ignitions` (list): Stores new ignitions for the next iteration.
@@ -121,7 +119,6 @@ class FireSim(BaseFireSim):
         self._curr_updates = []
 
         # Containers for cells
-        self._partially_burnt = []
         self._soaked = []
         self._burning_cells = []
         self._new_ignitions = []
@@ -309,9 +306,7 @@ class FireSim(BaseFireSim):
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
                         neighbor._update_wind(self._curr_wind_idx)
-                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here
-
-                        neighbor._set_fire_type(FireTypes.WILD) # TODO: Deprecate wild vs. prescribed fire 
+                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here 
 
                         self._updated_cells[neighbor.id] = neighbor
 
@@ -428,13 +423,13 @@ class FireSim(BaseFireSim):
     def log_changes(self):
         """Logs changes in cell states during the current simulation iteration.
 
-        This method records updates to fire-affected cells, including partially burnt 
-        and soaked cells, and clears the `_soaked` list for the next iteration. If a logger 
+        This method records updates to fire-affected cells, including 
+        soaked cells, and clears the `_soaked` list for the next iteration. If a logger 
         is available, the updates are added to the logging cache, along with agent updates 
         if applicable.
 
         Side Effects:
-            - Updates `_curr_updates` by appending `_partially_burnt` and `_soaked` cells.
+            - Updates `_curr_updates` by appending `_soaked` cells.
             - Clears the `_soaked` list for the next iteration.
             - Calls `self.logger.add_to_cache()` if logging is enabled.
             - Calls `self.logger.add_to_agent_cache()` if agents are present.
@@ -445,7 +440,6 @@ class FireSim(BaseFireSim):
             - `_soaked` cells are reset after being logged.
             - Agent updates are logged only if `agents_added` is `True`.
         """
-        self._curr_updates.extend(self._partially_burnt)
         self._curr_updates.extend(self._soaked)
         self._soaked = []
         
