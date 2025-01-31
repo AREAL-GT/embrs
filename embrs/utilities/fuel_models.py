@@ -1,20 +1,77 @@
+"""Fuel model definitions for fire spread simulation.
+
+This module defines fuel models used in fire behavior modeling, including the 
+Anderson 13 Fire Behavior Fuel Models (FBFMs). It provides structured data for 
+different fuel types, including their physical properties and combustion characteristics.
+
+Classes:
+    - Fuel: Base class representing a generic fuel type with physical properties.
+    - Anderson13: Subclass representing the 13 standard Anderson fuel models.
+
+References:
+    - Anderson, H. E. (1982). Aids to Determining Fuel Models for Estimating Fire Behavior.
+      USDA Forest Service General Technical Report INT-122.
+
+"""
+
+# TODO: implement Scott Burgan fuel models
+
 class Fuel:
+    """Represents a generic fuel type with physical and combustion properties.
+
+    This class serves as a base for defining fuel models, including their 
+    loading parameters, fuel moisture, and combustion characteristics.
+
+    Args:
+        name (str): Name of the fuel model.
+        model_num (int): Fuel model number (e.g., Anderson 13 fuel model ID).
+        fuel_load_params (dict): Fuel load parameters for different time-lag classes 
+                                 (e.g., 1-hour, 10-hour fuels).
+        sav_ratio (int): Surface-area-to-volume ratio (cm²/cm³) of the dominant fuel.
+        fuel_depth (float): Fuel bed depth in meters.
+        m_x (float): Moisture content of extinction (fraction).
+        rel_packing_ratio (float): Packing ratio relative to optimal.
+        rho_b (float): Bulk density of the fuel bed (kg/m³).
+        burnable (bool): Indicates if the fuel type is burnable.
+
+    Attributes:
+        heat_content (float): Heat content of the fuel (BTU/lb).
+        fuel_moisture (float): Initial fuel moisture content (default = 0.01).
+        net_fuel_load (float): Computed net fuel load (lb/ft²).
+
+    Methods:
+        - set_net_fuel_load(): Computes the net fuel load based on the fuel properties.
+        - set_fuel_moisture(moisture): Placeholder for updating fuel moisture dynamically.
+    """
     def __init__(self, name: str, model_num: int, fuel_load_params: dict, sav_ratio: int, fuel_depth: float,
                  m_x: float, rel_packing_ratio: float, rho_b: float, burnable: bool):
-        """_summary_
+        """Initializes a generic fuel model with its physical and combustion properties.
+
+        This constructor defines the primary attributes of a fuel model, including 
+        its loading parameters, packing ratio, and moisture content. 
 
         Args:
-            name (str): _description_
-            model_num (int): _description_
-            fuel_load_params (dict): _description_
-            sav_ratio (int): _description_
-            fuel_depth (float): _description_
-            m_x (float): _description_
-            rel_packing_ratio (float): _description_
-            rho_b (float): _description_
-            burnable (bool): _description_
-        """
+            name (str): The name of the fuel model (e.g., "Short Grass").
+            model_num (int): The model number (e.g., Anderson 13 fuel model ID).
+            fuel_load_params (dict): A dictionary of fuel load parameters for different 
+                                    fuel classes (e.g., `{"1-h": (fuel_load, sav_ratio)}`).
+            sav_ratio (int): The surface-area-to-volume ratio of fine fuels (cm²/cm³).
+            fuel_depth (float): The depth of the fuel bed (meters).
+            m_x (float): The moisture content of extinction (fraction, 0 to 1).
+            rel_packing_ratio (float): The relative packing ratio of the fuel.
+            rho_b (float): The bulk density of the fuel bed (kg/m³).
+            burnable (bool): Whether this fuel model is burnable (`True`) or not (`False`).
 
+        Attributes:
+            heat_content (float): Heat content of the fuel (BTU/lb), default = `8000`.
+            fuel_moisture (float): Initial fuel moisture content, default = `0.01`.
+            net_fuel_load (float): Computed net fuel load (lb/ft²), set to `0` if non-burnable.
+
+        Behavior:
+            - Computes `net_fuel_load` automatically for burnable fuels using `set_net_fuel_load()`.
+            - Defines standard physical parameters such as mineral content (`s_T = 0.0555`).
+        """
+        
         self.name = name
         self.model_num = model_num
         self.fuel_load_params = fuel_load_params
@@ -38,10 +95,23 @@ class Fuel:
             self.net_fuel_load = self.set_net_fuel_load()
 
     def set_net_fuel_load(self) -> float:
-        """_summary_
+        """Computes the net fuel load for the fuel model.
+
+        The net fuel load is calculated using the fuel loading parameters, 
+        surface-area-to-volume ratios, and packing ratio. The formula applies 
+        weighting factors based on fuel class contributions.
 
         Returns:
-            float: _description_
+            float: The computed net fuel load (lb/ft²).
+
+        Behavior:
+            - Uses a weighted sum of fuel loads for different fuel classes (1-h, 10-h, etc.).
+            - Normalizes values based on fuel density and mineral content.
+            - Converts final values to lb/ft² for compatibility with fire behavior models.
+
+        Notes:
+            - The computation follows the methodology from the Anderson fuel models.
+            - Some fuel classes may have zero contribution depending on the model.
         """
 
         fuel_classes = ["1-h", "10-h", "100-h", "Live H", "Live W"]
@@ -82,14 +152,44 @@ class Fuel:
 
 
 class Anderson13(Fuel):
+    """Represents one of the 13 standard Anderson fire behavior fuel models.
+
+    The Anderson 13 models categorize different vegetation types based on 
+    their fire behavior characteristics. This class initializes fuel models 
+    with predefined parameters.
+
+    Args:
+        model_number (int): The Anderson 13 model ID (1-13 for burnable fuels, 91-99 for non-burnable).
+
+    Raises:
+        ValueError: If an invalid model number is provided.
+
+    Attributes:
+        fuel_models (dict): Dictionary containing the fuel model definitions.
+
+    Notes:
+        - Fuel models 1-13 are burnable.
+        - Models 91-99 represent non-burnable categories (e.g., urban, water, barren).
+        - Uses predefined parameters from Anderson (1982).
+    """
     def __init__(self, model_number: int):
-        """_summary_
+        """Initializes an Anderson 13 fire behavior fuel model.
+
+        This constructor selects a predefined Anderson 13 fuel model based on the 
+        input `model_number` and initializes its parameters accordingly.
 
         Args:
-            model_number (int): _description_
+            model_number (int): The ID of the Anderson 13 fuel model. Must be:
+                - A **burnable** model (`1-13`).
+                - A **non-burnable** model (`91-99`), representing land types such as urban areas, water, or barren land.
 
         Raises:
-            ValueError: _description_
+            ValueError: If the provided `model_number` is not a valid Anderson 13 ID.
+
+        Behavior:
+            - Loads predefined model parameters from the `fuel_models` dictionary.
+            - Determines whether the fuel model is **burnable** (`True` for 1-13, `False` for 91-99).
+            - Calls the parent `Fuel` constructor with the corresponding parameters.
         """
         
         # TODO: convert fuel load to lb/ft^2 (multiply by 0.0459137)

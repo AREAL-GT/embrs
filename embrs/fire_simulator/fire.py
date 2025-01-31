@@ -1,4 +1,13 @@
-"""Core fire simulation model.
+"""
+Core fire simulation model.
+
+This module defines the `FireSim` class, which implements a **wildfire simulation** 
+based on fire spread dynamics, wind conditions, and terrain influences. It extends 
+`BaseFireSim` and incorporates **hexagonal grid modeling** to track fire behavior 
+at a cellular level.
+
+Classes:
+    - FireSim: The main wildfire simulation model.
 
 .. autoclass:: FireSim
     :members:
@@ -17,11 +26,83 @@ from embrs.utilities.rothermel import *
 from typing import Tuple
 
 class FireSim(BaseFireSim):
+    """A hexagonal grid-based wildfire simulation model.
+
+    `FireSim` extends `BaseFireSim` and models wildfire spread using **Rothermel’s 
+    fire spread equations**, wind influence, and terrain effects. It tracks individual 
+    burning cells, manages ignition events, and simulates real-time fire growth over 
+    a discrete simulation grid.
+
+    Attributes:
+        burnout_thresh (float): The fraction of fuel consumption at which a cell is 
+                                considered fully burned.
+        logger (Optional[Logger]): A logging utility for storing simulation outputs.
+        progress_bar (Optional[tqdm]): A progress bar for tracking simulation steps.
+        _updated_cells (dict): Stores cells that have been modified during the current iteration.
+        _curr_updates (list): A list of updates to be logged.
+        _partially_burnt (list): Tracks cells that are in an intermediate burning state.
+        _soaked (list): Stores cells that have been suppressed or extinguished.
+        _burning_cells (list): Contains all currently burning cells.
+        _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
+        _agent_list (list): Tracks agents (e.g., firefighters, sensors) interacting with the fire.
+        _agents_added (bool): Indicates whether agents have been added to the simulation.
+        _curr_wind_idx (int): The index of the current wind forecast entry.
+        _last_wind_update (float): The last recorded time (in seconds) when wind was updated.
+
+    Methods:
+        iterate(): Advances the simulation by one time step.
+        ignite_neighbors(): Attempts to ignite neighboring cells based on spread conditions.
+        _update_wind(): Updates the current wind conditions if the forecast has changed.
+        _init_iteration(): Resets and updates key variables at the start of each time step.
+        log_changes(): Records simulation updates for logging and visualization.
+
+    Notes:
+        - The fire simulation operates on a **point-up hexagonal grid**.
+        - Fire spread is calculated using **Rothermel’s fire behavior model**.
+        - Wind conditions dynamically influence fire propagation.
+        - The simulation tracks both fire progression and suppression efforts.
+
+    """
     def __init__(self, sim_input: SimInput):
-        """_summary_
+        """Initializes the wildfire simulation with input parameters and sets up core tracking structures.
+
+        This constructor initializes key attributes related to fire progression, cell state tracking, 
+        wind updates, and agent interactions. It also sets up logging and a progress bar for monitoring 
+        the simulation.
 
         Args:
-            sim_input (SimInput): _description_
+            sim_input (SimInput): A structured input object containing all necessary simulation parameters, 
+                                including terrain, fuel, wind conditions, and ignition points.
+
+        Attributes Initialized:
+            - **Fire Behavior Tracking:**
+                - `burnout_thresh` (float): Fuel fraction threshold at which a cell is considered fully burnt.
+                - `_updated_cells` (dict): Stores cells modified during the current iteration.
+                - `_curr_updates` (list): Stores updates to be logged.
+
+            - **Cell State Management:**
+                - `_partially_burnt` (list): Tracks cells that are actively burning.
+                - `_soaked` (list): Stores cells affected by suppression efforts.
+                - `_burning_cells` (list): Contains currently burning cells.
+                - `_new_ignitions` (list): Stores new ignitions for the next iteration.
+
+            - **Agent Tracking:**
+                - `_agent_list` (list): Holds agents (firefighters, sensors, etc.) interacting with the fire.
+                - `_agents_added` (bool): Indicates whether agents have been added to the simulation.
+
+            - **Wind Conditions:**
+                - `_curr_wind_idx` (int): Index tracking the current wind forecast entry.
+                - `_last_wind_update` (float): Timestamp of the last wind update.
+
+            - **Logging & Monitoring:**
+                - `logger` (Optional[Logger]): Handles simulation logging.
+                - `progress_bar` (Optional[tqdm]): Tracks simulation progress visually.
+
+        Notes:
+            - Calls `super().__init__(sim_input)` to inherit base functionality from `BaseFireSim`.
+            - Calls `_init_iteration()` to set up initial conditions for the first simulation step.
+            - The progress bar is initialized later when the simulation starts.
+
         """
 
         print("Simulation Initializing...")
@@ -58,10 +139,41 @@ class FireSim(BaseFireSim):
         self._init_iteration()
 
     def iterate(self):
-        """Step forward the fire simulation a single time-step
+        """Advances the fire simulation by one time step.
 
+        This function updates fire propagation, wind conditions, and the state of burning cells.
+        It handles new ignitions, spreads fire based on calculated rates of spread (ROS), 
+        and removes cells that have fully burned.
+
+        Behavior:
+            - On the first iteration (`_iters == 0`):
+                - Marks `self.wind_changed` as `True`.
+                - Initializes `_new_ignitions` with `starting_ignitions`.
+                - Sets the state of newly ignited cells to `CellStates.FIRE` and computes 
+                their initial fire spread parameters.
+            - Updates wind conditions if necessary (`_update_wind()`).
+            - Adds new ignitions to `_burning_cells` and resets `_new_ignitions`.
+            - Calls `_init_iteration()` to prepare for the time step.
+            - Iterates through burning cells and:
+                1. **Updates wind and fire spread parameters** if wind has changed or if 
+                the cell hasn't reached steady-state ROS.
+                2. **Calculates steady-state rate of spread (`r_ss`) and fireline intensity (`I_ss`)** 
+                using `calc_propagation_in_cell()`.
+                3. **Computes real-time ROS (`r_t`) and fireline intensity (`I_t`)**.
+                4. **Advances fire spread** by updating `fire_spread` distances.
+                5. **Determines if fire has reached the cell edge**, calling `ignite_neighbors()` 
+                to attempt ignition of adjacent cells.
+                6. **Removes fully burned cells** from `_burning_cells` and updates their state 
+                to `CellStates.BURNT`.
+                7. **Increments elapsed time for fire acceleration calculations**.
+            - Calls `log_changes()` to record updates.
+
+        Notes:
+            - Fire spread is calculated using a **hexagonal grid model**.
+            - ROS is updated dynamically based on wind changes and fire behavior.
+            - Fire can only ignite neighboring cells that are still in a **burnable** state.
+            - A mass-loss approach for fuel consumption is **not yet implemented**.
         """
-        
         if self._iters == 0:
             self.wind_changed = True
             self._new_ignitions = self.starting_ignitions
@@ -139,23 +251,50 @@ class FireSim(BaseFireSim):
         self.log_changes()
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
-        """_summary_
+        """Attempts to ignite neighboring cells based on fire spread conditions.
+
+        This method evaluates fire spread from a burning cell to its neighbors. 
+        If a neighboring cell meets ignition criteria, it is transitioned to the `FIRE` state 
+        and its fire spread parameters are updated.
 
         Args:
-            cell (Cell): _description_
-            r_gamma (float): _description_
-            end_point (list): _description_
+            cell (Cell): The currently burning cell attempting to ignite its neighbors.
+            r_gamma (float): The rate of spread within the burning cell along the ignition direction.
+            end_point (list): A list of tuples representing fire spread endpoints, where each tuple 
+                            contains:
+                            - An integer indicating the ignition location alogn the neighboring cell.
+                            - A letter (A-F) indicating which neighbor the fire is spreading to.
 
         Returns:
-            list: _description_
-        """
+            list: A list of successfully ignited neighboring `Cell` objects.
 
-        # Calculate how long fire will take to reach end point given local ROS 
+        Behavior:
+            - Iterates through `end_point` to identify potential ignition locations.
+            - Calls `get_neighbor_from_end_point()` to retrieve the corresponding neighboring cell.
+            - Checks if the neighbor is in a burnable state (`CellStates.FUEL` and has a burnable fuel type).
+            - Computes the **ignition rate of spread** (`r_ign`) using `calc_ignition_ros()`.
+            - If `r_ign > 1e-3`, the neighbor is ignited:
+                - Adds the cell to `_new_ignitions`.
+                - Initializes fire spread parameters (`directions`, `distances`, `end_pts`).
+                - Updates wind conditions using `_update_wind()`.
+                - Computes in-cell fire propagation using `calc_propagation_in_cell()`.
+                - Logs the update to `_updated_cells` and `_curr_updates`.
 
+        Notes:
+            - The ignition threshold (`1e-3`) is a placeholder; consider using mass-loss calculations 
+            or setting `R_min` dynamically.
+            - If a neighboring cell is **not** ignitable but exists in `cell.burnable_neighbors`, 
+            it is removed from that list.
+    """
         ignited_neighbors = []
 
+        # Loop through end points
         for pt in end_point:
+
+            # Get the location of the potential ignition on the neighbor
             n_loc = pt[0]
+
+            # Get the Cell object of the neighbor
             neighbor = self.get_neighbor_from_end_point(cell, pt)
 
             if neighbor:
@@ -187,17 +326,39 @@ class FireSim(BaseFireSim):
         return ignited_neighbors
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
-        """_summary_
+        """Calculates the rate of spread (ROS) required for ignition between a burning cell 
+        and an unburnt neighboring cell.
+
+        This method determines the ignition ROS by comparing the heat source of the burning 
+        cell to the heat sink of the unburned neighbor. The calculation follows:
+
+            r_ign = heat_source_of_burning_cell / heat_sink_of_unburned_neighbor
+
+        where:
+            - `heat_source_of_burning_cell` is calculated as:
+                
+                heat_source_of_burning_cell = r_gamma * heat_sink_of_burning_cell
+
+            This accounts for the energy available for fire spread along the ignition direction.
+            - `r_gamma` represents the rate of spread within the burning cell in the ignition direction.
+            - `heat_sink_of_burning_cell` and `heat_sink_of_unburned_neighbor` are computed 
+            using the **Rothermel fire spread model**, which accounts for fuel properties and moisture content.
 
         Args:
-            cell (Cell): _description_
-            neighbor (Cell): _description_
-            r_gamma (float): _description_
+            cell (Cell): The burning cell acting as the heat source.
+            neighbor (Cell): The adjacent unburned cell receiving heat (potential ignition target).
+            r_gamma (float): The rate of spread within the burning cell along the igniting direction.
 
         Returns:
-            float: _description_
-        """
+            float: The calculated ignition rate of spread (ROS), representing the minimum 
+                fire spread rate required for ignition of the neighboring cell.
 
+        Notes:
+            - The `calc_heat_sink` function is used to compute both heat source and sink values.
+            - This method assumes that `r_gamma` is precomputed and valid.
+            - The accuracy of this calculation depends on correct fuel moisture modeling.
+            - Currently, fuel moisture content updates are not implemented.
+        """
         # Get the heat source in the direction of question by eliminating denominator
         heat_source = r_gamma * calc_heat_sink(cell.fuel_type, cell.dead_m) # TODO: make sure this computation is valid (I think it is)
 
@@ -209,18 +370,38 @@ class FireSim(BaseFireSim):
 
         return r_ign
 
-    def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple) -> Cell:
-        """_summary_
+    def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple[int, str]) -> Cell:
+        """Retrieves the neighboring cell corresponding to a fire spread endpoint.
 
-        Args:
-            cell (Cell): _description_
-            end_point (Tuple): _description_
+            This method identifies which neighboring cell is adjacent to a given fire spread 
+            endpoint within the burning cell. The endpoint location is represented as a tuple:
 
-        Returns:
-            Cell: _description_
-        """
+                (position_index, neighbor_letter)
 
+            where:
+                - `position_index` (int) is a number from `1-12` indicating the fire spread endpoint 
+                on the neighboring cell.
+                - `neighbor_letter` (str) is a letter from `A-F` indicating which of the six 
+                neighboring cells the endpoint borders.
+
+            The mapping of these conventions is defined in **HexGridMath** (see `utilities.fire_util`).
+
+            Args:
+                cell (Cell): The burning cell from which the fire spreads.
+                end_point (Tuple[int, str]): A tuple representing the endpoint of the fire spread direction.
+
+            Returns:
+                Optional[Cell]: The neighboring cell that the endpoint borders if it exists and is burnable, 
+                                otherwise `None`.
+
+            Notes:
+                - Even-row and odd-row hexagonal grids use different neighbor mappings (handled via `HexGridMath`).
+                - The method ensures that the retrieved neighbor exists within the simulation grid bounds.
+                - Only neighbors listed in `cell.burnable_neighbors` are considered valid.
+            """
+        # Get the letter representing the neighbor location relative to cell
         neighbor_letter = end_point[1]
+
         # Get neighbor based on neighbor_letter
         if cell._row % 2 == 0:
             diff_to_letter_map = HexGridMath.even_neighbor_letters
@@ -228,21 +409,41 @@ class FireSim(BaseFireSim):
         else:
             diff_to_letter_map = HexGridMath.odd_neighbor_letters
 
+        # Get the row and col difference between cell and neighbor
         dx, dy = diff_to_letter_map[neighbor_letter]
 
         row_n = int(cell.row + dy)
         col_n = int(cell.col + dx)
 
         if self._grid_height >= row_n >=0 and self._grid_width >= col_n >= 0:
+            # Retrieve neighbor from cell grid
             neighbor = self._cell_grid[row_n, col_n]
 
+            # If neighbor in cell's neighbors return it
             if neighbor.id in cell.burnable_neighbors:
                 return neighbor
 
         return None
 
     def log_changes(self):
-        """Log the changes in state from the current iteration
+        """Logs changes in cell states during the current simulation iteration.
+
+        This method records updates to fire-affected cells, including partially burnt 
+        and soaked cells, and clears the `_soaked` list for the next iteration. If a logger 
+        is available, the updates are added to the logging cache, along with agent updates 
+        if applicable.
+
+        Side Effects:
+            - Updates `_curr_updates` by appending `_partially_burnt` and `_soaked` cells.
+            - Clears the `_soaked` list for the next iteration.
+            - Calls `self.logger.add_to_cache()` if logging is enabled.
+            - Calls `self.logger.add_to_agent_cache()` if agents are present.
+            - Increments `_iters`, tracking the number of simulation iterations.
+
+        Notes:
+            - `_curr_updates` stores all cells that changed state in the current iteration.
+            - `_soaked` cells are reset after being logged.
+            - Agent updates are logged only if `agents_added` is `True`.
         """
         self._curr_updates.extend(self._partially_burnt)
         self._curr_updates.extend(self._soaked)
@@ -257,11 +458,28 @@ class FireSim(BaseFireSim):
         self._iters += 1
 
     def _init_iteration(self) -> bool:
-        """Set up the next iteration. Reset and update relevant data structures based on last 
-        iteration. 
+        """Prepares the next iteration of the simulation by resetting and updating relevant data structures.
 
-        :return: Boolean value representing if the simulation should be terminated.
-        :rtype: bool
+        This method resets temporary state variables, updates the simulation clock, and 
+        manages the progress bar. It also checks termination conditions, determining whether 
+        the simulation should stop.
+
+        Returns:
+            bool: `True` if the simulation should be terminated, `False` otherwise.
+
+        Side Effects:
+            - Initializes the progress bar on the first iteration.
+            - Clears `_curr_updates`, resetting tracked state changes.
+            - Updates `_curr_time_s` based on the number of elapsed iterations.
+            - Advances the progress bar.
+            - Resets temporary state lists (`w_vals`, `fuels_at_ignition`, `ignition_clocks`).
+            - Closes the progress bar if the simulation reaches its duration or if no burning 
+            cells remain.
+
+        Termination Conditions:
+            - The current simulation time (`_curr_time_s`) exceeds or equals `_sim_duration`.
+            - The simulation has run at least one iteration (`_iters != 0`) and there are no 
+            active burning cells (`len(_burning_cells) == 0`).
         """
         if self._iters == 0:
             self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
@@ -285,21 +503,36 @@ class FireSim(BaseFireSim):
         return False
     
     def _update_wind(self) -> bool:
-        """_summary_
+        """Updates the current wind conditions based on the forecast.
 
-        Raises:
-            ValueError: _description_
+
+        This method checks whether the time elapsed since the last wind update exceeds 
+        the wind forecast time step. If so, it updates the wind index and retrieves 
+        the next forecasted wind condition. If the forecast has no remaining entries, 
+        it raises a `ValueError`.
 
         Returns:
-            bool: _description_
-        """
+            bool: `True` if the wind conditions were updated, `False` otherwise.
 
+        Raises:
+            ValueError: If the wind forecast runs out of entries.
+
+        Side Effects:
+            - Updates `_last_wind_update` to the current simulation time.
+            - Increments `_curr_wind_idx` to the next wind forecast entry.
+            - Resets `_curr_wind_idx` to `0` if out of bounds and raises an error.
+        """
+        # Check if a wind forecast time step has elapsed since last update
         wind_changed = self.curr_time_s - self._last_wind_update >= self.wind_forecast_t_step
 
         if wind_changed:
+            # Reset last wind update to current time
             self._last_wind_update = self.curr_time_s
+
+            # Increment wind index
             self._curr_wind_idx += 1
 
+            # Check for out of bounds index
             if self._curr_wind_idx >= len(self.wind_forecast):
                 self._curr_wind_idx = 0
                 raise ValueError("Wind forecast has no more entries!")

@@ -1,7 +1,7 @@
 """Base class implementation of fire simulation model.
 
-Builds fire simulation and contains core calculations for propagation model. Contains fire
-interface properties and functions.
+Contains code to initilaize fire simulation. Hosts getters and setters for cell state properties within a simulation.
+Also contains various properties on the overall state of the fire.
 
 .. autoclass:: BaseFireSim
     :members:
@@ -21,10 +21,11 @@ from embrs.base_classes.agent_base import AgentBase
 
 class BaseFireSim:
     def __init__(self, sim_input: SimInput):
-        """_summary_
+        """Base fire class, takes in a sim input object to initialize a fire simulation object.
 
         Args:
-            sim_input (SimInput): _description_
+            sim_input (SimInput): Contains all the data necessary for initializing a sim,
+                                  see SimInput documentation for more info
         """
 
         # Store sim input values in class variables
@@ -122,10 +123,41 @@ class BaseFireSim:
         print("Initialization complete...")
 
     def _parse_sim_input(self, sim_input: SimInput):
-        """_summary_
+        """Parses and initializes simulation input parameters.
+
+        This method extracts relevant data from the provided `SimInput` object
+        and assigns it to internal attributes for use in the wildfire simulation.
 
         Args:
-            sim_input (SimInput): _description_
+            sim_input (SimInput): An object containing all necessary input data 
+                                for the simulation, including terrain, fuel, 
+                                wind conditions, and initial ignition points.
+
+        Attributes Set:
+            display_frequency (float): Frequency (in seconds) at which the 
+                                    simulation state is displayed.
+            _size (tuple): The size of the simulation grid.
+            _shape (tuple): The shape of the simulation grid.
+            _cell_size (float): The size of each grid cell in the simulation.
+            _sim_duration (float): Total duration of the simulation in seconds.
+            _time_step (float): Time step interval for simulation updates.
+            _roads (array-like): Representation of roads in the simulation.
+            burnt_cells_input (array-like): Initial map of already burnt cells.
+            coarse_topography (ndarray): Placeholder for processed topography data.
+            _fire_breaks (array-like): Representation of fire breaks.
+            _topography_map (ndarray): Elevation map flipped vertically for processing.
+            base_slope (ndarray): Base slope map without flipping.
+            _slope_map (ndarray): Slope map flipped vertically.
+            _aspect_map (ndarray): Aspect map flipped and adjusted to match compass angles.
+            _fuel_map (ndarray): Fuel type distribution map flipped vertically.
+            _initial_ignition (array-like): Initial ignition points in the simulation.
+            _topography_res (float): Resolution of the elevation data.
+            _aspect_res (float): Resolution of the aspect data.
+            _slope_res (float): Resolution of the slope data.
+            _fuel_res (float): Resolution of the fuel data.
+            _wind_res (float): Resolution of the wind data.
+            wind_forecast (ndarray): Wind data map (may need flipping).
+            wind_forecast_t_step (float): Wind data time step in seconds.
         """
 
         self.display_frequency = sim_input.display_freq_s
@@ -191,7 +223,23 @@ class BaseFireSim:
                 cell._burnable_neighbors = dict(neighbors)
 
     def _set_roads(self):
-        """_summary_
+        """Updates the simulation grid to incorporate roads.
+
+        This method processes the road data and modifies grid cells accordingly. 
+        Roads are defined as a list of coordinate points with an associated type. 
+        If a road cell is currently burning (`CellStates.FIRE`), it is reset to 
+        `CellStates.FUEL`. The fuel content is updated based on road type.
+
+        TODO:
+            - This modelling will change
+
+        Side Effects:
+            - Modifies the state of grid cells corresponding to roads.
+            - Updates fuel content for road cells.
+
+        Raises:
+            - None explicitly, but depends on `get_cell_from_xy`.
+
         """
         #TODO: need to figure out how we are going to model roads going forward
         if self.roads is not None:
@@ -207,7 +255,26 @@ class BaseFireSim:
                         road_cell._set_fuel_content(rc.road_fuel_vals[road[1]])
 
     def _set_firebreaks(self):
-        """_summary_
+        """Updates the simulation grid to incorporate firebreaks.
+
+        Firebreaks are linear barriers designed to slow or stop the spread of fire.
+        This method iterates over all firebreaks, interpolates points along their 
+        geometry, and updates the corresponding grid cells by reducing their fuel content.
+
+        The function:
+        - Extracts the geometry and fuel reduction value of each firebreak.
+        - Interpolates points along the firebreak line at fixed intervals.
+        - Identifies the corresponding grid cell for each interpolated point.
+        - Updates the fuel content of the affected cells.
+        - Adds affected cells to `_fire_break_cells` to track their locations.
+
+        Notes:
+            - The `step_size` parameter controls the granularity of firebreak interpolation.
+            - Fuel content is normalized by dividing `fuel_value` by 100.
+
+        Side Effects:
+            - Modifies the fuel content of grid cells along firebreaks.
+            - Updates the `_fire_break_cells` list with affected cells.
         """
         for fire_break in self.fire_breaks:
             line = fire_break['geometry']
@@ -228,11 +295,33 @@ class BaseFireSim:
                         self._fire_break_cells.append(cell)
     
     def _set_state_in_polygons(self, polygons: list, state: CellStates):
-        """_summary_
+        """Updates the state of grid cells within given polygons.
+
+        This method iterates over a list of polygons and updates the state of 
+        grid cells that fall within each polygon's boundaries. It is primarily 
+        used for marking cells as burnt or ignited.
 
         Args:
-            polygons (list): _description_
-            state (CellStates): _description_
+            polygons (list): A list of polygon geometries (Shapely Polygon objects).
+            state (CellStates): The state to assign to the affected grid cells 
+                (e.g., `CellStates.BURNT` or `CellStates.FIRE`).
+
+        Behavior:
+            - Determines the bounding box of each polygon to limit the search space.
+            - Iterates over grid cells within the bounding box and checks if 
+            they fall inside the polygon.
+            - If `state == CellStates.BURNT`, directly sets the cell's state.
+            - If `state == CellStates.FIRE` and the cell has burnable fuel, 
+            adds it to `starting_ignitions`.
+
+        Notes:
+            - Uses hexagonal grid indexing, adjusting row and column calculations
+            based on the hex cell structure.
+            - Ensures that all row and column indices remain within bounds.
+
+        Side Effects:
+            - Modifies `_cell_grid` by updating cell states.
+            - Appends new ignitions to `starting_ignitions` when applicable.
         """
         for polygon in polygons:
             minx, miny, maxx, maxy = polygon.bounds

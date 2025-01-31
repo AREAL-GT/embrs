@@ -1,3 +1,41 @@
+"""Wind forecast processing using WindNinja.
+
+This module provides functions for generating and processing wind forecasts using WindNinja. 
+It supports different initialization methods, handles WindNinja CLI execution, and structures 
+wind data into NumPy arrays for use in wildfire simulations.
+
+Features:
+    - **Wind Forecast Generation**:
+        - `gen_forecast()`: Runs WindNinja with domain-average, point-based, or weather model initialization.
+        - `run_domain_avg_windninja()`: Executes WindNinja using domain-average wind initialization.
+        - `run_point_windninja()`: Placeholder for point-based wind initialization.
+        - `run_wxmodel_windninja()`: Placeholder for weather model-based wind initialization.
+
+    - **Wind Data Processing**:
+        - `rename_windninja_outputs()`: Renames WindNinja-generated files to a standardized format.
+        - `create_forecast_array()`: Loads WindNinja outputs into a structured NumPy array.
+        - `convert_to_cartesian()`: Converts wind direction data from meteorological to Cartesian convention.
+
+Dependencies:
+    - **External Software**: WindNinja CLI must be installed and accessible at `cli_path`.
+    - **Python Libraries**: Requires `subprocess`, `os`, `json`, `numpy`, and `typing`.
+
+Paths:
+    - `cli_path`: Path to the WindNinja CLI executable. **(TODO: Make user-configurable)**
+    - `temp_file_path`: Path for storing temporary WindNinja outputs. **(TODO: Set dynamically based on `cli_path`)**
+
+Usage:
+    To generate a wind forecast using a domain-average wind:
+    ```python
+    forecast, time_step = gen_forecast(
+        elevation_path="path/to/elevation.asc",
+        vegetation_path="path/to/vegetation.asc",
+        forecast_seed_path="path/to/wind_seed.json",
+        forecast_seed_type="Domain Average Wind"
+    )
+    ```
+"""
+
 import subprocess
 import os
 import json
@@ -12,19 +50,38 @@ temp_file_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/temp"
 
 def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed_path: str,
                  forecast_seed_type: str, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
-    """_summary_
+    """Generates a wind forecast using WindNinja.
+
+    This function runs WindNinja with different initialization methods to generate 
+    wind forecasts over a given terrain. The forecast is based on elevation, vegetation, 
+    and an external wind forecast seed file.
 
     Args:
-        elevation_path (str): _description_
-        vegetation_path (str): _description_
-        forecast_seed_path (str): _description_
-        forecast_seed_type (str): _description_
-        mesh_resolution (float, optional): _description_. Defaults to 250.
+        elevation_path (str): Path to the elevation raster file (e.g., a DEM).
+        vegetation_path (str): Path to the vegetation type raster file.
+        forecast_seed_path (str): Path to the wind seed file (e.g., a weather model output or point data).
+        forecast_seed_type (str): Type of wind initialization method. Options:
+            - `"Domain Average Wind"`: Uses a single wind value averaged across the domain.
+            - `"pointInitialization"`: Uses wind data from a specific point(s) location.
+            - `"wxModelInitialization"`: Uses gridded weather model output to initialize the wind field.
+        mesh_resolution (float, optional): Grid resolution for WindNinja in meters. Defaults to 250.
 
     Returns:
-        Tuple[np.ndarray, float]: _description_
-    """
+        Tuple[np.ndarray, float]: A tuple containing:
+            - `forecast` (np.ndarray): The generated wind forecast grid.
+            - `time_step` (float): The forecast time step in seconds.
 
+    Notes:
+        - The forecast is generated based on WindNinja's simulation outputs.
+        - Different initialization methods influence wind patterns significantly.
+        - Currently, the `pointInitialization` and `wxModelInitialization` methods 
+          call placeholder functions (`run_point_windninja()` and `run_wxmodel_windninja()`), 
+          which need implementation.
+
+    TODO:
+        - Implement `run_point_windninja()` for point-based wind initialization.
+        - Implement `run_wxmodel_windninja()` for weather model initialization.
+    """
     forecast = None
     time_step = None
 
@@ -40,23 +97,53 @@ def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed_path: 
         # Run WindNinja with weather model initialization
         run_wxmodel_windninja()
 
-
     return forecast, time_step
 
 def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_path: str, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
-    """_summary_
+    """Runs WindNinja with domain-average initialization to generate a wind forecast.
+
+    This function parses a wind seed file, extracts wind speed and direction data, 
+    and runs WindNinja CLI for each time step using a **domain-average wind** initialization. 
+    The outputs are processed into a structured wind forecast.
 
     Args:
-        elevation_path (str): _description_
-        vegetation_path (str): _description_
-        seed_path (str): _description_
-        mesh_resolution (float, optional): _description_. Defaults to 250.
+        elevation_path (str): Path to the elevation raster file (e.g., a DEM).
+        vegetation_path (str): Path to the vegetation type raster file.
+        seed_path (str): Path to the wind seed JSON file containing wind speed, 
+                         direction, and height data.
+        mesh_resolution (float, optional): Resolution of the WindNinja mesh in meters. 
+                                           Defaults to 250.
 
     Returns:
-        Tuple[np.ndarray, float]: _description_
+        Tuple[np.ndarray, float]: A tuple containing:
+            - `forecast` (np.ndarray): A NumPy array storing the processed wind forecast.
+            - `time_step` (float): The time step (in minutes) extracted from the seed file.
+
+    Behavior:
+        - Reads the wind seed file and extracts:
+            - Wind speed (`speed_m_s`) for each time step.
+            - Wind direction, converted to WindNinja’s convention (`(dir + 180) % 360`).
+            - Wind height and units.
+        - Creates an output directory for each time step and constructs a WindNinja CLI command.
+        - Runs WindNinja using `subprocess.run()`, passing parameters such as:
+            - Elevation and vegetation files.
+            - Mesh resolution.
+            - Wind speed, direction, and height.
+            - Output format settings.
+        - Calls `rename_windninja_outputs()` to standardize output filenames.
+        - Calls `create_forecast_array()` to merge the individual outputs into a single forecast array.
+
+    Notes:
+        - Wind height information is extracted from the seed file but **not yet fully implemented**.
+        - Uses `"domainAverageInitialization"` as the WindNinja initialization method.
+        - CLI command assumes `cli_path` is correctly set in the environment.
+
+    TODO:
+        - Implement wind height adjustments based on `wind_height` and `wind_height_units`.
+        - Validate vegetation file compatibility with WindNinja.
+        - Improve error handling for missing or incorrect seed file formats.
     """
     # Parse the forecast seed
-    # Load wind forecast and initialize wind vector
     with open(seed_path, 'r') as file:
         seed_data = json.load(file)
 
@@ -120,13 +207,25 @@ def run_wxmodel_windninja():
     raise NotImplementedError("Weather model initialization not yet implemented")
 
 def rename_windninja_outputs(output_path: str, time_step_index: int):
-    """
-    Rename WindNinja output files in the specified directory to a standard format.
+    """Renames WindNinja output files in a specified directory to a standardized format.
 
-    :param output_path: Directory where WindNinja outputs are stored.
-    :type output_path: str
-    :param time_step_index: Time step index to include in the file names.
-    :type time_step_index: int
+    This function processes WindNinja-generated output files, extracting wind speed, 
+    wind direction, and cloud cover data. It renames the files using a structured 
+    naming convention based on the provided time step index.
+
+    Args:
+        output_path (str): The directory where WindNinja outputs are stored.
+        time_step_index (int): The index of the time step to include in the file names.
+
+    Behavior:
+        - Identifies files containing `_vel` (wind speed), `_ang` (wind direction), 
+          and `_cld` (cloud cover).
+        - Renames them to `wind_speed_<time_step>.asc`, `wind_direction_<time_step>.asc`, etc.
+        - Ensures all files remain in the same directory.
+
+    Notes:
+        - Assumes WindNinja outputs are stored in ASCII format (`.asc`).
+        - Cloud cover renaming is included but may not be relevant for all WindNinja runs.
     """
     for file_name in os.listdir(output_path):
         old_path = os.path.join(output_path, file_name)
@@ -144,14 +243,40 @@ def rename_windninja_outputs(output_path: str, time_step_index: int):
             os.rename(old_path, new_path)
 
 def create_forecast_array(num_files: int) -> np.ndarray:
-    """_summary_
+    """Loads WindNinja wind forecast outputs into a structured NumPy array.
+
+
+    This function reads ASCII files produced by WindNinja, extracts wind speed 
+    and direction data, and compiles them into a multi-dimensional NumPy array 
+    for use in fire simulations.
 
     Args:
-        num_files (int): _description_
+        num_files (int): The number of time steps (i.e., number of WindNinja-generated files).
 
     Returns:
-        np.ndarray: _description_
+        np.ndarray: A structured array with shape `(num_files, height, width, 2)`, 
+                    where:
+                    - `height` and `width` are the dimensions of the wind raster.
+                    - The last axis stores wind components:
+                        - `[:,:,0]` = Wind speed (m/s).
+                        - `[:,:,1]` = Wind direction (converted to Cartesian).
+
+    Behavior:
+        - Iterates through each time step’s wind speed and direction files.
+        - Loads wind speed (`wind_speed_<i>.asc`) and direction (`wind_direction_<i>.asc`).
+        - Converts wind direction data using `convert_to_cartesian()`.
+        - Constructs a forecast array with separate wind speed and direction layers.
+        - Cleans up temporary WindNinja output directories after processing.
+
+    Notes:
+        - Expects WindNinja outputs to follow the standardized naming convention 
+          produced by `rename_windninja_outputs()`.
+        - Assumes WindNinja output files contain ASCII grid data with a 6-line header.
+        - Uses `np.loadtxt()` to efficiently load numerical wind data.
     """
+    
+    # TODO: Check if we need to clean up temp directory before writing to it
+
     for i in range(num_files):
         output_path = os.path.join(temp_file_path, f"{i}")
 
@@ -186,12 +311,23 @@ def create_forecast_array(num_files: int) -> np.ndarray:
     return forecast
 
 def convert_to_cartesian(direction_data: np.ndarray) -> np.ndarray:
-    """_summary_
+    """Converts wind direction data to a Cartesian-compatible format.
+
+    Wind direction in WindNinja outputs is typically measured in meteorological degrees 
+    (0° = North-South, 90° = East-West, 180° = South-North, 270° = West-East). This function adjusts the values 
+    to align with a Cartesian coordinate system.
 
     Args:
-        direction_data (np.ndarray): _description_
+        direction_data (np.ndarray): A NumPy array containing wind direction values in degrees.
 
     Returns:
-        np.ndarray: _description_
+        np.ndarray: The transformed wind direction data, where:
+
+            direction_cartesian = (180 + direction_data) % 360
+
+    Notes:
+        - This transformation ensures compatibility with fire spread models that 
+          use Cartesian angle conventions.
+        - Assumes wind direction values are given in degrees (0-360).
     """
     return (180 + direction_data) % 360

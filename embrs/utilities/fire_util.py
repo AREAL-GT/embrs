@@ -45,7 +45,7 @@ action_type = np.dtype([
 ])
 
 class SpreadDecomp:
-    """_summary_
+    """_summary_ TODO: need to carefully think about how to best document this
     """
 
     self_loc_to_neighbor_loc_mapping = {
@@ -170,11 +170,11 @@ class HexGridMath:
     """
     even_neighborhood = [(-1,1), (0, 1), (1,0), (0, -1), (-1, -1), (-1,0)]
     even_neighbor_letters = {'F': (-1, 1),
-                            'A':(0, 1),
-                            'B':(1, 0),
-                            'C': (0, -1),
-                            'D': (-1, -1),
-                            'E': (-1, 0)}
+                             'A':(0, 1),
+                             'B':(1, 0),
+                             'C': (0, -1),
+                             'D': (-1, -1),
+                             'E': (-1, 0)}
 
     odd_neighborhood = [(1,0), (1,1), (0,1), (-1,0), (0,-1), (1, -1)]
     odd_neighbor_letters = {'B': (1, 0),
@@ -319,7 +319,7 @@ class UtilFuncs:
     
 
     def get_dist(edge_loc: int, idx_diff: int, cell_size: float) -> float:
-        """_summary_
+        """_summary_ # TODO: need to carefully think about how to document this
 
         Args:
             edge_loc (int): _description_
@@ -363,7 +363,7 @@ class UtilFuncs:
 
     @lru_cache
     def get_ign_parameters(edge_loc: int, cell_size: float) -> Tuple[np.ndarray, np.ndarray, list]:
-        """_summary_
+        """_summary_# TODO: need to think carefully about how to document this
 
         Args:
             edge_loc (int): _description_
