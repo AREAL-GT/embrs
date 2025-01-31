@@ -7,10 +7,8 @@
 import numpy as np
 from shapely.geometry import Polygon
 
-from embrs.utilities.fire_util import ControlledBurnParams
 from embrs.utilities.fire_util import CellStates, FireTypes
 from embrs.utilities.fire_util import HexGridMath as hex
-
 from embrs.utilities.fuel_models import Anderson13
 
 import copy
@@ -48,9 +46,11 @@ class Cell:
         # z is the elevation of cell in m
         self._z = z
 
-        self.aspect = aspect # upslope direction
-        self.slope_deg = slope_deg
+        # Upslope direction in degrees - 0 degrees = North
+        self.aspect = aspect
 
+        # Slope angle in degrees
+        self.slope_deg = slope_deg
 
         self._cell_size = cell_size # defined as the edge length of hexagon
         self._cell_area = self.calc_cell_area()
@@ -63,68 +63,82 @@ class Cell:
 
         self._y_pos = row * cell_size * 1.5
 
+        # Set Fuel type
         self._fuel_type = fuel_type
-    
-        # Variables to track how long a given cell will take to burnout
-        self._t_d = None
 
         # Variable that tracks which type of fire a burning cell is
         self._fire_type = -1
 
+        # Set state for non burnable types to BURNT
         if self._fuel_type.burnable:
             self._state = CellStates.FUEL
         
         else:
-            self._staste = CellStates.BURNT
+            self._state = CellStates.BURNT
 
-        self.cont_state = 0 # continuous state, only used for FirePrediction model
-
+        # Dictionaries to store neighbors
         self._neighbors = {}
         self._burnable_neighbors = {}
 
         # dead fuel moisture at this cell, value based on Anderson fuel model paper
         self._dead_m = 0.08
 
+        # Get shapely polygon representation of cell
         self.polygon = self.to_polygon()
-        self.changed = False
-        self.mapping = None
 
-        if self._row % 2 == 0:
-            self.mapping = hex.even_neighborhood_mapping
-
-        else:
-            self.mapping = hex.odd_neighborhood_mapping
-
+        # Store initial state for potential reset
         self.initial_state = None
 
-        self.scheduled = False
-        self.scheduled_t = np.inf
-
+        # Variables that define spread directions within cell
         self.distances = None
         self.directions = None
         self.end_pts = None
-        self.r_t = None
 
+        # Variables that keep track of elliptical spread within cell
+        self.r_t = None
         self.fire_spread = np.array([])
         self.r_prev_list = np.array([])
         self.t_elapsed_min = 0
         self.r_ss = np.array([])
         self.I_ss = np.array([])
         
+        # Boolean defining the cell already has a steady-state ROS
         self.has_steady_state = False
 
+        # Wind forecast and current wind within cell
+        self.wind_forecast = []
+        self.curr_wind = (0,0)
+
+        # Constant defining fire acceleration characteristics
         self.a_a = 0.115 # TODO: find fuel type dependent values for this
 
     def get_copy_of_state(self):
+        """_summary_
+
+        Returns:
+            Cell: _description_
+        """
         return copy.deepcopy(self)
 
-    def reset(self):
+    def reset(self) -> CellStates:
+        """_summary_
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            CellStates: _description_
+        """
+
         if self.initial_state:
             return self.initial_state
         else:
             raise ValueError("Initial state not stored.")
 
     def set_real_time_vals(self):
+        """_summary_
+        """
+
         # TODO: validate that this works correctly
 
         if np.max(self.r_ss) < np.max(self.r_prev_list):
@@ -136,6 +150,24 @@ class Cell:
             self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
 
+    def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
+        """_summary_
+
+        Args:
+            wind_speed (np.ndarray): _description_
+            wind_dir (np.ndarray): _description_
+        """
+        self.wind_forecast = [(speed, dir) for speed, dir in zip(wind_speed, wind_dir)]
+        self.curr_wind = self.wind_forecast[0] # Note: (m/s, degrees)
+
+    def _update_wind(self, idx: int):
+        """_summary_
+
+        Args:
+            idx (int): _description_
+        """
+        self.curr_wind = self.wind_forecast[idx]
+
     def _set_elev(self, z: float):
         """Set the elevation of a cell
 
@@ -145,13 +177,20 @@ class Cell:
 
         self._z = z
 
-
     def _set_slope(self, slope: float):
+        """_summary_
 
+        Args:
+            slope (float): _description_
+        """
         self.slope_deg = slope
 
-
     def _set_aspect(self, aspect: float):
+        """_summary_
+
+        Args:
+            aspect (float): _description_
+        """
         self.aspect = aspect
 
     def _set_fuel_content(self, fuel_content: float):
@@ -161,7 +200,6 @@ class Cell:
         :type fuel_content: float
         """
         self._fuel_content = fuel_content
-        self.changed = True
 
     def _set_fuel_type(self, fuel_type: Anderson13):
         """Set the fuel type of a cell.
@@ -170,18 +208,6 @@ class Cell:
         :type fuel_type: :class:`~fire_simulator.fuel.Fuel`
         """
         self._fuel_type = fuel_type
-        self.changed = True
-
-    def _set_vprop(self, v_prop: float):
-        """Calculates the time a fire will take to propagate across a cell from the propagation
-        velocity
-
-        :param v_prop: propagation velocity of the fire in m/s
-        :type v_prop: float
-        """
-
-        # Calculate time it takes for fire to propagate across cell
-        self._t_d = (2 * self._cell_size) / v_prop # distance across corners used as the distance
 
     def _set_state(self, state: CellStates):
         """Set the state of the cell to :py:attr:`CellStates.FUEL`, :py:attr:`CellStates.FIRE`,
@@ -191,7 +217,6 @@ class Cell:
         :type state: :class:`~utilities.fire_util.CellStates`
         """
         self._state = state
-        self.changed = True
 
         if self._state == CellStates.FIRE:
             self.fire_spread = np.zeros(len(self.directions))
@@ -206,7 +231,6 @@ class Cell:
         :type fire_type: :class:`~utilities.fire_util.FireTypes`
         """
         self._fire_type = fire_type
-        self.changed = True
 
     def _set_dead_m(self, dead_m: float):
         """Set the dead fuel moisture at a cell.
@@ -217,7 +241,6 @@ class Cell:
         :type dead_m: float
         """
         self._dead_m = dead_m
-        self.changed = True
 
     def __str__(self):
         """To string method for cells.
@@ -358,15 +381,6 @@ class Cell:
         """Fraction of fuel remaining at the cell, between 0 and 1
         """
         return self._fuel_content
-
-    @property
-    def t_d(self) -> float:
-        """Estimate of the time (in seconds) it will take the current fire to propagate across the
-        cell. 
-
-        `-1` if the cell is not on fire
-        """
-        return self._t_d
 
     @property
     def state(self) -> CellStates:

@@ -156,28 +156,16 @@ class Visualizer:
                                                 facecolor='white', edgecolor='black', linewidth=1,
                                                 zorder=3, alpha = 0.75)
 
-            # Create wind display
-            wind_box_x = 0
-            wind_box_y = sim.grid_height*1.5*sim.cell_size - (650/6000) * height_m
-            wind_box_w = (5/60)*width_m
-            wind_box_h = (500/6000) * height_m
-
-            self.wind_box = mpatches.Rectangle((wind_box_x, wind_box_y), wind_box_w, wind_box_h,
-                                                facecolor='white', edgecolor ='black', linewidth=1,
-                                                zorder = 3, alpha = 0.75)
-
             # Create scale display
             self.scale_box = mpatches.Rectangle((0, 10), 1100, (2/60)*height_m, facecolor='white',
                                                 edgecolor='k', linewidth= 1, alpha=0.75, zorder= 3)
             
             # Add display items to artists
             self.artists = [copy.copy(self.time_box),
-                            copy.copy(self.wind_box),
                             copy.copy(self.scale_box)]
 
             # Add display items to plot
             h_ax.add_patch(self.scale_box)
-            h_ax.add_patch(self.wind_box)
             h_ax.add_patch(self.time_box)
 
             # Plot roads if they exist
@@ -221,6 +209,23 @@ class Visualizer:
             h_ax.legend(handles=legend_elements, loc='upper right', borderaxespad=0)
             self.legend_elements = legend_elements
 
+            # Plot wind vector field
+            curr_forecast = sim.wind_forecast[sim._curr_wind_idx]
+            # Downsample the wind data for plotting
+            downsample_factor = 5
+            wind_speed = curr_forecast[::downsample_factor, ::downsample_factor, 0]
+            wind_dir_deg = curr_forecast[::downsample_factor, ::downsample_factor, 1]
+            X, Y = np.meshgrid(np.arange(0, wind_speed.shape[1]) * sim._wind_res * downsample_factor,
+                               np.arange(0, wind_speed.shape[0]) * sim._wind_res * downsample_factor)
+
+            # Convert wind speed and direction to u and v components
+            U = np.sin(np.deg2rad(wind_dir_deg))
+            V = np.cos(np.deg2rad(wind_dir_deg))
+
+            # Plot the wind vectors
+            self.wind_grid = h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap= 'jet', width=0.002, zorder=3)
+            self.wind_idx = sim._curr_wind_idx
+
         # Reload visualizer from initial state
         else:
             for coll in collections:
@@ -251,12 +256,6 @@ class Visualizer:
 
             h_ax.legend(handles=saved_legend, loc='upper right', borderaxespad=0)
 
-        wx, wy = self.wind_box.get_xy()
-        cx = wx + self.wind_box.get_width()/2
-
-        self.windheader = h_ax.text(cx, wy + 0.85 * self.wind_box.get_height(),
-                                    'Wind:', ha = 'center', va = 'center')
-
         time_str = util.get_time_str(sim.curr_time_s)
 
         rx, ry = self.time_box.get_xy()
@@ -285,8 +284,6 @@ class Visualizer:
                                    color ='k', pad = 0.1, frameon=False)
         h_ax.add_artist(scalebar)
 
-        self.arrow_obj = None
-        self.windtext = None
 
         self.h_ax = h_ax
         self.fig = h_fig
@@ -304,6 +301,25 @@ class Visualizer:
         :type sim: FireSim
         """
         self.simtext.set_visible(False)
+
+        if self.wind_idx != sim._curr_wind_idx:
+            self.wind_grid.remove()
+            curr_forecast = sim.wind_forecast[sim._curr_wind_idx]
+
+            # Downsample the wind data for plotting
+            downsample_factor = 5
+            wind_speed = curr_forecast[::downsample_factor, ::downsample_factor, 0]
+            wind_dir_deg = curr_forecast[::downsample_factor, ::downsample_factor, 1]
+            X, Y = np.meshgrid(np.arange(0, wind_speed.shape[1]) * sim._wind_res * downsample_factor,
+                                np.arange(0, wind_speed.shape[0]) * sim._wind_res * downsample_factor)
+
+            # Convert wind speed and direction to u and v components
+            U = np.sin(np.deg2rad(wind_dir_deg))
+            V = np.cos(np.deg2rad(wind_dir_deg))
+
+            # Plot the wind vectors
+            self.wind_grid = self.h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap= 'jet', width=0.002, zorder=3)
+            self.wind_idx = sim._curr_wind_idx
 
         fire_patches = []
         tree_patches = []
@@ -336,7 +352,7 @@ class Visualizer:
                 if c.dead_m > 0.08: # fuel moisture not nominal
                     soak_xs.append(c.x_pos)
                     soak_ys.append(c.y_pos)
-                    c_val = c.dead_m/fc.dead_fuel_moisture_ext_table[c.fuel_type.model_num]
+                    c_val = c.dead_m/fc.dead_fuel_moisture_ext_table[c.fuel_type.model_num] # TODO: Use FuelModel value
                     c_val = np.min([1, c_val])
                     c_vals.append(c_val)
 
@@ -375,35 +391,6 @@ class Visualizer:
         self.h_ax.add_collection(burnt_coll)
         self.h_ax.add_collection(prescribe_coll)
 
-        if self.arrow_obj is not None:
-            self.arrow_obj.remove()
-
-        if self.windtext is not None:
-            self.windtext.remove()
-
-        wx, wy = self.wind_box.get_xy()
-        cx = wx + self.wind_box.get_width()/2
-        cy = wy + self.wind_box.get_height()/2
-
-        self.windtext = self.h_ax.text(cx, wy + 0.1 * self.wind_box.get_height(),
-                                       str(np.round(sim.wind_vec.wind_speed,2)) + " m/s",
-                                       ha = 'center', va = 'center')
-
-        if sim.wind_vec.wind_speed != 0:
-            wind_dir_vec = sim.wind_vec.vec/np.linalg.norm(sim.wind_vec.vec)
-            dx = wind_dir_vec[0]
-            dy = wind_dir_vec[1]
-            arrow_len = self.wind_box.get_height()/3
-
-            self.arrow_obj = self.h_ax.arrow(cx-(arrow_len*dx) , cy-(arrow_len*dy),
-                                             dx*arrow_len, dy*arrow_len, width=10,
-                                             head_width = 50, color = 'r', zorder= 3)
-        else:
-            self.arrow_obj = self.h_ax.text(cx, cy, 'X', fontsize = 20, color = 'r',
-                                            ha='center', va = 'center')
-
-        self.h_ax.draw_artist(self.windtext)
-        self.h_ax.draw_artist(self.arrow_obj)
 
         sim_time_s = sim.time_step*sim.iters
         time_str = util.get_time_str(sim_time_s)
@@ -413,6 +400,8 @@ class Visualizer:
         cy = ry + self.time_box.get_height()/2
 
         self.simtext = self.h_ax.text(2*cx - 20, cy, time_str, ha='right', va='center')
+
+
 
         # Plot agents at current time if they exist
         if len(sim.agent_list) > 0:

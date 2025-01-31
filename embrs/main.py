@@ -14,10 +14,12 @@ from shapely.geometry import shape, LineString
 from embrs.fire_simulator.visualizer import Visualizer
 from embrs.fire_simulator.logger import Logger
 from embrs.fire_simulator.fire import FireSim
-from embrs.fire_simulator.wind import Wind
 from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
 from embrs.utilities.fire_util import UtilFuncs
+from embrs.utilities.sim_input import SimInput, DataMap, WindDataMap
+from embrs.utilities.wind_forecast import gen_forecast
 from embrs.base_classes.control_base import ControlClass
+
 
 def initialize(params: dict) -> Tuple[FireSim, bool, Visualizer]:
     """Initializes a fireSim object and a Visualizer(if selected) based on user inputs
@@ -30,90 +32,21 @@ def initialize(params: dict) -> Tuple[FireSim, bool, Visualizer]:
              selected Visualizer will be None.
     :rtype: Tuple[FireSim, bool, Visualizer]
     """
-    # Folder Setup
-    input_folder = params['input']
-    input_foldername = os.path.basename(input_folder)
 
-    # Real-time viz
-    viz_on = params['viz_on']
+    print(params)
 
-    # Map Setup
-    cell_size = params['cell_size'] # meters
-    time_step = params['t_step'] # seconds
-    sim_duration = params['sim_time']
-
-    # Load wind forecast and initialize wind vector
-    wind_forecast = []
-
-    if not params['zero_wind']:
-
-        wind_file = params['wind']
-
-        with open(wind_file, 'r') as file:
-            wind_data = json.load(file)
-
-        forecast_time_step = wind_data['time_step_min']
-
-        for entry in wind_data['data']:
-            wind_forecast.append((entry['speed_m_s'], entry['direction']))
-
-    else:
-        forecast_time_step = 1e10
-        wind_forecast = [(0, 0)]
-
-    wind_forecast = np.array(wind_forecast)
-
-    # Initialize wind vector
-    wind_vec = Wind(wind_forecast, forecast_time_step)
-
-    # Read JSON map file
-    with open(input_folder + '/' + input_foldername + '.json', 'r') as f:
-        data = json.load(f)
-
-    # Load data files
-    topography_map = np.load(data['topography']['file'])
-    fuel_map = np.load(data['fuel']['file'])
-    aspect_map = np.load(data['aspect']['file'])
-    slope_map = np.load(data['slope']['file'])
-    ignition_dicts = data['initial_ignition']
-    initial_ignition = [shape(d) for d in ignition_dicts]
-    fire_breaks = [{'geometry': LineString(fb['geometry']['coordinates']),
-                    'fuel_value': fb['fuel_value']} for fb in data['fire_breaks']]
-
-    if 'roads' in data:
-        with open(data['roads']['file'], 'rb') as f:
-            roads = pickle.load(f)
-    else:
-        roads = None
-
-    print(data)
-
-    # Save resolution, width, and height into variables
-    topography_resolution = data['topography']['resolution']
-    fuel_resolution = data['fuel']['resolution']
-    aspect_resolution = data['aspect']['resolution']
-    slope_resolution = data['slope']['resolution']
-    width_m = data['topography']['width_m']
-    height_m = data['topography']['height_m']
-
-    # Calculate simSize
-    num_cols = int(np.floor(width_m/(np.sqrt(3)*cell_size)))
-    num_rows = int(np.floor(height_m/(1.5*cell_size)))
-
-    sim_size = (num_rows, num_cols)
-    print("simSize: " + str(sim_size))
+    sim_input = construct_sim_input(params)
 
     # Initialize the simulator
-    fire = FireSim(fuel_map, fuel_resolution, topography_map, topography_resolution, aspect_map, aspect_resolution, slope_map, slope_resolution, wind_vec,
-                   roads, fire_breaks, time_step = time_step, initial_ignition = initial_ignition,
-                   size = (width_m, height_m), cell_size=cell_size, duration_s = sim_duration)
+    fire = FireSim(sim_input)
 
-    if viz_on:
+    # Initialize the visualizer, if visualization is selected
+    if sim_input.viz_on:
         viz = Visualizer(fire)
     else:
         viz = None
 
-    return fire, viz_on, viz
+    return fire, sim_input.viz_on, viz
 
 def run_sim(fire: FireSim, viz: Visualizer, progress_bar: tqdm, loader_window: LoaderWindow,
             viz_on: bool, user_code_path: str, user_code_class: str, i:int, num_runs:int):
@@ -267,15 +200,128 @@ def sim_loop(params: dict):
     print("")
     print(f"Finished running {num_runs} simulation(s)")
 
+def construct_sim_input(params:dict) -> SimInput:
+    # TODO: does this function belong in main.py?
+
+    # Construct SimInput object
+    sim_input = SimInput()
+
+    # Folder Setup
+    input_folder = params['input']
+    input_foldername = os.path.basename(input_folder)
+
+    # Real-time viz
+    viz_on = params['viz_on']
+    sim_input.viz_on = viz_on
+
+    # Map Setup
+    cell_size = params['cell_size'] # meters
+    time_step = params['t_step'] # seconds
+    sim_duration = params['sim_time']
+
+    sim_input.cell_size = cell_size
+    sim_input.time_step = time_step
+    sim_input.duration_s = sim_duration 
+
+    # Read JSON map file
+    with open(input_folder + '/' + input_foldername + '.json', 'r') as f:
+        data = json.load(f)
+
+    # Create elevation DataMap object
+    topography_map = np.load(data['topography']['file'])
+    topography_resolution = data['topography']['resolution']
+
+    elevation = DataMap(topography_map, topography_resolution)
+    sim_input.elevation = elevation
+
+    # Create fuel DataMap object
+    fuel_map = np.load(data['fuel']['file'])
+    fuel_resolution = data['fuel']['resolution']
+
+    fuel = DataMap(fuel_map, fuel_resolution)
+    sim_input.fuel = fuel
+
+    # Create aspect DataMap object
+    aspect_map = np.load(data['aspect']['file'])
+    aspect_resolution = data['aspect']['resolution']
+    
+    aspect = DataMap(aspect_map, aspect_resolution)
+    sim_input.aspect = aspect
+
+    # Create slope DataMap object
+    slope_map = np.load(data['slope']['file'])
+    slope_resolution = data['slope']['resolution']
+    
+    slope = DataMap(slope_map, slope_resolution)
+    sim_input.slope = slope
+
+    
+    ignition_dicts = data['initial_ignition']
+    initial_ignition = [shape(d) for d in ignition_dicts]
+    
+    sim_input.initial_ignition = initial_ignition
+    
+    fire_breaks = [{'geometry': LineString(fb['geometry']['coordinates']),
+                    'fuel_value': fb['fuel_value']} for fb in data['fire_breaks']]
+
+    sim_input.fire_breaks = fire_breaks
+
+    if 'roads' in data:
+        with open(data['roads']['file'], 'rb') as f:
+            roads = pickle.load(f)
+    else:
+        roads = None
+
+    sim_input.roads = roads
+
+        # Save resolution, width, and height into variables
+    width_m = data['topography']['width_m']
+    height_m = data['topography']['height_m']
+
+    sim_size = (width_m, height_m)
+    sim_input.size = sim_size
+    
+    # Generate wind forecast
+    # TODO: should mesh resolution be a user input?
+    wind_resolution = 30
+    forecast_seed_path = params['wind']
+    forecast_seed_type = params['wind_type']
+    elevation_path = data['topography']['tif_file_path']
+    vegetation_path = "trees" #data['vegetation']['tif_file_path'] # TODO: Implement vegetation
+
+    # TODO: make it an option to save wind forecast to a file somewhere
+    if not params['zero_wind']:
+        wind_forecast, wind_time_step = gen_forecast(elevation_path, vegetation_path, forecast_seed_path, forecast_seed_type, mesh_resolution=wind_resolution)
+
+    else:
+        wind_forecast = np.zeros((1, *topography_map.shape, 2))
+        wind_time_step = 1e10
+
+    wind = WindDataMap(wind_forecast, wind_resolution, wind_time_step)
+
+    sim_input.wind = wind
+
+    # Calculate simSize
+    num_cols = int(np.floor(width_m/(np.sqrt(3)*cell_size)))
+    num_rows = int(np.floor(height_m/(1.5*cell_size)))
+
+    sim_shape = (num_rows, num_cols)
+
+
+    sim_input.shape = sim_shape
+    
+    return sim_input
+
+
 def main():
 
-    # params = {'input': '/Users/rjdp3/Documents/embrs_release/src/rothermel_sample_map', 'log': '/Users/rjdp3/Documents/Research/rothermel_logs', 'wind': '/Users/rjdp3/Documents/embrs_release/src/sample_wind_forecasts/north_const.json', 't_step': 5, 'cell_size': 10, 'sim_time': 86400.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': False}
-
-    # sim_loop(params)
+    params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/yellowstone', 'log': '/Users/rui/Documents/Research/Code/embrs_logs', 'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind', 't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': False}
 
 
-    folder_selector = SimFolderSelector(sim_loop)
-    folder_selector.run()
+    sim_loop(params)
+
+    # folder_selector = SimFolderSelector(sim_loop)
+    # folder_selector.run()
 
 if __name__ == "__main__":
     main()

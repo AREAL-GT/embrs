@@ -1,8 +1,21 @@
-from embrs.utilities.fuel_models import Anderson13
+from embrs.utilities.fuel_models import Fuel
 from embrs.fire_simulator.cell import Cell
 import numpy as np
+from typing import Tuple
 
-def calc_propagation_in_cell(cell, wind_speed_m_s, wind_dir_deg, R_h_in = None):
+def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarray, np.ndarray]:
+    """_summary_
+
+    Args:
+        cell (Cell): _description_
+        R_h_in (float, optional): _description_. Defaults to None.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: _description_
+    """
+    
+    wind_speed_m_s, wind_dir_deg = cell.curr_wind
+
     wind_speed_ft_min = 196.85 * wind_speed_m_s
 
     slope_angle_deg = cell.slope_deg
@@ -41,7 +54,16 @@ def calc_propagation_in_cell(cell, wind_speed_m_s, wind_dir_deg, R_h_in = None):
 
     return np.array(r_list), np.array(I_list)
 
-def calc_r_0(fuel, m_f):
+def calc_r_0(fuel: Fuel, m_f: float) -> Tuple[float, float]:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        m_f (float): _description_
+
+    Returns:
+        Tuple[float, float]: _description_
+    """
 
     flux_ratio = calc_flux_ratio(fuel)
     I_r = calc_I_r(fuel, m_f)
@@ -51,7 +73,16 @@ def calc_r_0(fuel, m_f):
 
     return R_0, I_r
 
-def calc_I_r(fuel, m_f):
+def calc_I_r(fuel: Fuel, m_f: float) -> float:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        m_f (float): _description_
+
+    Returns:
+        float: _description_
+    """
 
     moist_damping = calc_moisture_damping(m_f, fuel.m_x)
     mineral_damping = calc_mineral_damping()
@@ -65,7 +96,16 @@ def calc_I_r(fuel, m_f):
 
     return I_r
 
-def calc_flux_ratio(fuel):
+def calc_flux_ratio(fuel: Fuel) -> float:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+
+    Returns:
+        float: _description_
+    """
+
     rho_b = fuel.rho_b
     sav_ratio = fuel.sav_ratio
 
@@ -74,7 +114,16 @@ def calc_flux_ratio(fuel):
 
     return flux_ratio
 
-def calc_heat_sink(fuel, m_f):
+def calc_heat_sink(fuel: Fuel, m_f: float) -> float:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        m_f (float): _description_
+
+    Returns:
+        float: _description_
+    """
 
     rho_b = fuel.rho_b
     sav_ratio = fuel.sav_ratio
@@ -86,14 +135,21 @@ def calc_heat_sink(fuel, m_f):
 
     return heat_sink
 
-def calc_r_and_i_along_dir(cell: Cell, decomp_dir, R_h, I_r, alpha, e):
-    """Calculates the rate of spread in direction gamma from the ignition point
+def calc_r_and_i_along_dir(cell: Cell, decomp_dir: float, R_h: float, I_r: float, alpha: float, e: float) -> Tuple[float, float]:
+    """_summary_
 
-    :param gamma: _description_
-    :type gamma: _type_
-    :return: _description_
-    :rtype: _type_
+    Args:
+        cell (Cell): _description_
+        decomp_dir (float): _description_
+        R_h (float): _description_
+        I_r (float): _description_
+        alpha (float): _description_
+        e (float): _description_
+
+    Returns:
+        Tuple[float, float]: _description_
     """
+
     fuel = cell.fuel_type
     slope_dir = np.deg2rad(cell.aspect)
 
@@ -108,7 +164,16 @@ def calc_r_and_i_along_dir(cell: Cell, decomp_dir, R_h, I_r, alpha, e):
 
     return R_gamma, I_gamma
 
-def calc_E_B_C(fuel):
+def calc_E_B_C(fuel:Fuel) -> Tuple[float, float, float]:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+
+    Returns:
+        Tuple[float, float, float]: _description_
+    """
+
     sav_ratio = fuel.sav_ratio
 
     E = 0.715 * np.exp(-3.59e-4 * sav_ratio)
@@ -117,14 +182,33 @@ def calc_E_B_C(fuel):
 
     return E, B, C
 
-def calc_wind_factor(fuel, wind_speed):
+def calc_wind_factor(fuel:Fuel , wind_speed: float) -> float:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        wind_speed (float): _description_
+
+    Returns:
+        float: _description_
+    """
 
     E, B, C = calc_E_B_C(fuel)
     phi_w = C * (wind_speed ** B) * fuel.rel_packing_ratio ** (-E)
 
     return phi_w
 
-def calc_slope_factor(fuel, phi):
+def calc_slope_factor(fuel: Fuel, phi: float) -> float:
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        phi (float): _description_
+
+    Returns:
+        float: _description_
+    """
+
     packing_ratio = fuel.rho_b / 32
 
     phi_s = 5.275 * (packing_ratio ** (-0.3)) * (np.tan(phi)) ** 2
@@ -132,51 +216,63 @@ def calc_slope_factor(fuel, phi):
     return phi_s
 
 
-def calc_moisture_damping(m_f, m_x):
+def calc_moisture_damping(m_f: float, m_x: float) -> float:
+    """_summary_
+
+    Args:
+        m_f (float): _description_
+        m_x (float): _description_
+
+    Returns:
+        float: _description_
+    """
     r_m = m_f / m_x
 
     moist_damping = 1 - 2.59 * r_m + 5.11 * (r_m)**2 - 3.52 * (r_m)**3
 
     return moist_damping
 
-def calc_mineral_damping(s_e = 0.010):
+def calc_mineral_damping(s_e:float = 0.010) -> float:
+    """_summary_
+
+    Args:
+        s_e (float, optional): _description_. Defaults to 0.010.
+
+    Returns:
+        float: _description_
+    """
 
     mineral_damping = 0.174 * s_e ** (-0.19)
 
     return mineral_damping
 
 
-def calc_effective_wind_factor(R_h, R_0):
-    """Effective wind factor in direction of maximum spread
+def calc_effective_wind_factor(R_h: float, R_0: float) -> float:
+    """_summary_
 
-    :param R_h: _description_
-    :type R_h: _type_
-    :param R_0: _description_
-    :type R_0: _type_
-    :return: _description_
-    :rtype: _type_
+    Args:
+        R_h (float): _description_
+        R_0 (float): _description_
+
+    Returns:
+        float: _description_
     """
+
     phi_e = (R_h / R_0) - 1
 
     return phi_e
 
-def calc_effective_wind_speed(fuel, R_h, R_0):
+def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
     """_summary_
 
-    :param phi_e: _description_
-    :type phi_e: _type_
-    :param rel_packing_ratio: _description_
-    :type rel_packing_ratio: _type_
-    :param E: _description_
-    :type E: _type_
-    :param B: _description_
-    :type B: _type_
-    :param C: _description_
-    :type C: _type_
-    :return: _description_
-    :rtype: _type_
-    """
+    Args:
+        fuel (Fuel): _description_
+        R_h (float): _description_
+        R_0 (float): _description_
 
+    Returns:
+        float: _description_
+    """
     E, B, C = calc_E_B_C(fuel)
     phi_e = calc_effective_wind_factor(R_h, R_0)
 
@@ -185,7 +281,17 @@ def calc_effective_wind_speed(fuel, R_h, R_0):
 
     return u_e
 
-def calc_eccentricity(fuel, R_h, R_0):
+def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
+    """_summary_
+
+    Args:
+        fuel (Fuel): _description_
+        R_h (float): _description_
+        R_0 (float): _description_
+
+    Returns:
+        _type_: _description_
+    """
 
     u_e = calc_effective_wind_speed(fuel, R_h, R_0)
 
@@ -196,21 +302,23 @@ def calc_eccentricity(fuel, R_h, R_0):
 
     return e
 
-def calc_r_h(cell, wind_speed, slope_angle, omega, R_0 = None, I_r = None):
-    """Calculate the rate of spread in the direction of maximum spread, heading fire
+def calc_r_h(cell: Cell, wind_speed: float, 
+             slope_angle: float, omega: float,
+             R_0: float = None, I_r: float = None)-> Tuple[float, float, float, float]:
+    
+    """_summary_
 
-    :param R_0: _description_
-    :type R_0: _type_
-    :param phi_w: _description_
-    :type phi_w: _type_
-    :param phi_s: _description_
-    :type phi_s: _type_
-    :param omega: _description_
-    :type omega: _type_
-    :return: _description_
-    :rtype: _type_
+    Args:
+        cell (Cell): _description_
+        wind_speed (float): _description_
+        slope_angle (float): _description_
+        omega (float): _description_
+        R_0 (float, optional): _description_. Defaults to None.
+        I_r (float, optional): _description_. Defaults to None.
+
+    Returns:
+        Tuple[float, float, float, float]: _description_
     """
-
     fuel = cell.fuel_type
     m_f = cell.dead_m
     
@@ -232,7 +340,7 @@ def calc_r_h(cell, wind_speed, slope_angle, omega, R_0 = None, I_r = None):
 
     R_h = R_0 + (D_h / t)
 
-    alpha = np.arcsin(y/D_h) # TODO: check that this is ok without abs(y)
+    alpha = np.arcsin(y/D_h)
 
     return R_h, R_0, I_r, alpha
 

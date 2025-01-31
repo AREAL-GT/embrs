@@ -64,7 +64,8 @@ class Logger:
             'topography_map': fire_obj.topography_map,
             'coarse_topography': fire_obj.coarse_topography,
             'fuel_map': fire_obj.fuel_map,
-            'wind_vec': fire_obj.wind_vec
+            'wind_forecast': fire_obj.wind_forecast,
+            'wind_forecast_time_step': fire_obj.wind_forecast_t_step
         }
 
         if fire_obj.roads is not None:
@@ -234,9 +235,8 @@ class Logger:
 
         if fire is not None:
             # log results of simulation run
-            burning_cells = len(fire.curr_fires)
             burnt_cells = len(fire.burnt_cells)
-            fire_extinguished = burning_cells == 0
+            fire_extinguished = len(fire._burning_cells) == 0
 
             self.data["results"] = {
                 "user interrupted": on_interrupt,
@@ -246,8 +246,8 @@ class Logger:
             }
 
             if not fire_extinguished:
-                self.data["results"]["burning cells remaining"] = burning_cells
-                self.data["results"]["burning area remaining (m^2)"] = burning_cells * fire.cell_dict[0].cell_area
+                self.data["results"]["burning cells remaining"] = len(fire._burning_cells)
+                self.data["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0].cell_area
 
         else:
             self.log_message("Unable to publish results due to early termination")

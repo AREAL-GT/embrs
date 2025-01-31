@@ -1,5 +1,20 @@
 class Fuel:
-    def __init__(self, name, model_num, fuel_load_params, sav_ratio, fuel_depth, m_x, rel_packing_ratio, rho_b, burnable):
+    def __init__(self, name: str, model_num: int, fuel_load_params: dict, sav_ratio: int, fuel_depth: float,
+                 m_x: float, rel_packing_ratio: float, rho_b: float, burnable: bool):
+        """_summary_
+
+        Args:
+            name (str): _description_
+            model_num (int): _description_
+            fuel_load_params (dict): _description_
+            sav_ratio (int): _description_
+            fuel_depth (float): _description_
+            m_x (float): _description_
+            rel_packing_ratio (float): _description_
+            rho_b (float): _description_
+            burnable (bool): _description_
+        """
+
         self.name = name
         self.model_num = model_num
         self.fuel_load_params = fuel_load_params
@@ -21,9 +36,13 @@ class Fuel:
         self.net_fuel_load = 0
         if burnable:
             self.net_fuel_load = self.set_net_fuel_load()
-            # print(f"net fuel load: {self.net_fuel_load}")
 
-    def set_net_fuel_load(self):
+    def set_net_fuel_load(self) -> float:
+        """_summary_
+
+        Returns:
+            float: _description_
+        """
 
         fuel_classes = ["1-h", "10-h", "100-h", "Live H", "Live W"]
 
@@ -55,7 +74,7 @@ class Fuel:
 
     def __str__(self):
         return (f"Fuel Model: {self.name}\n"
-                f"Fuel Load: {self.fuel_load}\n"
+                f"Fuel Load: {self.net_fuel_load}\n"
                 f"SAV Ratio: {self.sav_ratio}\n"
                 f"Fuel Depth: {self.fuel_depth}\n"
                 f"Dead Fuel Extinction Moisture: {self.m_x}\n"
@@ -63,7 +82,15 @@ class Fuel:
 
 
 class Anderson13(Fuel):
-    def __init__(self, model_number):
+    def __init__(self, model_number: int):
+        """_summary_
+
+        Args:
+            model_number (int): _description_
+
+        Raises:
+            ValueError: _description_
+        """
         
         # TODO: convert fuel load to lb/ft^2 (multiply by 0.0459137)
         fuel_models = {
@@ -90,14 +117,13 @@ class Anderson13(Fuel):
         if model_number not in fuel_models:
             raise ValueError(f"{model_number} is not a valid Anderson 13 model number.")
 
+        # Get model parameters based on number input
         model = fuel_models[model_number]
 
+        # Set burnable variable
         burnable = model_number <= 13
 
         super().__init__(model["name"], model_number, model["fuel_load_params"], model["sav_ratio"], model["fuel_depth"], model["m_x"], model["rel_packing_ratio"], model["rho_b"], burnable)
-
-
-
 
 
 # class ScottBurgan40(Fuel):

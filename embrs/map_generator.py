@@ -60,18 +60,21 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
     if not uniform_elev and not uniform_fuel:
         print("Starting fuel parsing")
         fuel_data, fuel_bounds = parse_fuel_data(fuel_path, import_roads)
+        fuel_data['tif_file_path'] = fuel_path
         print("Finished fuel parsing")
         topography_data, elev_bounds = parse_elevation_data(top_path, data_res, min_cell_size)
+        topography_data['tif_file_path'] = top_path
         print("Finished topography parsing")
         aspect_data, _ = parse_elevation_data(asp_path, data_res, min_cell_size)
+        aspect_data['tif_file_path'] = asp_path
         print("Finished aspect parsing")
         slope_data, _ = parse_elevation_data(slope_path, data_res, min_cell_size)
+        slope_data['tif_file_path'] = slope_path
 
         print(f"Fuel data shape: {fuel_data['map'].shape}")
         print(f"Topography data shape: {topography_data['map'].shape}")
         print(f"Aspect data shape: {aspect_data['map'].shape}")
         print(f"Slope data shape: {slope_data['map'].shape}")
-
 
         # Ensure that the elevation and fuel data are from same region
         for e_bound, f_bound in zip(elev_bounds, fuel_bounds):
@@ -204,7 +207,8 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
                         'rows': fuel_data['rows'],
                         'cols': fuel_data['cols'],
                         'resolution': fuel_data['resolution'],
-                        'uniform': fuel_data['uniform']
+                        'uniform': fuel_data['uniform'],
+                        'tif_file_path': fuel_data['tif_file_path']
                     }
     
     if fuel_data['uniform']:
@@ -220,7 +224,8 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
                         'rows': topography_data['rows'],
                         'cols': topography_data['cols'],
                         'resolution': topography_data['resolution'],
-                        'uniform': topography_data['uniform']
+                        'uniform': topography_data['uniform'],
+                        'tif_file_path': topography_data['tif_file_path']
                         }
 
     aspect_path = save_path + '/aspect.npy'
@@ -232,7 +237,9 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
                       'rows': aspect_data['rows'],
                       'cols': aspect_data['cols'],
                       'resolution': aspect_data['resolution'],
-                      'uniform': aspect_data['uniform']}
+                      'uniform': aspect_data['uniform'],
+                      'tif_file_path': aspect_data['tif_file_path']
+                      }
 
     slope_path = save_path + '/aspect.npy'
     np.save(slope_path, slope_data['map'])
@@ -243,7 +250,8 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
                       'rows': slope_data['rows'],
                       'cols': slope_data['cols'],
                       'resolution': slope_data['resolution'],
-                      'uniform': slope_data['uniform']}
+                      'uniform': slope_data['uniform'],
+                      'tif_file_path': slope_data['tif_file_path']}
 
     # Save the roads data
     road_path = save_path + '/roads.pkl'
