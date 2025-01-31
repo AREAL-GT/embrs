@@ -8,6 +8,9 @@ import pickle
 import sys
 import os
 import rasterio
+from rasterio.warp import reproject
+from rasterio.enums import Resampling as ResamplingMethod
+from rasterio.transform import Affine
 import requests
 import pyproj
 import utm
@@ -16,7 +19,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from shapely.geometry import Polygon, LineString
 from shapely.geometry import mapping
-from scipy.interpolate import RectBivariateSpline
 from scipy import ndimage, stats
 import numpy as np
 
@@ -58,19 +60,12 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
     import_roads = file_params['Import Roads']
 
     if not uniform_elev and not uniform_fuel:
-        print("Starting fuel parsing")
         fuel_data, fuel_bounds = parse_fuel_data(fuel_path, import_roads)
-        fuel_data['tif_file_path'] = fuel_path
-        print("Finished fuel parsing")
-        topography_data, elev_bounds = parse_elevation_data(top_path, data_res, min_cell_size)
-        topography_data['tif_file_path'] = top_path
-        print("Finished topography parsing")
-        aspect_data, _ = parse_elevation_data(asp_path, data_res, min_cell_size)
-        aspect_data['tif_file_path'] = asp_path
-        print("Finished aspect parsing")
-        slope_data, _ = parse_elevation_data(slope_path, data_res, min_cell_size)
-        slope_data['tif_file_path'] = slope_path
+        topography_data, elev_bounds = geotiff_to_numpy(top_path)
+        aspect_data, _ = geotiff_to_numpy(asp_path)
+        slope_data, _ = geotiff_to_numpy(slope_path)
 
+        # TODO: need to get shapes to align properly
         print(f"Fuel data shape: {fuel_data['map'].shape}")
         print(f"Topography data shape: {topography_data['map'].shape}")
         print(f"Aspect data shape: {aspect_data['map'].shape}")
@@ -82,7 +77,6 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
                 raise ValueError('The elevation and fuel data are not from the same region')
 
         bounds = elev_bounds
-
 
         widths = [fuel_data['width_m'], topography_data['width_m'], aspect_data['width_m'], slope_data['width_m']]
         heights = [fuel_data['height_m'], topography_data['height_m'], aspect_data['height_m'], slope_data['height_m']]
@@ -106,9 +100,9 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
 
     elif uniform_fuel and not uniform_elev:
         # parse elevation map first
-        topography_data, elev_bounds = parse_elevation_data(top_path, data_res, min_cell_size)
-        aspect_data, _ = parse_elevation_data(asp_path, data_res, min_cell_size)
-        slope_data, _ = parse_elevation_data(slope_path, data_res, min_cell_size)
+        topography_data, elev_bounds = geotiff_to_numpy(top_path, data_res, min_cell_size)
+        aspect_data, _ = geotiff_to_numpy(asp_path, data_res, min_cell_size)
+        slope_data, _ = geotiff_to_numpy(slope_path, data_res, min_cell_size)
         bounds = elev_bounds
 
         # create uniform fuel map based on dimensions
@@ -159,11 +153,6 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         'roads': roads,
         'bounds': bounds
     }
-
-    # Get user input from GUI
-    user_data = get_user_data(fig)
-
-    save_to_file(save_path, fuel_data, topography_data, roads, user_data, bounds)
 
 def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_data: dict, slope_data: dict,
                 roads: list, user_data: dict, bounds: list):
@@ -241,7 +230,7 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
                       'tif_file_path': aspect_data['tif_file_path']
                       }
 
-    slope_path = save_path + '/aspect.npy'
+    slope_path = save_path + '/slope.npy'
     np.save(slope_path, slope_data['map'])
 
     data['slope'] = {'file': slope_path,
@@ -446,73 +435,98 @@ def interpolate_points(roads: list, max_spacing_m: float) -> list:
 
     return interpolated_roads
 
+def resample_raster(array, crs, transform, target_resolution):
+    """TODO: insert docstring
 
-def parse_elevation_data(top_path: str, data_res: float, cell_size: float) -> dict:
-    """Read elevation data file, rotate and buffer, and interpolate so it can be used for smaller
-    cell sizes.
+    Args:
+        array (_type_): _description_
+        crs (_type_): _description_
+        transform (_type_): _description_
+        target_resolution (_type_): _description_
 
-    :param top_path: path to the elevation data file
-    :type top_path: str
-    :param data_res: resolution of the raw elevation data
-    :type data_res: float
-    :param cell_size: size the elevation data will interpolate to (new resolution)
-    :type cell_size: float
-    :return: dictionary containing all relevant topography data
-    :rtype: dict
+    Returns:
+        _type_: _description_
     """
-    with rasterio.open(top_path) as elev_data:
-        # read data
-        array = elev_data.read(1)
+    scale_factor = transform.a / target_resolution
 
-    # Take out no data values
-    no_data_value = 32767 #elev_data.nodatavals[0]
+    new_height = int(array.shape[0] * scale_factor)
+    new_width = int(array.shape[1] * scale_factor)
 
-    print(f"shape before rotate and buffer: {array.shape}")
-
-    topography_map = rotate_and_buffer_data(array, no_data_value)
+    print(f"Resampling: Original Shape = {array.shape}, New Shape = ({new_height}, {new_width})")
     
-    print(f"shape after rotate and buffer: {topography_map.shape}")
+    # Create the resampled array
+    resampled_array = np.empty((new_height, new_width), dtype=np.float32)
 
+    # Compute the new transform (apply scale inversely)
+    new_transform = transform * transform.scale(1 / scale_factor, 1 / scale_factor)
+    # Perform resampling
+    reproject(
+        source=array.astype(np.float32),
+        destination=resampled_array,
+        src_transform=transform,
+        dst_transform=new_transform,
+        src_crs=crs,
+        dst_crs=crs,
+        resampling=ResamplingMethod.bilinear
+    )
 
-    width_m = topography_map.shape[1] * data_res
-    height_m = topography_map.shape[0] * data_res
+    # Restore NoData values
+    resampled_array[resampled_array == -9999] = np.nan 
 
-    x = np.arange(0, topography_map.shape[1])
-    y = np.arange(0, topography_map.shape[0])
-    X, Y = np.meshgrid(x, y)
-    plt.contour(X, Y, np.flipud(topography_map), colors='k')
+    return resampled_array, new_transform
 
-    # upscale grid
-    scale_factor = int(np.floor(data_res/cell_size))
+def geotiff_to_numpy(filepath: str, fill_value: int =-9999) -> Tuple[np.ndarray, list]:
+    """_summary_
 
-    x = np.arange(topography_map.shape[1])
-    y = np.arange(topography_map.shape[0])
+    Args:
+        filepath (str): _description_
+        fill_value (int, optional): _description_. Defaults to -9999.
 
-    # construct the interpolator object
-    interpolator = RectBivariateSpline(y, x, topography_map)
+    Returns:
+        Tuple[np.ndarray, list]: _description_
+    """
+    with rasterio.open(filepath) as src:
+        # Read the data and metadata
+        array = src.read(1)  # Read the first band
+        nodata = 32767  # Get the NoData value
+        transform = src.transform
+        
+        # Replace NoData values with the fill_value
+        if nodata is not None:
+            array = np.where(array == nodata, fill_value, array)
+        
+        # Align to the axes (optional: crop to remove all NoData rows/columns)
+        non_empty_rows = np.any(array != fill_value, axis=1)
+        non_empty_cols = np.any(array != fill_value, axis=0)
+        array = array[non_empty_rows][:, non_empty_cols]
+        
+        # Adjust the transform for the cropped array
+        new_transform = transform * Affine.translation(
+            non_empty_cols.argmax(), non_empty_rows.argmax()
+        )
+        
+    array = rotate_and_buffer_data(array, fill_value)
 
-    xnew = np.linspace(0, topography_map.shape[1]-1, topography_map.shape[1]*scale_factor)
-    ynew = np.linspace(0, topography_map.shape[0]-1, topography_map.shape[0]*scale_factor)
+    resampled_array, transform =  resample_raster(array, src.crs, new_transform, 1)
 
-    # apply the interpolator
-    topography_map_new = interpolator(ynew, xnew)
-    topography_map_new = topography_map_new.reshape((topography_map.shape[0]*scale_factor,
-                                                     topography_map.shape[1]*scale_factor))
+    rows, cols = resampled_array.shape
 
-    rows = topography_map_new.shape[0]
-    cols = topography_map_new.shape[1]
-    resolution = width_m / cols
+    width_m = cols
+    height_m = rows
 
-    topography_output = {'width_m': width_m,
-                        'height_m': height_m,
-                        'rows': rows,
-                        'cols': cols,
-                        'resolution': resolution,
-                        'map': topography_map_new,
-                        'uniform': False
-                        }
+    resolution = 1
 
-    return topography_output, elev_data.bounds
+    output = {'width_m': width_m,
+                    'height_m': height_m,
+                    'rows': rows,
+                    'cols': cols,
+                    'resolution': resolution,
+                    'map': resampled_array,
+                    'uniform': False,
+                    'tif_file_path': filepath
+                    }
+
+    return output, src.bounds
 
 def create_uniform_elev_map(rows: int, cols: int) -> dict:
     """Create an elevation map for the uniform case (all elevation set to 0)
@@ -590,7 +604,8 @@ def parse_fuel_data(fuel_path: str, import_roads: bool) -> dict:
                     'cols': cols,
                     'resolution': resolution,
                     'map': fuel_map,
-                    'uniform': False
+                    'uniform': False,
+                    'tif_file_path': fuel_path
                 }
 
     return fuel_output, fuel_data.bounds
@@ -856,20 +871,19 @@ def get_shapely_polys(polygons: list) -> list:
     return shapely_polygons
 
 def main():
-    file_selector = MapGenFileSelector()
-    file_params = file_selector.run()
+    # file_selector = MapGenFileSelector()
+    # file_params = file_selector.run()
 
-    if file_params is None:
-        print("User exited before submitting necessary files.")
-        sys.exit(0)
+    # if file_params is None:
+    #     print("User exited before submitting necessary files.")
+    #     sys.exit(0)
 
     # Initialize figure for GUI
     fig = plt.figure(figsize=(15, 10))
     plt.tick_params(left = False, right = False, bottom = False, labelleft = False,
                     labelbottom = False)
 
-    # file_params = {'Output Map Folder': '/Users/rjdp3/Documents/Research/Code/full-stack-burnout/real_fire_eval_scenarios/soberanes_fire/map', 'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False, 'Fuel Map Path': '/Users/rjdp3/Documents/Research/Code/full-stack-burnout/real_fire_eval_scenarios/soberanes_fire/raw_data_new/LF2019_FBFM13_200_CONUS/LC19_F13_200.tif', 'Uniform Elev': False, 'Topography Map Path': '/Users/rjdp3/Documents/Research/Code/full-stack-burnout/real_fire_eval_scenarios/soberanes_fire/raw_data_new/LF2020_Elev_220_CONUS/LC20_Elev_220.tif', 'Aspect Map Path': '/Users/rjdp3/Documents/Research/Code/full-stack-burnout/real_fire_eval_scenarios/soberanes_fire/raw_data_new/LF2020_Asp_220_CONUS/LC20_Asp_220.tif', 'Slope Map Path': '/Users/rjdp3/Documents/Research/Code/full-stack-burnout/real_fire_eval_scenarios/soberanes_fire/raw_data_new/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
-
+    file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/new_raster_code_test', 'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False, 'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif', 'Uniform Elev': False, 'Topography Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_Elev_220_CONUS/LC20_Elev_220.tif', 'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_Asp_220_CONUS/LC20_Asp_220.tif', 'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
     params = generate_map_from_file(file_params, DATA_RESOLUTION, 1)
     user_data = get_user_data(fig)
     save_to_file(params['save_path'], params['fuel_data'], params['topography_data'], params['aspect_data'], params['slope_data'], params['roads'], user_data, params['bounds'])
