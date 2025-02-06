@@ -1,13 +1,95 @@
 """Module that handles user drawing on top of sim map when specifying map parameters.
 """
 
+from embrs.utilities.fire_util import FuelConstants as fc
+
 from typing import Tuple
+import rasterio
 import numpy as np
 from PyQt5.QtWidgets import QApplication, QInputDialog
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, RectangleSelector
+from matplotlib.colors import ListedColormap, BoundaryNorm
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('TkAgg')
+
+class CropTiffTool:
+    """
+    Class for cropping a TIFF file using a bounding box drawn by the user.
+    Uses the RectangleSelector widget for selecting the area to crop.
+    """
+    def __init__(self, fig: plt.Figure, tiff_path: str):
+        self.fig = fig
+        self.ax = fig.add_subplot(111)
+        self.tiff_path = tiff_path
+        self.coords = None  # Store bounding box coordinates
+        
+        # Load TIFF data
+        self.load_tiff()
+        
+        # Create RectangleSelector for user selection
+        self.selector = RectangleSelector(
+            self.ax, self.on_select, useblit=True,
+            button=[1], minspanx=5, minspany=5,
+            spancoords='pixels', interactive=True
+        )
+        
+        # Create accept and decline buttons
+        self.accept_button = Button(plt.axes([0.78, 0.05, 0.1, 0.075]), 'Accept')
+        self.accept_button.on_clicked(self.accept)
+        self.accept_button.ax.set_visible(False)
+        
+        self.decline_button = Button(plt.axes([0.885, 0.05, 0.1, 0.075]), 'Decline')
+        self.decline_button.on_clicked(self.decline)
+        self.decline_button.ax.set_visible(False)
+        
+        self.fig.canvas.draw()
+    
+    def load_tiff(self):
+        """Loads and plots the TIFF data."""
+        with rasterio.open(self.tiff_path) as dataset:
+            self.extent = [dataset.bounds.left, dataset.bounds.right, dataset.bounds.bottom, dataset.bounds.top]
+            self.data = dataset.read(1)  # Assuming single-band TIFF
+            
+            nodata_value = dataset.nodata
+            if nodata_value is not None:
+                self.data[self.data == nodata_value] = -100
+
+        # Create a color list in the right order
+        colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
+
+        # Create a colormap from the list
+        cmap = ListedColormap(colors)
+
+        # Create a norm object to map your data points to the colormap
+        norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
+
+        self.ax.imshow(self.data, extent=self.extent, cmap=cmap, norm=norm)
+        self.ax.set_title("Draw a bounding box to crop the TIFF file")
+        
+    def on_select(self, eclick, erelease):
+        """Handles the selection of a bounding box."""
+        self.coords = [(eclick.xdata, eclick.ydata), (erelease.xdata, erelease.ydata)]
+        self.accept_button.ax.set_visible(True)
+        self.decline_button.ax.set_visible(True)
+        self.fig.canvas.draw()
+    
+    def accept(self, event):
+        """Confirms the selection and closes the figure."""
+        print(f"Bounding Box Selected: {self.coords}")
+        plt.close(self.fig)
+    
+    def decline(self, event):
+        """Clears the selection and resets the figure."""
+        self.coords = None
+        self.accept_button.ax.set_visible(False)
+        self.decline_button.ax.set_visible(False)
+        self.selector.set_visible(False)
+        self.fig.canvas.draw()
+    
+    def get_coords(self):
+        """Returns the selected bounding box coordinates."""
+        return self.coords
 
 class PolygonDrawer:
     """Class used for drawing polygons on top of sim map for specifying locations of initial

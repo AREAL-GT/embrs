@@ -1,6 +1,7 @@
 """Module used to run the application that allows users to generate a new map file.
 """
 
+import subprocess
 from typing import Tuple
 import xml.etree.ElementTree as ET
 import json
@@ -11,6 +12,7 @@ import rasterio
 from rasterio.warp import reproject
 from rasterio.enums import Resampling as ResamplingMethod
 from rasterio.transform import Affine
+from rasterio.windows import from_bounds
 import requests
 import pyproj
 import utm
@@ -23,7 +25,7 @@ from scipy import ndimage, stats
 import numpy as np
 
 from embrs.utilities.file_io import MapGenFileSelector
-from embrs.utilities.map_drawer import PolygonDrawer
+from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import FuelConstants as fc
 
@@ -44,14 +46,12 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
     :raises ValueError: if elevation and fuel data selected are not from the same region
     """
 
-    print(file_params)
-
     # Get file paths for all data files
     save_path = file_params['Output Map Folder']
-    top_path  = file_params['Topography Map Path']
-    fuel_path = file_params['Fuel Map Path']
-    asp_path = file_params['Aspect Map Path']
-    slope_path = file_params['Slope Map Path']
+    top_path  = file_params['Cropped Topography Map Path']
+    fuel_path = file_params['Cropped Fuel Map Path']
+    asp_path = file_params['Cropped Aspect Map Path']
+    slope_path = file_params['Cropped Slope Map Path']
 
     uniform_fuel = file_params["Uniform Fuel"]
     uniform_elev = file_params["Uniform Elev"]
@@ -64,12 +64,6 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         topography_data, elev_bounds = geotiff_to_numpy(top_path)
         aspect_data, _ = geotiff_to_numpy(asp_path)
         slope_data, _ = geotiff_to_numpy(slope_path)
-
-        # TODO: need to get shapes to align properly
-        print(f"Fuel data shape: {fuel_data['map'].shape}")
-        print(f"Topography data shape: {topography_data['map'].shape}")
-        print(f"Aspect data shape: {aspect_data['map'].shape}")
-        print(f"Slope data shape: {slope_data['map'].shape}")
 
         # Ensure that the elevation and fuel data are from same region
         for e_bound, f_bound in zip(elev_bounds, fuel_bounds):
@@ -84,21 +78,11 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         widths_equal = all(x == widths[0] for x in widths)
         heights_equal = all(x == heights[0] for x in heights)
 
-        if not  widths_equal or not heights_equal:
-            # set bounds to the smallest of each
-            width_m = np.min(widths)
-            height_m = np.min(heights)
+        if not widths_equal or not heights_equal:
+            # TODO: See if this ever comes up, if it does figure out how to handle it
+            raise ValueError('Widths or heights of cropped data do not match')
 
-            fuel_data['width_m'] = int(width_m)
-            topography_data['width_m'] = int(width_m)
-            aspect_data['width_m'] = int(width_m)
-            slope_data['width_m'] = int(width_m)
-            fuel_data['height_m'] = int(height_m)
-            topography_data['height_m'] = int(height_m)
-            aspect_data['height_m'] = int(height_m)
-            slope_data['height_m'] = int(height_m)
-
-    elif uniform_fuel and not uniform_elev:
+    elif uniform_fuel and not uniform_elev: # TODO: Handle uniform cases
         # parse elevation map first
         topography_data, elev_bounds = geotiff_to_numpy(top_path, data_res, min_cell_size)
         aspect_data, _ = geotiff_to_numpy(asp_path, data_res, min_cell_size)
@@ -110,7 +94,7 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         fuel_type = file_params["Fuel Type"]
         fuel_data = create_uniform_fuel_map(rows, cols, fuel_type)
 
-    elif not uniform_fuel and uniform_elev:
+    elif not uniform_fuel and uniform_elev: # TODO: Handle uniform cases
         # parse fuel map first
         fuel_data, fuel_bounds = parse_fuel_data(fuel_path, import_roads)
         bounds = fuel_bounds
@@ -120,7 +104,7 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         topography_data = create_uniform_elev_map(rows, cols)
         aspect_data = create_uniform_elev_map(rows, cols)
         slope_data = create_uniform_elev_map(rows, cols)
-    else:
+    else: # Both fuel and elevation are uniform # TODO: Handle uniform cases
         # get sim size from parameters
         rows, cols = file_params["height m"], file_params["width m"]
         fuel_type = file_params["Fuel Type"]
@@ -154,30 +138,178 @@ def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: fl
         'bounds': bounds
     }
 
-def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_data: dict, slope_data: dict,
-                roads: list, user_data: dict, bounds: list):
-    """Save all generated map data to a file specified in 'save_path'
+def find_warping_angle(array: np.ndarray) -> float:
+    """_summary_
 
-    :param save_path: Path to save the map files in
-    :type save_path: str
-    :param fuel_data: Dictionary containing all data relevant to the fuel map
-    :type fuel_data: dict
-    :param topography_data: Dictionary containing all data relevant to the topography map
-    :type topography_data: dict
-    :param roads: list of points considered roads each element formatted as ((x, y), road_type)
-    :type roads: list
-    :param user_data: Dictionary containing the data generated by user in the drawing process
-    :type user_data: dict
-    :param bounds: list containing the geographic bounds of the map, corner coordinates listed in
-    following order:[south, north, west, east]
-    :type bounds: list
+    Args:
+        array (np.ndarray): _description_
+
+    Returns:
+        float: _description_
     """
+    # find top left corner
+    corner_1 = None
+    for i in range(array.shape[1]):
+        for x in range(array.shape[0]):
+            if array[i][x] != -100:
+                corner_1 = (x, i)
+                break
+
+        if corner_1 is not None:
+            break
+
+    # find bottom left corner
+    corner_2 = None
+    for i in range(array.shape[0]):
+        for y in range(array.shape[1]):
+            if array[y][i] != -100:
+                corner_2 = (i, y)
+                break
+        
+        if corner_2 is not None:
+            break
+    
+    if corner_2[1] == 0:
+        angle = 0
+    else:
+        angle = np.arctan(corner_1[0]/corner_2[1])
+
+    return angle
+
+def crop_map_data(file_params: str) -> float:
+    """_summary_
+
+    Args:
+        file_params (str): _description_
+
+    Returns:
+        float: _description_
+    """
+    # Get bounding box from user input
+    
+    crop_done = False
+
+    fuel_path = file_params['Fuel Map Path']
+
+    while not crop_done:
+
+        fig, ax = plt.subplots()
+
+        crop_tool = CropTiffTool(fig, fuel_path)
+        plt.show()
+
+        bounds = crop_tool.get_coords()
+
+        crop_done = crop_data_products(file_params, bounds)
+
+    angle = find_warping_angle(crop_tool.data)
+
+    return angle
+
+
+def crop_data_products(file_params: dict, bounds: list) -> bool:
+    """_summary_
+
+    Args:
+        file_params (dict): _description_
+        bounds (list): _description_
+
+    Returns:
+        bool: _description_
+    """
+    # TODO: How should we handle uniform fuel and elevation case?
+    output_dir = file_params['Output Map Folder']
+
+    data_path_keys = ['Fuel Map Path', 'Topography Map Path', 'Aspect Map Path', 'Slope Map Path']
+    cropped_filename = ['fuel.tif', 'elevation.tif', 'aspect.tif', 'slope.tif']
+    output_keys = ['Cropped Fuel Map Path', 'Cropped Topography Map Path', 'Cropped Aspect Map Path', 'Cropped Slope Map Path']
+
+
+    for i in range(len(data_path_keys)):
+        data_path = file_params[data_path_keys[i]]
+        output_path = os.path.join(output_dir, cropped_filename[i])
+        flag = crop_and_save_tiff(data_path, output_path, bounds)
+        
+        if flag == -1:
+            return False
+        
+        file_params[output_keys[i]] = output_path
+
+    return True
+
+def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
+    """_summary_
+
+    Args:
+        input_path (str): _description_
+        output_path (str): _description_
+        bounds (list): _description_
+
+    Returns:
+        int: _description_
+    """
+
+    left, bottom = bounds[0]
+    right, top = bounds[1]
+
+    with rasterio.open(input_path) as src:
+        nodata_value = 32767
+
+        window = from_bounds(left, bottom, right, top, src.transform)
+
+        cropped_data = src.read(1, window=window)
+
+        if np.any(cropped_data == nodata_value):
+            return -1
+
+        new_transform = src.window_transform(window)
+
+        out_meta = src.meta.copy()
+
+        out_meta.update({
+            "height": cropped_data.shape[0],
+            "width": cropped_data.shape[1],
+            "transform": new_transform,
+            "crs": src.crs
+        })
+
+    with rasterio.open(output_path, "w", **out_meta) as dest:
+        dest.write(cropped_data, 1)
+
+    try:
+        subprocess.run(["gdal_edit.py", "-a_srs", "EPSG:5070", output_path], check=True)
+        print(f"Successfully set CRS to EPSG:5070 for {output_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error running gdal_edit.py: {e}")
+
+    return 0
+    
+def save_to_file(params: dict, user_data: dict, north_dir: float):
+    """_summary_
+
+    Args:
+        params (dict): _description_
+        user_data (dict): _description_
+        north_dir (float): _description_
+    """
+
+    # Extract relevant data from params
+    save_path = params['save_path']
+    bounds = params['bounds']
+    fuel_data = params['fuel_data']
+    topography_data = params['topography_data']
+    slope_data = params['slope_data']
+    aspect_data = params['aspect_data']
+    roads = params['roads']
+
     data = {}
 
     # Save fuel data
     fuel_path = save_path + '/fuel.npy'
 
     np.save(fuel_path, fuel_data['map'])
+
+    data['north_angle_deg'] = np.rad2deg(north_dir)
 
     if bounds is None:
         data['geo_bounds'] = None
@@ -187,7 +319,7 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
             'south': bounds[0],
             'north': bounds[1],
             'west': bounds[2],
-            'east': bounds[3] 
+            'east': bounds[3]
         }
 
     data['fuel'] = {'file': fuel_path,
@@ -250,8 +382,6 @@ def save_to_file(save_path: str, fuel_data: dict, topography_data: dict, aspect_
     data['roads'] = {'file': road_path}
 
     data = data | user_data
-
-    print(data)
 
     # Save data to JSON
     folder_name = os.path.basename(save_path)
@@ -488,12 +618,7 @@ def geotiff_to_numpy(filepath: str, fill_value: int =-9999) -> Tuple[np.ndarray,
     with rasterio.open(filepath) as src:
         # Read the data and metadata
         array = src.read(1)  # Read the first band
-        nodata = 32767  # Get the NoData value
         transform = src.transform
-        
-        # Replace NoData values with the fill_value
-        if nodata is not None:
-            array = np.where(array == nodata, fill_value, array)
         
         # Align to the axes (optional: crop to remove all NoData rows/columns)
         non_empty_rows = np.any(array != fill_value, axis=1)
@@ -504,8 +629,6 @@ def geotiff_to_numpy(filepath: str, fill_value: int =-9999) -> Tuple[np.ndarray,
         new_transform = transform * Affine.translation(
             non_empty_cols.argmax(), non_empty_rows.argmax()
         )
-        
-    array = rotate_and_buffer_data(array, fill_value)
 
     resampled_array, transform =  resample_raster(array, src.crs, new_transform, 1)
 
@@ -564,11 +687,9 @@ def parse_fuel_data(fuel_path: str, import_roads: bool) -> dict:
     :rtype: dict
     """
 
-    with rasterio.open(fuel_path) as fuel_data:
-        array = fuel_data.read(1)
-    no_data_value = fuel_data.nodatavals[0]
-
-    fuel_map = rotate_and_buffer_data(array, no_data_value, order=0)
+    with rasterio.open(fuel_path) as src:
+        # Read the data and metadata
+        fuel_map = src.read(1)  # Read the first band
 
     if import_roads:
         fuel_map = replace_clusters(fuel_map)
@@ -608,7 +729,7 @@ def parse_fuel_data(fuel_path: str, import_roads: bool) -> dict:
                     'tif_file_path': fuel_path
                 }
 
-    return fuel_output, fuel_data.bounds
+    return fuel_output, src.bounds
 
 def create_uniform_fuel_map(height_m: float, width_m: float, fuel_type: fc.fbfm_13_keys) -> dict:
     """Create a fuel map for the uniform case (all fuel set to same value)
@@ -649,69 +770,6 @@ def create_uniform_fuel_map(height_m: float, width_m: float, fuel_type: fc.fbfm_
                 }
 
     return fuel_output
-
-def rotate_and_buffer_data(array: np.ndarray, no_data_value: int, order = 3) -> np.ndarray:
-    """Rotates and buffers raw .tif fuel and elevation files so they are squares and contain no
-    garbage data
-
-    :param array: array of data to be cleaned
-    :type array: np.ndarray
-    :param no_data_value: value that represents no data within the array
-    :type no_data_value: int
-    :param order: order of interpolation for ndimage.rotate, order=0 does not interpolate, defaults
-                  to 3
-    :type order: int, optional
-    :return: cleaned array
-    :rtype: np.ndarray
-    """
-    array = np.where(array == no_data_value, -100, array)
-
-    # find top left corner
-    corner_1 = None
-    for i in range(array.shape[1]):
-        for x in range(array.shape[0]):
-            if array[i][x] != -100:
-                corner_1 = (x, i)
-                break
-
-        if corner_1 is not None:
-            break
-
-    # find bottom left corner
-    corner_2 = None
-    for i in range(array.shape[0]):
-        for y in range(array.shape[1]):
-            if array[y][i] != -100:
-                corner_2 = (i, y)
-                break
-        
-        if corner_2 is not None:
-            break
-    
-    if corner_2[1] == 0:
-        angle = 0
-    else:
-        angle = np.arctan(corner_1[0]/corner_2[1]) * (180/np.pi)
-
-    # rotate data to align it with x, y axes
-    rotated_data = ndimage.rotate(array, angle, order=order)
-
-    # Get the indices of valid elevation values
-    valid_indices = np.where((rotated_data > 0))
-
-    # Get rough min and max valid indices
-    min_row = np.min(valid_indices[0])
-    max_row = np.max(valid_indices[0])
-    min_col = np.min(valid_indices[1])
-    max_col = np.max(valid_indices[1])
-
-    # Trim data
-    new_array = rotated_data[min_row:max_row, min_col:max_col]
-
-    # buffer 10 values on each side to remove any garbage data
-    new_array = new_array[10:-10, 10:-10]
-
-    return new_array
 
 def replace_clusters(fuel_map: np.ndarray, invalid_value=91) -> np.ndarray:
     """Function to replace clusters of invalid values with their neighboring values
@@ -878,16 +936,27 @@ def main():
     #     print("User exited before submitting necessary files.")
     #     sys.exit(0)
 
-    # Initialize figure for GUI
+
+    file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
+                   'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False,
+                   'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif',
+                   'Uniform Elev': False, 'Topography Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_Elev_220_CONUS/LC20_Elev_220.tif',
+                   'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_Asp_220_CONUS/LC20_Asp_220.tif',
+                   'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
+    
+
+    north_dir = crop_map_data(file_params)
+
+    # Initialize figure for user data GUI
     fig = plt.figure(figsize=(15, 10))
     plt.tick_params(left = False, right = False, bottom = False, labelleft = False,
                     labelbottom = False)
 
-    file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/new_raster_code_test', 'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False, 'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif', 'Uniform Elev': False, 'Topography Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_Elev_220_CONUS/LC20_Elev_220.tif', 'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_Asp_220_CONUS/LC20_Asp_220.tif', 'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/yellowstone/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
     params = generate_map_from_file(file_params, DATA_RESOLUTION, 1)
-    user_data = get_user_data(fig)
-    save_to_file(params['save_path'], params['fuel_data'], params['topography_data'], params['aspect_data'], params['slope_data'], params['roads'], user_data, params['bounds'])
 
+
+    user_data = get_user_data(fig)
+    save_to_file(params, user_data, north_dir)
 
 if __name__ == "__main__":
     main()

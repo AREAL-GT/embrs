@@ -184,6 +184,7 @@ class BaseFireSim:
         self._aspect_map = (180 + self._aspect_map) % 360 
         self._fuel_map = np.flipud(sim_input.fuel.map)
         self._initial_ignition = sim_input.initial_ignition
+        self._north_dir_deg = sim_input.north_angle
 
         # Get data map resolutions
         self._topography_res = sim_input.elevation.res
@@ -193,8 +194,15 @@ class BaseFireSim:
         self._wind_res = sim_input.wind.res
 
         # Get wind data
-        self.wind_forecast = sim_input.wind.map # TODO do we need to flipud this?
+        self.wind_forecast = sim_input.wind.map  # TODO do we need to flipud this?
+
+        self.flipud_forecast = np.empty(self.wind_forecast.shape)
+
+        # Iterate over each layer (time step or vertical level, depending on the dataset structure)
+        for layer in range(self.wind_forecast.shape[0]):
+            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
         
+        self.wind_forecast = self.flipud_forecast
         self.wind_forecast_t_step = sim_input.wind.time_step * 60 # convert to seconds
 
     def _add_cell_neighbors(self):

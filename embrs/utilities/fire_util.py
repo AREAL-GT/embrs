@@ -114,7 +114,7 @@ class FuelConstants:
                         10: 'xkcd:light forest green', 11: 'xkcd:bright olive',
                         12: 'xkcd:tree green', 13: 'xkcd:avocado green', 91: 'xkcd:ugly purple',
                         92: 'xkcd:pale cyan' , 93: "xkcd:perrywinkle", 98: 'xkcd:water blue',
-                        99: 'xkcd:black'}
+                        99: 'xkcd:black', -100: 'xkcd:red'}
 
 
 class RoadConstants: # TODO: need to change this class to reflect new road modelling approach

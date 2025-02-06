@@ -255,6 +255,7 @@ def construct_sim_input(params:dict) -> SimInput:
     slope = DataMap(slope_map, slope_resolution)
     sim_input.slope = slope
 
+    sim_input.north_angle = data['north_angle_deg']
     
     ignition_dicts = data['initial_ignition']
     initial_ignition = [shape(d) for d in ignition_dicts]
@@ -291,7 +292,7 @@ def construct_sim_input(params:dict) -> SimInput:
 
     # TODO: make it an option to save wind forecast to a file somewhere
     if not params['zero_wind']:
-        wind_forecast, wind_time_step = gen_forecast(elevation_path, vegetation_path, forecast_seed_path, forecast_seed_type, mesh_resolution=wind_resolution)
+        wind_forecast, wind_time_step = gen_forecast(elevation_path, vegetation_path, forecast_seed_path, forecast_seed_type, sim_input.north_angle, mesh_resolution=wind_resolution)
 
     else:
         wind_forecast = np.zeros((1, *topography_map.shape, 2))
@@ -315,7 +316,10 @@ def construct_sim_input(params:dict) -> SimInput:
 
 def main():
 
-    params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/yellowstone', 'log': '/Users/rui/Documents/Research/Code/embrs_logs', 'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind', 't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': False}
+    params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
+              'log': '/Users/rui/Documents/Research/Code/embrs_logs',
+              'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind',
+              't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': True}
 
 
     sim_loop(params)

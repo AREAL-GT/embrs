@@ -52,6 +52,7 @@ class SimInput():
         self.fire_breaks = []
         self.time_step = None
         self.cell_size = None
+        self.north_angle = None
         self.duration_s = None
         self.initial_ignition = None
         self.size = None

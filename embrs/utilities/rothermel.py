@@ -3,6 +3,8 @@ from embrs.fire_simulator.cell import Cell
 import numpy as np
 from typing import Tuple
 
+# TODO: fill in docstrings
+
 def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarray, np.ndarray]:
     """_summary_
 
@@ -24,6 +26,10 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     if slope_angle_deg == 0:
         rel_wind_dir_deg = 0
         cell.aspect = wind_dir_deg
+
+    elif wind_speed_m_s == 0:
+        rel_wind_dir_deg = 0
+        wind_dir_deg = cell.aspect
 
     else:
         rel_wind_dir_deg = wind_dir_deg - slope_dir_deg

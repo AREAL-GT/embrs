@@ -49,7 +49,7 @@ cli_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/WindNinja_cli"
 temp_file_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/temp"
 
 def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed_path: str,
-                 forecast_seed_type: str, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
+                 forecast_seed_type: str, north_angle:float=0, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
     """Generates a wind forecast using WindNinja.
 
     This function runs WindNinja with different initialization methods to generate 
@@ -87,7 +87,7 @@ def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed_path: 
 
     if forecast_seed_type == "Domain Average Wind":
         # Run WindNinja with domain average initialization
-        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, forecast_seed_path, mesh_resolution)
+        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, forecast_seed_path, north_angle, mesh_resolution)
 
     elif forecast_seed_type == "pointInitialization":
         # Run WindNinja with point initialization
@@ -99,7 +99,7 @@ def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed_path: 
 
     return forecast, time_step
 
-def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_path: str, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
+def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_path: str, north_angle: float, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization to generate a wind forecast.
 
     This function parses a wind seed file, extracts wind speed and direction data, 
@@ -154,13 +154,27 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_pat
         speed_list.append(entry['speed_m_s'])
 
         # Convert direction to WindNinja convention
-        direction = (entry['direction'] + 180) % 360
+        direction = (entry['direction'] + north_angle + 180) % 360
         direction_list.append(direction)
 
     # TODO: Implement wind height in wind forecast seed generation
     wind_height = seed_data['wind_height']
     wind_height_units = seed_data['wind_height_units']
 
+    # Clear temp folder so that new files can be written there
+    if os.path.exists(temp_file_path): 
+        for file_name in os.listdir(temp_file_path):
+            file_path = os.path.join(temp_file_path, file_name)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            elif os.path.isdir(file_path):
+                for sub_file_name in os.listdir(file_path):
+                    sub_file_path = os.path.join(file_path, sub_file_name)
+                    if os.path.isfile(sub_file_path):
+                        os.remove(sub_file_path)
+                os.rmdir(file_path)
+
+    # Write WindNinja outputs for each entry of the wind forecast seed
     for i, (speed, direction) in enumerate(zip(speed_list, direction_list)):
         os.makedirs(os.path.join(temp_file_path, f"{i}"), exist_ok=True)
         output_path = os.path.join(temp_file_path, f"{i}")
@@ -182,7 +196,8 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_pat
             "--input_direction", str(direction),
             "--input_wind_height", str(wind_height),
             "--units_input_wind_height", wind_height_units,
-            "--write_ascii_output", "true"
+            "--write_ascii_output", "true",
+            "--write_goog_output", "false"
         ]
 
         try:
@@ -238,6 +253,8 @@ def rename_windninja_outputs(output_path: str, time_step_index: int):
                 new_file_name = f"wind_direction_{time_step_index}{extension}"
             elif "_cld" in file_name:
                 new_file_name = f"cloud_cover_{time_step_index}{extension}"
+            elif extension == ".kmz" or extension == ".kml":
+                new_file_name = f"old_path{extension}"
 
             new_path = os.path.join(output_path, new_file_name)
             os.rename(old_path, new_path)
@@ -274,8 +291,6 @@ def create_forecast_array(num_files: int) -> np.ndarray:
         - Assumes WindNinja output files contain ASCII grid data with a 6-line header.
         - Uses `np.loadtxt()` to efficiently load numerical wind data.
     """
-    
-    # TODO: Check if we need to clean up temp directory before writing to it
 
     for i in range(num_files):
         output_path = os.path.join(temp_file_path, f"{i}")
@@ -296,17 +311,6 @@ def create_forecast_array(num_files: int) -> np.ndarray:
                 direction_data = np.loadtxt(file, skiprows=6)
                 direction_data = convert_to_cartesian(direction_data)
                 forecast[i, :, :, 1] = direction_data
-    
-    # Delete the temporary directories after data is gathered
-    print("Removing temporary files...")
-    for i in range(num_files):
-        output_path = os.path.join(temp_file_path, f"{i}")
-        if os.path.exists(output_path):
-            for file_name in os.listdir(output_path):
-                file_path = os.path.join(output_path, file_name)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-            os.rmdir(output_path)
 
     return forecast
 

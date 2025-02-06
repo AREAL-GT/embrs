@@ -148,12 +148,23 @@ class Visualizer:
                                                 facecolor='white', edgecolor='black', linewidth=1,
                                                 zorder=3, alpha = 0.75)
 
+            #  Create compass display
+            compass_box_x = 0
+            compass_box_y = sim.grid_height*1.5*sim.cell_size - (650/6000) * height_m
+            compass_box_w = (5/60)*width_m
+            compass_box_h = (500/6000) * height_m
+
+            self.compass_box = mpatches.Rectangle((compass_box_x, compass_box_y), compass_box_w, compass_box_h,
+                                                facecolor='white', edgecolor ='black', linewidth=1,
+                                                zorder = 3, alpha = 0.75)
+
             # Create scale display
             self.scale_box = mpatches.Rectangle((0, 10), 1100, (2/60)*height_m, facecolor='white',
                                                 edgecolor='k', linewidth= 1, alpha=0.75, zorder= 3)
             
             # Add display items to artists
             self.artists = [copy.copy(self.time_box),
+                            copy.copy(self.compass_box),
                             copy.copy(self.scale_box)]
 
             # Add display items to plot
@@ -215,7 +226,7 @@ class Visualizer:
             V = np.cos(np.deg2rad(wind_dir_deg))
 
             # Plot the wind vectors
-            self.wind_grid = h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap= 'jet', width=0.002, zorder=3)
+            self.wind_grid = h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap='jet', width=0.002, zorder=3)
             self.wind_idx = sim._curr_wind_idx
 
         # Reload visualizer from initial state
@@ -248,6 +259,15 @@ class Visualizer:
 
             h_ax.legend(handles=saved_legend, loc='upper right', borderaxespad=0)
 
+        wx, wy = self.compass_box.get_xy()
+        cx = wx + self.compass_box.get_width()/2
+
+        self.compassheader = h_ax.text(cx, wy + 0.1 * self.compass_box.get_height(),
+                                    'N', ha = 'center', va = 'center', color='red', weight='extra bold')
+
+        h_ax.add_artist(self.compass_box)
+        h_ax.add_artist(self.compassheader)
+
         time_str = util.get_time_str(sim.curr_time_s)
 
         rx, ry = self.time_box.get_xy()
@@ -273,9 +293,23 @@ class Visualizer:
             scale_size = str(scale_bar_km) + "km"
 
         scalebar = AnchoredSizeBar(h_ax.transData, num_cells_scale, scale_size, 'lower left',
-                                   color ='k', pad = 0.1, frameon=False)
+                       color='k', pad=0.1, frameon=False, zorder=4)
+        
         h_ax.add_artist(scalebar)
 
+        arrow_len = self.compass_box.get_height()/3
+
+        dx = np.sin(np.deg2rad(sim._north_dir_deg))
+        dy = np.cos(np.deg2rad(sim._north_dir_deg))
+
+        rx, ry = self.compass_box.get_xy()
+        cx = rx + self.compass_box.get_width()/2
+        cy = ry + self.compass_box.get_height()/2
+        
+        self.arrow_obj = h_ax.arrow(cx, cy - self.compass_box.get_height()/4, dx*arrow_len, dy*arrow_len, width=10,
+                                             head_width = 50, color = 'r', zorder= 3)
+        
+        h_ax.add_artist(self.arrow_obj)
 
         self.h_ax = h_ax
         self.fig = h_fig
