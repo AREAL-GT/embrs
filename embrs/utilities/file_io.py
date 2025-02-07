@@ -519,6 +519,7 @@ class SimFolderSelector(FileSelectBase):
         self.user_class_name = tk.StringVar()
         self.viz_on = tk.BooleanVar()
         self.zero_wind = tk.BooleanVar()
+        self.no_log = tk.BooleanVar()
 
         # Define some useful variables
         self.prev_t_unit = "hours"
@@ -535,6 +536,7 @@ class SimFolderSelector(FileSelectBase):
         self.time_unit.set("hours")
         self.wind_forecast_type.set("Domain Average Wind")
         self.zero_wind.set(False)
+        self.no_log.set(False)
 
         frame = self.create_frame(self.root)
 
@@ -542,7 +544,9 @@ class SimFolderSelector(FileSelectBase):
         self.create_folder_selector(frame, "Map folder:    ", self.map_folder)
 
         # Create frame for log folder selection
-        self.create_folder_selector(frame, "Log folder:     ", self.log_folder)
+        _, self.log_entry, self.log_button, self.log_frame = self.create_folder_selector(frame, "Log folder:     ", self.log_folder)
+        tk.Checkbutton(self.log_frame, text='Disable logging',
+                variable=self.no_log).grid(row=0, column=3)
 
         # Create frame for wind file selection
         _, self.wind_entry, self.wind_button, self.wind_frame = self.create_file_selector(frame, "Wind forecast: ", self.wind_forecast, [("JavaScript Object Notation","*.JSON")])
@@ -608,6 +612,7 @@ class SimFolderSelector(FileSelectBase):
         self.user_path.trace("w", self.user_path_changed)
         self.user_class_name.trace("w", self.class_changed)
         self.zero_wind.trace("w", self.zero_wind_toggled)
+        self.no_log.trace("w", self.write_logs_toggled)
 
     def duration_changed(self, *args):
         """Callback function that handles the sim duration changing, prevents values greater than 
@@ -789,11 +794,21 @@ class SimFolderSelector(FileSelectBase):
             self.forecast_type_menu.configure(state='normal')
             self.wind_forecast_type.set("Domain Average Wind")
 
+    def write_logs_toggled(self, *args):
+        if self.no_log.get():
+            self.log_button.configure(state='disabled')
+            self.log_entry.configure(state='disabled')
+            self.log_folder.set("")
+        
+        else:
+            self.log_button.configure(state='normal')
+            self.log_entry.configure(state='normal')
+
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
-        if all([self.map_folder.get(), self.log_folder.get()]):
+        if self.map_folder.get() and  (self.no_log.get() or self.log_folder.get()):
             self.submit_button.config(state='normal')
         else:
             self.submit_button.config(state='disabled')
@@ -825,7 +840,8 @@ class SimFolderSelector(FileSelectBase):
             "num_runs": self.num_runs.get(),
             "user_path": self.user_path.get(),
             "class_name": self.user_class_name.get(),
-            "zero_wind": self.zero_wind.get()
+            "zero_wind": self.zero_wind.get(),
+            "write_log_files": not self.no_log.get()
         }
 
         self.submit_callback(self.result)

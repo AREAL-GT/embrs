@@ -3,6 +3,7 @@
 from time import time
 import signal
 import importlib
+import sys
 import pickle
 import json
 import copy
@@ -32,8 +33,6 @@ def initialize(params: dict) -> Tuple[FireSim, bool, Visualizer]:
              selected Visualizer will be None.
     :rtype: Tuple[FireSim, bool, Visualizer]
     """
-
-    print(params)
 
     sim_input = construct_sim_input(params)
 
@@ -138,8 +137,11 @@ def run_sim(fire: FireSim, viz: Visualizer, progress_bar: tqdm, loader_window: L
 def handle_interrupt(logger, fire):
     """Function to handle user interrupts while a sim is running.
     """
-    print("\nUser interrupt detected. Finalizing logging...")
-    logger.finish(fire, True)
+    if logger is not None:
+        print("\nUser interrupt detected. Finalizing logging...")
+        logger.finish(fire, True)
+    else:
+        sys.exit(0)
 
 def sim_loop(params: dict):
     """Main function that gets user input from GUI and runs the specified simulation(s)
@@ -162,9 +164,14 @@ def sim_loop(params: dict):
 
     fire, viz_on, viz = initialize(params)
 
-    data_logger = Logger(params['log'])
-    data_logger.store_metadata(params, fire)
-    data_logger.store_init_fire_obj(fire)
+    if params['write_log_files']:
+        data_logger = Logger(params['log'])
+        data_logger.store_metadata(params, fire)
+        data_logger.store_init_fire_obj(fire)
+
+    else:
+        data_logger = None
+
 
     print("Running simulations... ")
     print("")
@@ -316,16 +323,16 @@ def construct_sim_input(params:dict) -> SimInput:
 
 def main():
 
-    params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
-              'log': '/Users/rui/Documents/Research/Code/embrs_logs',
-              'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind',
-              't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': True}
+    # params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
+    #           'log': '/Users/rui/Documents/Research/Code/embrs_logs',
+    #           'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind',
+    #           't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': True, 'write_log_files': False}
 
 
-    sim_loop(params)
+    # sim_loop(params)
 
-    # folder_selector = SimFolderSelector(sim_loop)
-    # folder_selector.run()
+    folder_selector = SimFolderSelector(sim_loop)
+    folder_selector.run()
 
 if __name__ == "__main__":
     main()
