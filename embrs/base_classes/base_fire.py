@@ -76,8 +76,8 @@ class BaseFireSim:
                 self.coarse_topography[j, i] = new_cell.z
 
                 # Set cell fuel type from fuel map
-                fuel_col = int(np.floor(cell_x/self.fuel_res)) - 1
-                fuel_row = int(np.floor(cell_y/self.fuel_res)) - 1
+                fuel_col = int(np.floor(cell_x/self.fuel_res))
+                fuel_row = int(np.floor(cell_y/self.fuel_res))
                 fuel_key = self._fuel_map[fuel_row, fuel_col]
                 new_cell._set_fuel_type(Anderson13(fuel_key))
 
