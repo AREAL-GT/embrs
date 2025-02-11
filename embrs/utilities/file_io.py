@@ -14,7 +14,7 @@ import json
 from typing import Callable, Tuple
 import numpy as np
 import time
-from datetime import datetime
+from datetime import datetime, date, time
 from tkcalendar import DateEntry
 
 from embrs.utilities.fire_util import FuelConstants
@@ -208,14 +208,14 @@ class MapGenFileSelector(FileSelectBase):
 
         # Define variables
         self.uniform_fuel = tk.BooleanVar()
-        self.uniform_fuel.trace("w", self.uniform_options_toggled)
+        self.uniform_fuel.trace_add("write", self.uniform_options_toggled)
         self.fuel_selection = tk.StringVar()
         self.fuel_selection.set("Short grass")
-        self.fuel_selection.trace("w", self.fuel_selection_changed)
+        self.fuel_selection.trace_add("write", self.fuel_selection_changed)
         self.fuel_selection_val = 1
         self.fuel_map_filename = tk.StringVar()
         self.uniform_elev = tk.BooleanVar()
-        self.uniform_elev.trace("w", self.uniform_options_toggled)
+        self.uniform_elev.trace_add("write", self.uniform_options_toggled)
         self.topography_map_filename = tk.StringVar()
         self.aspect_map_filename = tk.StringVar()
         self.slope_map_filename = tk.StringVar()
@@ -495,6 +495,7 @@ class HistoricFireSelector(MapGenFileSelector):
         self.root.quit() 
 
 class SimFolderSelector(FileSelectBase):
+    # TODO: need to deal with duration based on the weather file currently input
     """Class used to prompt user for inputs to set up a sim
     """
     def __init__(self, submit_callback:Callable):
@@ -508,8 +509,7 @@ class SimFolderSelector(FileSelectBase):
         # Define variables
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
-        self.wind_forecast = tk.StringVar()
-        self.wind_forecast_type = tk.StringVar()
+        self.weather = tk.StringVar()
         self.time_step = tk.IntVar()
         self.cell_size = tk.IntVar()
         self.sim_time = tk.DoubleVar()
@@ -518,8 +518,18 @@ class SimFolderSelector(FileSelectBase):
         self.user_path = tk.StringVar()
         self.user_class_name = tk.StringVar()
         self.viz_on = tk.BooleanVar()
-        self.zero_wind = tk.BooleanVar()
         self.no_log = tk.BooleanVar()
+        self.open_meteo = tk.BooleanVar()
+        self.weather_file = tk.BooleanVar()
+        self.mesh_resolution = tk.IntVar()
+        self.start_date = tk.StringVar()
+        self.end_date = tk.StringVar() 
+        self.start_hour = tk.IntVar()
+        self.start_min = tk.IntVar()
+        self.end_hour = tk.IntVar()
+        self.end_min = tk.IntVar()
+        self.start_ampm = tk.StringVar()
+        self.end_ampm = tk.StringVar()
 
         # Define some useful variables
         self.prev_t_unit = "hours"
@@ -534,9 +544,16 @@ class SimFolderSelector(FileSelectBase):
         self.num_runs.set(1)
         self.viz_on.set(False)
         self.time_unit.set("hours")
-        self.wind_forecast_type.set("Domain Average Wind")
-        self.zero_wind.set(False)
         self.no_log.set(False)
+        self.open_meteo.set(True)
+        self.weather_file.set(False)
+        self.mesh_resolution.set(250)
+        self.start_hour.set(12)
+        self.start_min.set(0)
+        self.end_hour.set(12)
+        self.end_min.set(0)
+        self.start_ampm.set("AM")
+        self.end_ampm.set("AM")
 
         frame = self.create_frame(self.root)
 
@@ -548,17 +565,47 @@ class SimFolderSelector(FileSelectBase):
         tk.Checkbutton(self.log_frame, text='Disable logging',
                 variable=self.no_log).grid(row=0, column=3)
 
-        # Create frame for wind file selection
-        _, self.wind_entry, self.wind_button, self.wind_frame = self.create_file_selector(frame, "Wind forecast: ", self.wind_forecast, [("JavaScript Object Notation","*.JSON")])
-        tk.Checkbutton(self.wind_frame, text='No Wind',
-                       variable=self.zero_wind).grid(row=0, column=3)
 
-        # Create frame for user class selection
-        forecast_type_frame = tk.Frame(frame)
-        forecast_type_frame.pack(padx=10,pady=5)
-        tk.Label(forecast_type_frame, text="Wind forecast type:").grid(row=0, column=0)
-        self.forecast_type_menu = tk.OptionMenu(forecast_type_frame, self.wind_forecast_type, "Domain Average Wind", "Point Wind", "wxModel")
-        self.forecast_type_menu.grid(row=0, column=1)
+        weather_option_frame = self.create_frame(frame)
+        tk.Label(weather_option_frame, text="Weather Option:").grid(row=0, column=0)
+        tk.Checkbutton(weather_option_frame, text='Import OpenMeteo Weather',
+                       variable=self.open_meteo).grid(row=0, column=1)
+        
+        tk.Checkbutton(weather_option_frame, text='Import Weather .json File',
+                       variable=self.weather_file).grid(row=0, column=2)
+
+        self.open_meteo_frame = self.create_frame(frame)
+
+        tk.Label(self.open_meteo_frame, text="Start Date:").grid(row=0, column=0)
+        self.start_cal = DateEntry(self.open_meteo_frame, date_pattern="y-mm-dd", background='white')
+        self.start_cal.grid(row=0, column =1)
+        self.start_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
+        
+        # Start time selection
+        tk.Label(self.open_meteo_frame, text="Start Time:").grid(row=0, column=2)
+        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, format="%2.0f", textvariable=self.start_hour).grid(row=0, column=3)
+        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, format="%02.0f", textvariable=self.start_min).grid(row=0, column=4, padx=5)
+        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.start_ampm).grid(row=0, column=5, padx=5)
+    
+        # End time selection
+        tk.Label(self.open_meteo_frame, text="End Time:").grid(row=1, column=2)
+        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, format="%2.0f", textvariable=self.end_hour).grid(row=1, column=3)
+        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, format="%02.0f", textvariable=self.end_min).grid(row=1, column=4, padx=5)
+        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.end_ampm).grid(row=1, column=5, padx=5)
+
+        tk.Label(self.open_meteo_frame, text="End Date:").grid(row=1, column=0)
+        self.end_cal = DateEntry(self.open_meteo_frame, date_pattern="y-mm-dd", background='white')
+        self.end_cal.grid(row=1, column =1)
+        self.end_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
+
+        # Create frame for wind file selection
+        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(frame, "Weather file: ", self.weather, [("JavaScript Object Notation","*.JSON")])
+
+        self.weather.set("")
+        self.weather_button.configure(state='disabled')
+        self.weather_entry.configure(state='disabled')
+
+        self.create_spinbox_with_two_labels(frame, "Wind Mesh Resolution:       ", 250, self.mesh_resolution, "meters")
 
         # Create frame for time step selection
         self.create_spinbox_with_two_labels(frame, "Time step:     ", 100, self.time_step, "seconds")
@@ -604,15 +651,36 @@ class SimFolderSelector(FileSelectBase):
         self.submit_button.pack(pady=10)
 
         # Define variable callbacks
-        self.map_folder.trace("w", self.map_folder_changed)
-        self.log_folder.trace("w", self.log_folder_changed)
-        self.wind_forecast.trace("w", self.wind_forecast_changed)
-        self.sim_time.trace("w", self.duration_changed)
-        self.time_unit.trace("w", self.time_unit_changed)
-        self.user_path.trace("w", self.user_path_changed)
-        self.user_class_name.trace("w", self.class_changed)
-        self.zero_wind.trace("w", self.zero_wind_toggled)
-        self.no_log.trace("w", self.write_logs_toggled)
+        self.map_folder.trace_add("write", self.map_folder_changed)
+        self.log_folder.trace_add("write", self.log_folder_changed)
+        self.sim_time.trace_add("write", self.duration_changed)
+        self.time_unit.trace_add("write", self.time_unit_changed)
+        self.user_path.trace_add("write", self.user_path_changed)
+        self.user_class_name.trace_add("write", self.class_changed)
+        self.no_log.trace_add("write", self.write_logs_toggled)
+        self.open_meteo.trace_add("write", self.open_meteo_toggled)
+        self.weather_file.trace_add("write", self.weather_file_toggled)
+
+        self.start_hour.trace_add("write", self.update_datetime)
+        self.start_min.trace_add("write", self.update_datetime)
+        self.start_ampm.trace_add("write", self.update_datetime)
+        self.end_hour.trace_add("write", self.update_datetime)
+        self.end_min.trace_add("write", self.update_datetime)
+        self.end_ampm.trace_add("write", self.update_datetime)
+
+
+        self.update_datetime()
+
+
+    def update_datetime(self, *args):
+        """Update datetime values whenever any input field changes"""
+        start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
+        start_time = time(start_hr, self.start_min.get())
+        self.start_datetime = datetime.combine(self.start_cal.get_date(), start_time)
+
+        end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
+        end_time = time(end_hr, self.end_min.get())
+        self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
 
     def duration_changed(self, *args):
         """Callback function that handles the sim duration changing, prevents values greater than 
@@ -661,44 +729,6 @@ class SimFolderSelector(FileSelectBase):
             msg = """Warning: Selected folder already contains log files, these will be overwritten
                      if you keep this selection"""
             tk.messagebox.showwarning("Warning", msg)
-            window.destroy()
-
-    def wind_forecast_changed(self, *args):
-        """Callback function to handle wind forecast input being changed. Sets the max duration of
-        the simulation to the duration of the forecast.
-        """
-
-        filepath = self.wind_forecast.get()
-
-        if os.path.exists(filepath):
-            with open(filepath, "rb") as f:
-                wind_data = json.load(f)
-
-            # get wind duration and set max_duration
-            wind_time_step_min = wind_data['time_step_min']
-            wind_time_step_sec = wind_time_step_min * 60
-            num_entries = len(wind_data['data'])
-
-            wind_duration_sec = wind_time_step_sec * num_entries
-
-            time_unit = self.time_unit.get()
-
-            if time_unit == "minutes":
-                self.max_duration = wind_duration_sec / 60
-
-            elif time_unit == "hours":
-                self.max_duration = wind_duration_sec / 60 / 60
-
-            self.duration_spinbox.configure(to=self.max_duration)
-
-        elif filepath == "":
-            pass
-
-        else:
-            self.wind_forecast.set("")
-            window = tk.Tk()
-            window.withdraw()
-            tk.messagebox.showwarning("Error", "Selected folder does not contain a valid wind forecast!")
             window.destroy()
 
     def time_unit_changed(self, *args):
@@ -780,19 +810,52 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", "User class must be instance of ControlClass!")
             window.destroy()
 
-    def zero_wind_toggled(self, *args):
-        if self.zero_wind.get():
-            self.wind_button.configure(state='disabled')
-            self.wind_entry.configure(state='disabled')
-            self.wind_forecast.set("")
-            self.forecast_type_menu.configure(state='disabled')
-            self.wind_forecast_type.set("")
-
+    def open_meteo_toggled(self, *args):
+        """Callback for the OpenMeteo toggle button. Ensures only OpenMeteo is selected."""
+        if self.open_meteo.get():
+            # Turn off weather file option
+            self.weather_file.set(False)
+            # Disable weather file widgets
+            self.weather.set("")
+            self.weather_button.configure(state='disabled')
+            self.weather_entry.configure(state='disabled')
+            # Enable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='normal')
         else:
-            self.wind_button.configure(state='normal')
-            self.wind_entry.configure(state='normal')
-            self.forecast_type_menu.configure(state='normal')
-            self.wind_forecast_type.set("Domain Average Wind")
+            self.weather_file.set(True)
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='disabled')
+
+            self.weather_button.configure(state='normal')
+            self.weather_entry.configure(state='normal')
+
+        self.validate_fields()
+
+    def weather_file_toggled(self, *args):
+        """Callback for the Weather File toggle button. Ensures only Weather File is selected."""
+        if self.weather_file.get():
+            # Turn off OpenMeteo option
+            self.open_meteo.set(False)
+            # Disable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='disabled')
+            # Enable weather file widgets
+            self.weather_button.configure(state='normal')
+            self.weather_entry.configure(state='normal')
+        else:
+            # Prevent both options from being off
+            self.open_meteo.set(True)
+            self.weather_file.set(False)
+            # Disable weather file widgets
+            self.weather.set("")
+            self.weather_button.configure(state='disabled')
+            self.weather_entry.configure(state='disabled')
+            # Enable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='normal')
+
+        self.validate_fields()
 
     def write_logs_toggled(self, *args):
         if self.no_log.get():
@@ -804,11 +867,22 @@ class SimFolderSelector(FileSelectBase):
             self.log_button.configure(state='normal')
             self.log_entry.configure(state='normal')
 
+        self.validate_fields()
+
+    def convert_to_24_hr_time(self, hour, ampm):
+        if ampm == "PM" and hour != 12:
+                return hour + 12
+
+        elif ampm == "AM" and hour == 12:
+                return 0
+
+        return hour
+
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
-        if self.map_folder.get() and  (self.no_log.get() or self.log_folder.get()):
+        if self.map_folder.get() and  (self.no_log.get() or self.log_folder.get()) and (self.open_meteo.get() or self.weather.get()):
             self.submit_button.config(state='normal')
         else:
             self.submit_button.config(state='disabled')
@@ -828,23 +902,30 @@ class SimFolderSelector(FileSelectBase):
         elif self.time_unit.get() == "hours":
             sim_time = sim_time_raw * 3600
 
-        self.result = {
-            "input": self.map_folder.get(),
-            "log": self.log_folder.get(),
-            "wind": self.wind_forecast.get(),
-            "wind_type": self.wind_forecast_type.get(),
-            "t_step": self.time_step.get(),
-            "cell_size": self.cell_size.get(),
-            "sim_time": sim_time,
-            "viz_on": self.viz_on.get(),
-            "num_runs": self.num_runs.get(),
-            "user_path": self.user_path.get(),
-            "class_name": self.user_class_name.get(),
-            "zero_wind": self.zero_wind.get(),
-            "write_log_files": not self.no_log.get()
-        }
+        if not (self.start_datetime < self.end_datetime < datetime.now()):
+            tk.messagebox.showwarning("Invalid Date Selection", 
+                                "Start date and time must be before the end date and time, and the end date must be in the past.")
 
-        self.submit_callback(self.result)
+        else:
+            self.result = {
+                "input": self.map_folder.get(),
+                "log": self.log_folder.get(),
+                "weather_type": "OpenMeteo" if self.open_meteo.get() else "Weather File",
+                "weather_file": self.weather.get(),
+                "mesh_resolution": self.mesh_resolution.get(),
+                "start_datetime": self.start_datetime,
+                "end_datetime": self.end_datetime,
+                "t_step": self.time_step.get(),
+                "cell_size": self.cell_size.get(),
+                "sim_time": sim_time,
+                "viz_on": self.viz_on.get(),
+                "num_runs": self.num_runs.get(),
+                "user_path": self.user_path.get(),
+                "class_name": self.user_class_name.get(),
+                "write_log_files": not self.no_log.get()
+            }
+
+            self.submit_callback(self.result)
 
 class VizFolderSelector(FileSelectBase):
     """Class used to prompt user for log files to be visualized
@@ -860,9 +941,9 @@ class VizFolderSelector(FileSelectBase):
 
         # Define variables
         self.viz_folder = tk.StringVar()
-        self.viz_folder.trace("w", self.viz_folder_changed)
+        self.viz_folder.trace_add("write", self.viz_folder_changed)
         self.run_folder = tk.StringVar()
-        self.run_folder.trace("w", self.run_folder_changed)
+        self.run_folder.trace_add("write", self.run_folder_changed)
         self.viz_freq = tk.IntVar()
         self.viz_freq.set(60)
         self.scale_km = tk.DoubleVar()
@@ -1098,8 +1179,8 @@ class WindForecastGen(FileSelectBase):
         self.submit_button = tk.Button(frame, text="Save to File", command=self.submit, state='disabled')
         self.submit_button.pack(pady=10)
 
-        self.time_step.trace('w', self.time_step_changed)
-        self.duration.trace('w', self.duration_changed)
+        self.time_step.trace_add('write', self.time_step_changed)
+        self.duration.trace_add('write', self.duration_changed)
 
     def validate_fields(self):
         """Function used to validate the inputs, primarily responsible for activating/disabling

@@ -193,7 +193,7 @@ def crop_map_data(file_params: str) -> float:
 
     while not crop_done:
 
-        fig, ax = plt.subplots()
+        fig = plt.figure(figsize=(15, 10))
 
         crop_tool = CropTiffTool(fig, fuel_path)
         plt.show()
@@ -937,12 +937,12 @@ def main():
     #     sys.exit(0)
 
 
-    file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
+    file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/denver_demo',
                    'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False,
-                   'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif',
-                   'Uniform Elev': False, 'Topography Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_Elev_220_CONUS/LC20_Elev_220.tif',
-                   'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_Asp_220_CONUS/LC20_Asp_220.tif',
-                   'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/fox_island/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
+                   'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif',
+                   'Uniform Elev': False, 'Topography Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_Elev_220_CONUS/LC20_Elev_220.tif',
+                   'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_Asp_220_CONUS/LC20_Asp_220.tif',
+                   'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
     
 
     north_dir = crop_map_data(file_params)
@@ -954,7 +954,7 @@ def main():
 
     params = generate_map_from_file(file_params, DATA_RESOLUTION, 1)
 
-
+    
     user_data = get_user_data(fig)
     save_to_file(params, user_data, north_dir)
 

@@ -19,7 +19,9 @@ from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.utilities.sim_input import SimInput, DataMap, WindDataMap
 from embrs.utilities.wind_forecast import gen_forecast
+from embrs.utilities.weather import gen_weather_from_open_meteo
 from embrs.base_classes.control_base import ControlClass
+import datetime
 
 
 def initialize(params: dict) -> Tuple[FireSim, bool, Visualizer]:
@@ -147,7 +149,6 @@ def sim_loop(params: dict):
     """Main function that gets user input from GUI and runs the specified simulation(s)
     """
 
-    # params = {'input': '/Users/rjdp3/Documents/embrs_release/src/rothermel_sample_map', 'log': '/Users/rjdp3/Documents/Research/rothermel_logs', 'wind': '/Users/rjdp3/Documents/embrs_release/src/sample_wind_forecasts/north_const.json', 't_step': 5, 'cell_size': 10, 'sim_time': 86400.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': False}
 
 
     num_runs = params['num_runs']
@@ -289,23 +290,22 @@ def construct_sim_input(params:dict) -> SimInput:
     sim_size = (width_m, height_m)
     sim_input.size = sim_size
     
-    # Generate wind forecast
-    # TODO: should mesh resolution be a user input?
-    wind_resolution = 30
-    forecast_seed_path = params['wind']
-    forecast_seed_type = params['wind_type']
+    # Handle weather data
+    weather_type = params['weather_type']
+
     elevation_path = data['topography']['tif_file_path']
     vegetation_path = "trees" #data['vegetation']['tif_file_path'] # TODO: Implement vegetation
+    
+    if weather_type == "OpenMeteo":
+        # Handle open meteo data # TODO: forecast for temp and humidity to be incldued as well
+        wind_forecast, wind_time_step = gen_weather_from_open_meteo(elevation_path, vegetation_path, sim_input.north_angle, params)
 
-    # TODO: make it an option to save wind forecast to a file somewhere
-    if not params['zero_wind']:
-        wind_forecast, wind_time_step = gen_forecast(elevation_path, vegetation_path, forecast_seed_path, forecast_seed_type, sim_input.north_angle, mesh_resolution=wind_resolution)
+    elif weather_type == "Weather File":
+        # Handle weather file
+        # TODO: write function in weather.py for this
+        pass
 
-    else:
-        wind_forecast = np.zeros((1, *topography_map.shape, 2))
-        wind_time_step = 1e10
-
-    wind = WindDataMap(wind_forecast, wind_resolution, wind_time_step)
+    wind = WindDataMap(wind_forecast, params["mesh_resolution"], wind_time_step)
 
     sim_input.wind = wind
 
@@ -315,7 +315,6 @@ def construct_sim_input(params:dict) -> SimInput:
 
     sim_shape = (num_rows, num_cols)
 
-
     sim_input.shape = sim_shape
     
     return sim_input
@@ -323,10 +322,7 @@ def construct_sim_input(params:dict) -> SimInput:
 
 def main():
 
-    # params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test',
-    #           'log': '/Users/rui/Documents/Research/Code/embrs_logs',
-    #           'wind': '/Users/rui/Documents/Research/Code/embrs/sample_wind_forecasts/burnout_wind_forecast.json', 'wind_type': 'Domain Average Wind',
-    #           't_step': 5, 'cell_size': 10, 'sim_time': 18000.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'zero_wind': True, 'write_log_files': False}
+    # params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test', 'log': '', 'weather_type': 'OpenMeteo', 'weather_file': '', 'mesh_resolution': 250, 'start_datetime': datetime.datetime(2025, 2, 3, 8, 0), 'end_datetime': datetime.datetime(2025, 2, 5, 11, 0), 't_step': 5, 'cell_size': 10, 'sim_time': 3600.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'write_log_files': False}
 
 
     # sim_loop(params)
