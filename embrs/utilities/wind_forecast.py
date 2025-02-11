@@ -42,6 +42,8 @@ import json
 import numpy as np
 from typing import Tuple
 
+from datetime import timedelta
+
 # Path to the WindNinja CLI executable # TODO: need a way to populate this for other users
 cli_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/WindNinja_cli"
 
@@ -49,7 +51,7 @@ cli_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/WindNinja_cli"
 temp_file_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/temp"
 
 def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed,
-                 forecast_seed_type: str, north_angle:float=0, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
+                 forecast_seed_type: str, timezone, north_angle:float=0, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
     """Generates a wind forecast using WindNinja.
 
     This function runs WindNinja with different initialization methods to generate 
@@ -91,11 +93,11 @@ def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed,
         with open(forecast_seed, 'r') as file:
             seed_data = json.load(file)
 
-        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, seed_data, forecast_seed_type, north_angle, mesh_resolution)
+        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, seed_data, timezone, north_angle, mesh_resolution)
 
     elif forecast_seed_type == "OpenMeteo":
         # Run WindNinja on OpenMeteo data
-        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, forecast_seed, forecast_seed_type, north_angle, mesh_resolution)
+        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, forecast_seed, timezone, north_angle, mesh_resolution)
 
     elif forecast_seed_type == "pointInitialization":
         # Run WindNinja with point initialization
@@ -107,7 +109,7 @@ def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed,
 
     return forecast, time_step
 
-def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_data: str, seed_type: str, north_angle: float, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
+def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_data: str, timezone, north_angle: float, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization to generate a wind forecast.
 
     This function parses a wind seed file, extracts wind speed and direction data, 
@@ -153,23 +155,15 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
     """
     # Extract data from forecast seed
     time_step = seed_data['time_step_min']
-    speed_list = []
-    direction_list = []
-    for entry in seed_data['data']:
-        speed_list.append(entry['speed_m_s'])
-
-        # Convert direction to WindNinja convention # TODO: should we just define wind according to convention?
-        if seed_type == "Domain Average Wind":
-            direction = (entry['direction'] + north_angle + 180) % 360
-        
-        else:
-            direction = entry['direction']
-
-        direction_list.append(direction)
-
-    # TODO: Implement wind height in wind forecast seed generation
     wind_height = seed_data['wind_height']
     wind_height_units = seed_data['wind_height_units']
+    input_speed_units = seed_data['wind_speed_units']
+    temperature_units = seed_data['temperature_units']
+    start_datetime = seed_data['start_datetime']
+
+    # Initialize datetime to track time steps
+    curr_datetime = start_datetime
+
 
     # Clear temp folder so that new files can be written there
     if os.path.exists(temp_file_path): 
@@ -185,9 +179,12 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
                 os.rmdir(file_path)
 
     # Write WindNinja outputs for each entry of the wind forecast seed
-    for i, (speed, direction) in enumerate(zip(speed_list, direction_list)):
+    for i, entry in enumerate(seed_data['data']):
         os.makedirs(os.path.join(temp_file_path, f"{i}"), exist_ok=True)
         output_path = os.path.join(temp_file_path, f"{i}")
+
+        # Update current date time to next time step
+        curr_datetime = start_datetime + timedelta(minutes= i * time_step)
 
         # Build the WindNinja CLI command
         command = [
@@ -198,17 +195,30 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
             "--vegetation", vegetation_path, # TODO: test with actual vegetation file
             "--mesh_resolution", str(mesh_resolution),
             "--units_mesh_resolution", "m",
+            "--time_zone", timezone,
+            "--uni_air_temp", str(entry['temperature']),
+            "--air_temp_units", temperature_units,
+            "--uni_cloud_cover", str(entry['cloud_cover']),
+            "--cloud_cover_units", "percent",
+            "--diurnal_winds", "false",
+            "--year", str(curr_datetime.year),
+            "--month", str(curr_datetime.month),
+            "--day", str(curr_datetime.day),
+            "--hour", str(curr_datetime.hour),
+            "--minute", str(curr_datetime.minute),
             "--num_threads", "4",
             "--output_wind_height", "6.1",
             "--units_output_wind_height", "m",
-            "--input_speed", str(speed),
-            "--input_speed_units", "mps",
-            "--input_direction", str(direction),
+            "--input_speed", str(entry['wind_speed']),
+            "--input_speed_units", input_speed_units,
+            "--input_direction", str(entry['wind_direction'] + north_angle),
             "--input_wind_height", str(wind_height),
             "--units_input_wind_height", wind_height_units,
             "--write_ascii_output", "true",
             "--write_goog_output", "true"
         ]
+
+        print(f"command: {command}")
 
         try:
             # Run the WindNinja CLI command
@@ -220,7 +230,7 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
             print(f"Error running WindNinja CLI: {e}")
     
     # Merge data into a forecast
-    forecast = create_forecast_array(len(speed_list))
+    forecast = create_forecast_array(len(seed_data['data']))
 
     return forecast, time_step
 
