@@ -95,6 +95,16 @@ class BaseFireSim:
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))
                 wind_row = int(np.floor(cell_y/self._wind_res))
+
+                # Account for WindNinja differences in mesh_resolution
+                if wind_row > self.wind_forecast.shape[1] - 1:
+                    wind_row = self.wind_forecast.shape[1] - 1
+                    rows_changed += 1
+
+                if wind_col > self.wind_forecast.shape[2] - 1:
+                    wind_col = self.wind_forecast.shape[2] - 1
+                    cols_changed += 1
+
                 wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
                 wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
                 new_cell._set_wind_forecast(wind_speed, wind_dir)
