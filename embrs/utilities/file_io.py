@@ -20,6 +20,8 @@ from tkcalendar import DateEntry
 from embrs.utilities.fire_util import FuelConstants
 from embrs.base_classes.control_base import ControlClass
 
+from embrs.utilities.data_classes import MapParams
+
 class FileSelectBase:
     """Base class for creating tkinter file and folder selector interfaces
 
@@ -216,7 +218,7 @@ class MapGenFileSelector(FileSelectBase):
         self.fuel_map_filename = tk.StringVar()
         self.uniform_elev = tk.BooleanVar()
         self.uniform_elev.trace_add("write", self.uniform_options_toggled)
-        self.topography_map_filename = tk.StringVar()
+        self.elev_map_filename = tk.StringVar()
         self.aspect_map_filename = tk.StringVar()
         self.slope_map_filename = tk.StringVar()
         self.output_map_folder = tk.StringVar()
@@ -252,7 +254,7 @@ class MapGenFileSelector(FileSelectBase):
 
         # Create frame for topography map selection
         _, _, self.elev_button, self.elev_frame = self.create_file_selector(frame,
-                                                  "Elevation Map: ", self.topography_map_filename,
+                                                  "Elevation Map: ", self.elev_map_filename,
                     [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
 
         # Create field for uniform elev option
@@ -353,7 +355,7 @@ class MapGenFileSelector(FileSelectBase):
         """
         # Check that all fields are filled before enabling submit button
         if all([(self.fuel_map_filename.get() or self.uniform_fuel.get()),
-                ((self.topography_map_filename.get() and self.aspect_map_filename.get() and self.slope_map_filename.get()) or self.uniform_elev.get()),
+                ((self.elev_map_filename.get() and self.aspect_map_filename.get() and self.slope_map_filename.get()) or self.uniform_elev.get()),
                  self.output_map_folder.get()]):
 
             self.submit_button.config(state='normal')
@@ -367,7 +369,7 @@ class MapGenFileSelector(FileSelectBase):
         """
         if self.import_roads.get():
             # check that metadata.xml exists
-            elev_path = os.path.dirname(self.topography_map_filename.get())
+            elev_path = os.path.dirname(self.elev_map_filename.get())
             fuel_path = os.path.dirname(self.fuel_map_filename.get())
             asp_path  = os.path.dirname(self.aspect_map_filename.get())
             slope_path = os.path.dirname(self.slope_map_filename.get())
@@ -390,35 +392,36 @@ class MapGenFileSelector(FileSelectBase):
         else:
             metadata_path = ""
 
-        self.result = {}
+        self.result = MapParams()
 
-        self.result["Output Map Folder"] = self.output_map_folder.get()
-        self.result["Metadata Path"] = metadata_path
-        self.result["Import Roads"] = self.import_roads.get()
+        self.result.output_folder = self.output_map_folder.get()
+        self.result.metadata_path = metadata_path
+        self.result.import_roads = self.import_roads.get()
 
         if self.uniform_fuel.get():
-            self.result["Uniform Fuel"] = True
-            self.result["Fuel Type"] = self.fuel_selection_val
-            self.result["Fuel Map Path"] = ""
-
+            self.result.uniform_fuel = True
+            self.result.fuel_type = self.fuel_selection_val
+            self.result.fuel_data.tiff_filepath = ""
+        
         else:
-            self.result["Uniform Fuel"] = False
-            self.result["Fuel Map Path"] = self.fuel_map_filename.get()
+            self.result.uniform_fuel = False
+            self.result.fuel_data.tiff_filepath = self.fuel_map_filename.get()
 
         if self.uniform_elev.get():
-            self.result["Uniform Elev"] = True
-            self.result["Topography Map Path"] = ""
-            self.result["Aspect Map Path"] = ""
-            self.result["Slope Map Path"] = ""
+            self.result.uniform_elev = True
+            self.result.elev_data.tiff_filepath = ""
+            self.result.asp_data.tiff_filepath = ""
+            self.result.slp_data.tiff_filepath = ""
+        
         else:
-            self.result["Uniform Elev"] = False
-            self.result["Topography Map Path"] = self.topography_map_filename.get()
-            self.result["Aspect Map Path"] = self.aspect_map_filename.get()
-            self.result["Slope Map Path"] = self.slope_map_filename.get()
+            self.result.uniform_elev = False
+            self.result.elev_data.tiff_filepath = self.elev_map_filename.get()
+            self.result.asp_data.tiff_filepath = self.aspect_map_filename.get()
+            self.result.slp_data.tiff_filepath = self.slope_map_filename.get()
 
         if self.uniform_elev.get() and self.uniform_fuel.get():
-            self.result["width m"] = self.sim_width.get()
-            self.result["height m"] = self.sim_height.get()
+            self.result.width_m = self.sim_width.get()
+            self.result.height_m = self.sim_width.get()
 
         self.root.withdraw()
         self.root.quit()
@@ -493,6 +496,9 @@ class HistoricFireSelector(MapGenFileSelector):
 
         # Close the window after successful submission
         self.root.quit() 
+
+
+
 
 class SimFolderSelector(FileSelectBase):
     # TODO: need to deal with duration based on the weather file currently input
