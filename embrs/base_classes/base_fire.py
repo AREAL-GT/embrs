@@ -35,7 +35,7 @@ class BaseFireSim:
         self._curr_time_s = 0
         self._iters = 0
         
-        # Variable to store logger object # TODO: re-write logger and make it optional
+        # Variable to store logger object
         self.logger = None
 
         # Containers for cells
@@ -204,7 +204,7 @@ class BaseFireSim:
         self._wind_res = sim_input.wind.res
 
         # Get wind data
-        self.wind_forecast = sim_input.wind.map  # TODO do we need to flipud this?
+        self.wind_forecast = sim_input.wind.map
 
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
@@ -247,9 +247,6 @@ class BaseFireSim:
         Roads are defined as a list of coordinate points with an associated type. 
         If a road cell is currently burning (`CellStates.FIRE`), it is reset to 
         `CellStates.FUEL`. The fuel content is updated based on road type.
-
-        TODO:
-            - This modelling will change
 
         Side Effects:
             - Modifies the state of grid cells corresponding to roads.

@@ -18,7 +18,7 @@ from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.utilities.sim_input import SimInput, DataMap, WindDataMap
-from embrs.utilities.wind_forecast import gen_forecast
+from embrs.utilities.wind_forecast import run_windninja
 from embrs.utilities.weather import gen_weather_from_open_meteo
 from embrs.base_classes.control_base import ControlClass
 import datetime
@@ -148,9 +148,6 @@ def handle_interrupt(logger, fire):
 def sim_loop(params: dict):
     """Main function that gets user input from GUI and runs the specified simulation(s)
     """
-
-
-
     num_runs = params['num_runs']
     duration = params['sim_time']
     time_step = params['t_step']
@@ -265,6 +262,14 @@ def construct_sim_input(params:dict) -> SimInput:
 
     sim_input.north_angle = data['north_angle_deg']
     
+    # Get the lat and lon of the center point of the region, store in params
+    center_lat = data['geo_info']['center_lat']
+    center_lon = data['geo_info']['center_lon']    
+    params["center_coords"] = (center_lat, center_lon)
+
+    # Get the timezone of the region, store in params
+    params["timezone"] = data['geo_info']['timezone']
+    
     ignition_dicts = data['initial_ignition']
     initial_ignition = [shape(d) for d in ignition_dicts]
     
@@ -283,7 +288,7 @@ def construct_sim_input(params:dict) -> SimInput:
 
     sim_input.roads = roads
 
-        # Save resolution, width, and height into variables
+    # Save resolution, width, and height into variables
     width_m = data['topography']['width_m']
     height_m = data['topography']['height_m']
 
@@ -297,12 +302,19 @@ def construct_sim_input(params:dict) -> SimInput:
     vegetation_path = "trees" #data['vegetation']['tif_file_path'] # TODO: Implement vegetation
     
     if weather_type == "OpenMeteo":
-        # Handle open meteo data # TODO: forecast for temp and humidity to be incldued as well
+        # Handle open meteo data
         wind_forecast, wind_time_step = gen_weather_from_open_meteo(elevation_path, vegetation_path, sim_input.north_angle, params)
-
-    elif weather_type == "Weather File":
+        
+    elif weather_type == "WeatherFile":
         # Handle weather file
-        # TODO: write function in weather.py for this
+        weather_file = params['weather_file']
+
+        with open(weather_file, 'r') as file:
+            seed_data = json.load(file)
+
+        # TODO: this needs to call a function that handles humidity, temperature etc.
+
+        wind_forecast, wind_time_step = run_windninja(elevation_path, vegetation_path, seed_data, params["timezone"], sim_input.north_angle, params["mesh_resolution"])
         pass
 
     wind = WindDataMap(wind_forecast, params["mesh_resolution"], wind_time_step)
@@ -322,13 +334,13 @@ def construct_sim_input(params:dict) -> SimInput:
 
 def main():
 
-    # params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test', 'log': '', 'weather_type': 'OpenMeteo', 'weather_file': '', 'mesh_resolution': 250, 'start_datetime': datetime.datetime(2025, 2, 3, 8, 0), 'end_datetime': datetime.datetime(2025, 2, 5, 11, 0), 't_step': 5, 'cell_size': 10, 'sim_time': 3600.0, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'write_log_files': False}
+    params = {'input': '/Users/rui/Documents/Research/Code/embrs_maps/fox_crop_test', 'log': '', 'weather_type': 'WeatherFile', 'weather_file': '/Users/rui/Documents/Research/Code/embrs_weather_files/example_weather.json', 'mesh_resolution': 30, 'start_datetime': datetime.datetime(2025, 2, 5, 4, 0), 'end_datetime': datetime.datetime(2025, 2, 5, 23, 0), 't_step': 5, 'cell_size': 10, 'sim_time': 3600.0 * 19, 'viz_on': True, 'num_runs': 1, 'user_path': '', 'class_name': '', 'write_log_files': False}
 
 
-    # sim_loop(params)
+    sim_loop(params)
 
-    folder_selector = SimFolderSelector(sim_loop)
-    folder_selector.run()
+    # folder_selector = SimFolderSelector(sim_loop)
+    # folder_selector.run()
 
 if __name__ == "__main__":
     main()

@@ -10,38 +10,18 @@ import pytz
 
 from datetime import datetime, timedelta
 
-from embrs.utilities.wind_forecast import gen_forecast
+from embrs.utilities.wind_forecast import run_windninja
 
 def gen_weather_from_open_meteo(elevation_path, vegetation_path, north_angle, params):
-    with rasterio.open(elevation_path, "r") as src:
-        bounds = src.bounds  # (left, bottom, right, top)
-        
-        # Manually set the correct EPSG code for NAD83 / Conus Albers
-        epsg_code = "EPSG:5070"
-
-    # Compute midpoint in projected coordinates
-    mid_x = (bounds.left + bounds.right) / 2
-    mid_y = (bounds.bottom + bounds.top) / 2
-
-    # Define the transformation from raster CRS (NAD83 / Conus Albers) to WGS84 (EPSG:4326)
-    transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
-
-    # Transform the midpoint from projected coordinates to lat/lon
-    lon, lat = transformer.transform(mid_x, mid_y)
-
-    # Get the time zone at the location to sample
-    tf = TimezoneFinder()
-    timezone = tf.timezone_at(lng=lon, lat=lat)
-
     # Get the weather data
-    seed = retrieve_weather_data(params, lat, lon, timezone)
+    seed = retrieve_weather_data(params)
     mesh_resolution = params["mesh_resolution"]
+    timezone = params["timezone"]
 
     # Returns forecast and time step 
-    return gen_forecast(elevation_path, vegetation_path, seed, "OpenMeteo", timezone, north_angle, mesh_resolution)
+    return run_windninja(elevation_path, vegetation_path, seed, timezone, north_angle, mesh_resolution)
 
-
-def retrieve_weather_data(params, lat, lon, timezone):
+def retrieve_weather_data(params):
     # Use center of the sim region as weather data location
     # TODO: Test to see if it makes a difference to sample across the domain and take average of outputs    
     
@@ -49,7 +29,7 @@ def retrieve_weather_data(params, lat, lon, timezone):
     cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
     retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
     openmeteo = openmeteo_requests.Client(session = retry_session)
-    local_tz = pytz.timezone(timezone)
+    local_tz = pytz.timezone(params["timezone"])
 
     # Buffer times and format for OpenMeteo
     start_datetime = params["start_datetime"]
@@ -61,6 +41,8 @@ def retrieve_weather_data(params, lat, lon, timezone):
     end_datetime = local_tz.localize(end_datetime)
     buffered_end = start_datetime + timedelta(days=1)
     end_datetime_utc = buffered_end.astimezone(pytz.utc)
+
+    lat, lon = params["center_coords"]
 
     url = "https://archive-api.open-meteo.com/v1/archive"
     api_input = {

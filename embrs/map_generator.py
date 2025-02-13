@@ -23,6 +23,8 @@ from shapely.geometry import Polygon, LineString
 from shapely.geometry import mapping
 from scipy import ndimage, stats
 import numpy as np
+from pyproj import Transformer
+from timezonefinder import TimezoneFinder
 
 from embrs.utilities.file_io import MapGenFileSelector
 from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
@@ -312,14 +314,34 @@ def save_to_file(params: dict, user_data: dict, north_dir: float):
     data['north_angle_deg'] = np.rad2deg(north_dir)
 
     if bounds is None:
-        data['geo_bounds'] = None
+        data['geo_info'] = None
 
     else:
-        data['geo_bounds'] = {
-            'south': bounds[0],
-            'north': bounds[1],
-            'west': bounds[2],
-            'east': bounds[3]
+        # Manually set the correct EPSG code for NAD83 / Conus Albers
+        epsg_code = "EPSG:5070"
+
+        # Compute midpoint in projected coordinates
+        mid_x = (bounds.left + bounds.right) / 2
+        mid_y = (bounds.bottom + bounds.top) / 2
+
+        # Define the transformation from raster CRS (NAD83 / Conus Albers) to WGS84 (EPSG:4326)
+        transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
+
+        # Transform the midpoint from projected coordinates to lat/lon
+        lon, lat = transformer.transform(mid_x, mid_y)
+
+        # Get the time zone at the location to sample
+        tf = TimezoneFinder()
+        timezone = tf.timezone_at(lng=lon, lat=lat)
+
+        data['geo_info'] = {
+            'south_lim': bounds[0],
+            'north_lim': bounds[1],
+            'west_lim': bounds[2],
+            'east_lim': bounds[3],
+            'center_lat': lat,
+            'center_lon': lon,
+            'timezone': timezone
         }
 
     data['fuel'] = {'file': fuel_path,
@@ -953,8 +975,6 @@ def main():
                     labelbottom = False)
 
     params = generate_map_from_file(file_params, DATA_RESOLUTION, 1)
-
-    
     user_data = get_user_data(fig)
     save_to_file(params, user_data, north_dir)
 

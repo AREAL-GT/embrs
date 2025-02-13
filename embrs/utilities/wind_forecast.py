@@ -9,7 +9,6 @@ Features:
         - `gen_forecast()`: Runs WindNinja with domain-average, point-based, or weather model initialization.
         - `run_domain_avg_windninja()`: Executes WindNinja using domain-average wind initialization.
         - `run_point_windninja()`: Placeholder for point-based wind initialization.
-        - `run_wxmodel_windninja()`: Placeholder for weather model-based wind initialization.
 
     - **Wind Data Processing**:
         - `rename_windninja_outputs()`: Renames WindNinja-generated files to a standardized format.
@@ -44,7 +43,8 @@ from typing import Tuple
 from multiprocessing import cpu_count, Pool
 from tqdm import tqdm
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta, datetime
+import pytz
 
 # Path to the WindNinja CLI executable # TODO: need a way to populate this for other users
 cli_path = "/Users/rui/Documents/Research/Code/wind/build/src/cli/WindNinja_cli"
@@ -69,65 +69,6 @@ class WindNinjaTask:
     wind_height_units: str
     input_speed_units: str
     temperature_units: str
-
-def gen_forecast(elevation_path: str, vegetation_path: str, forecast_seed,
-                 forecast_seed_type: str, timezone, north_angle:float=0, mesh_resolution:float=250) -> Tuple[np.ndarray, float]:
-    """Generates a wind forecast using WindNinja.
-
-    This function runs WindNinja with different initialization methods to generate 
-    wind forecasts over a given terrain. The forecast is based on elevation, vegetation, 
-    and an external wind forecast seed file.
-
-    Args:
-        elevation_path (str): Path to the elevation raster file (e.g., a DEM).
-        vegetation_path (str): Path to the vegetation type raster file.
-        forecast_seed_path (str): Path to the wind seed file (e.g., a weather model output or point data).
-        forecast_seed_type (str): Type of wind initialization method. Options:
-            - `"Domain Average Wind"`: Uses a single wind value averaged across the domain.
-            - `"pointInitialization"`: Uses wind data from a specific point(s) location.
-            - `"wxModelInitialization"`: Uses gridded weather model output to initialize the wind field.
-        mesh_resolution (float, optional): Grid resolution for WindNinja in meters. Defaults to 250.
-
-    Returns:
-        Tuple[np.ndarray, float]: A tuple containing:
-            - `forecast` (np.ndarray): The generated wind forecast grid.
-            - `time_step` (float): The forecast time step in seconds.
-
-    Notes:
-        - The forecast is generated based on WindNinja's simulation outputs.
-        - Different initialization methods influence wind patterns significantly.
-        - Currently, the `pointInitialization` and `wxModelInitialization` methods 
-          call placeholder functions (`run_point_windninja()` and `run_wxmodel_windninja()`), 
-          which need implementation.
-
-    TODO:
-        - Implement `run_point_windninja()` for point-based wind initialization.
-        - Implement `run_wxmodel_windninja()` for weather model initialization.
-    """
-    forecast = None
-    time_step = None
-
-    if forecast_seed_type == "Domain Average Wind":
-        # TODO: Add check to make sure this option is only input with a file path
-        # Run WindNinja with domain average initialization
-        with open(forecast_seed, 'r') as file:
-            seed_data = json.load(file)
-
-        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, seed_data, timezone, north_angle, mesh_resolution)
-
-    elif forecast_seed_type == "OpenMeteo":
-        # Run WindNinja on OpenMeteo data
-        forecast, time_step = run_domain_avg_windninja(elevation_path, vegetation_path, forecast_seed, timezone, north_angle, mesh_resolution)
-
-    elif forecast_seed_type == "pointInitialization":
-        # Run WindNinja with point initialization
-        run_point_windninja()
-
-    elif forecast_seed_type == "wxModelInitialization":
-        # Run WindNinja with weather model initialization
-        run_wxmodel_windninja(elevation_path, vegetation_path, forecast_seed, mesh_resolution)
-
-    return forecast, time_step
 
 def run_windninja_single(task: WindNinjaTask):
     """Runs WindNinja for a single time step in parallel."""
@@ -178,7 +119,7 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_data: dict, timezone, north_angle: float, mesh_resolution: float = 250) -> Tuple[np.ndarray, float]:
+def run_windninja(elevation_path: str, vegetation_path: str, seed_data: dict, timezone, north_angle: float, mesh_resolution: float = 250) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization in parallel."""
     
     # Extract data from forecast seed
@@ -188,6 +129,14 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
     input_speed_units = seed_data['wind_speed_units']
     temperature_units = seed_data['temperature_units']
     start_datetime = seed_data['start_datetime']
+
+    if not type(start_datetime) == datetime:
+        # Convert to naive datetime
+        dt_local = datetime.fromisoformat(start_datetime)
+
+        # Localize the datetime with the correct timezone
+        tz = pytz.timezone(seed_data["timezone"])
+        start_datetime = tz.localize(dt_local)
 
     # Clear temp folder
     if os.path.exists(temp_file_path):
@@ -238,45 +187,6 @@ def run_domain_avg_windninja(elevation_path: str, vegetation_path: str, seed_dat
 
 def run_point_windninja():
     raise NotImplementedError("Point initialization not yet implemented")
-
-def run_wxmodel_windninja(elevation_path: str, vegetation_path, seed_path, mesh_resolution):
-    # Parse the forecast seed
-    with open(seed_path, 'r') as file:
-        seed_data = json.load(file)
-
-    wx_model_type = seed_data['wx_model_type']
-    output_path = temp_file_path
-    forecast_time = seed_data['forecast_time']
-    forecast_duration = seed_data['forecast_duration']
-    time_zone = seed_data['time_zone']
-
-    command = [
-        cli_path,
-        "--initialization_method", "wxModelInitialization",
-        "--elevation_file", elevation_path,
-        "--output_path", output_path,
-        "--vegetation", vegetation_path, # TODO: need to implement actual files for this
-        "--wx_model_type", wx_model_type,
-        "--time_zone", time_zone, # TODO: should time zone just use the time zone based on the elevation file location?
-        "--forecast_time", forecast_time,  # Format: "YYYYMMDDTHHMMSS"
-        "--forecast_duration", str(forecast_duration),
-        "--mesh_resolution", str(mesh_resolution),
-        "--units_mesh_resolution", "m",
-        "--num_threads", "4",
-        "--diurnal_winds", "true",
-        "--output_wind_height", "6.1",
-        "--units_output_wind_height", "m",
-        "--write_ascii_output", "true",
-        "--write_goog_output", "false"
-    ]
-
-    try:
-        # Run the WindNinja CLI command
-        subprocess.run(command, check=True)
-
-    except subprocess.CalledProcessError as e:
-        print(f"Error running WindNinja CLI: {e}")
-
 
 def rename_windninja_outputs(output_path: str, time_step_index: int):
     """Renames WindNinja output files in a specified directory to a standardized format.
