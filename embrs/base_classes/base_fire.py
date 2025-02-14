@@ -14,13 +14,14 @@ import numpy as np
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import HexGridMath as hex
-from embrs.utilities.sim_input import SimInput
+from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 from embrs.utilities.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
+from embrs.utilities.weather import generate_weather
 
 class BaseFireSim:
-    def __init__(self, sim_input: SimInput):
+    def __init__(self, sim_params: SimParams):
         """Base fire class, takes in a sim input object to initialize a fire simulation object.
 
         Args:
@@ -28,8 +29,11 @@ class BaseFireSim:
                                   see SimInput documentation for more info
         """
 
+        # Constant parameters
+        self.display_frequency = 300
+
         # Store sim input values in class variables
-        self._parse_sim_input(sim_input)
+        self._parse_sim_params(sim_params)
         
         # Variables to keep track of sim progress
         self._curr_time_s = 0
@@ -69,11 +73,11 @@ class BaseFireSim:
                 new_cell = Cell(id, i, j, self._cell_size)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
-                # Set cell elevation from topography map
-                top_col = int(np.floor(cell_x/self.topography_res))
-                top_row = int(np.floor(cell_y/self.topography_res))
-                new_cell._set_elev(self._topography_map[top_row, top_col])
-                self.coarse_topography[j, i] = new_cell.z
+                # Set cell elevation from elevation map
+                top_col = int(np.floor(cell_x/self.elevation_res))
+                top_row = int(np.floor(cell_y/self.elevation_res))
+                new_cell._set_elev(self._elevation_map[top_row, top_col])
+                self.coarse_elevation[j, i] = new_cell.z
 
                 # Set cell fuel type from fuel map
                 fuel_col = int(np.floor(cell_x/self.fuel_res))
@@ -99,11 +103,9 @@ class BaseFireSim:
                 # Account for WindNinja differences in mesh_resolution
                 if wind_row > self.wind_forecast.shape[1] - 1:
                     wind_row = self.wind_forecast.shape[1] - 1
-                    rows_changed += 1
 
                 if wind_col > self.wind_forecast.shape[2] - 1:
                     wind_col = self.wind_forecast.shape[2] - 1
-                    cols_changed += 1
 
                 wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
                 wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
@@ -132,7 +134,7 @@ class BaseFireSim:
         
         print("Initialization complete...")
 
-    def _parse_sim_input(self, sim_input: SimInput):
+    def _parse_sim_params(self, sim_params: SimParams):
         """Parses and initializes simulation input parameters.
 
         This method extracts relevant data from the provided `SimInput` object
@@ -152,16 +154,15 @@ class BaseFireSim:
             _sim_duration (float): Total duration of the simulation in seconds.
             _time_step (float): Time step interval for simulation updates.
             _roads (array-like): Representation of roads in the simulation.
-            burnt_cells_input (array-like): Initial map of already burnt cells.
-            coarse_topography (ndarray): Placeholder for processed topography data.
+            coarse_elevation (ndarray): Placeholder for processed elevation data.
             _fire_breaks (array-like): Representation of fire breaks.
-            _topography_map (ndarray): Elevation map flipped vertically for processing.
+            _elevation_map (ndarray): Elevation map flipped vertically for processing.
             base_slope (ndarray): Base slope map without flipping.
             _slope_map (ndarray): Slope map flipped vertically.
             _aspect_map (ndarray): Aspect map flipped and adjusted to match compass angles.
             _fuel_map (ndarray): Fuel type distribution map flipped vertically.
             _initial_ignition (array-like): Initial ignition points in the simulation.
-            _topography_res (float): Resolution of the elevation data.
+            _elevation_res (float): Resolution of the elevation data.
             _aspect_res (float): Resolution of the aspect data.
             _slope_res (float): Resolution of the slope data.
             _fuel_res (float): Resolution of the fuel data.
@@ -170,42 +171,49 @@ class BaseFireSim:
             wind_forecast_t_step (float): Wind data time step in seconds.
         """
 
-        self.display_frequency = sim_input.display_freq_s
+        # Load general sim params
+        self._cell_size = sim_params.cell_size
+        self._sim_duration = sim_params.duration_s
+        self._time_step = sim_params.t_step_s
 
-        self._size = sim_input.size
-        self._shape = sim_input.shape
+        # Load map params
+        map_params = sim_params.map_params
+        self._size = map_params.size()
+        self._shape = map_params.shape(self._cell_size)
+        self._roads = map_params.roads
+        self._north_dir_deg = map_params.north_angle_deg
+        self.coarse_elevation = np.empty(self._shape)
 
-        self._cell_size = sim_input.cell_size
+        # Load DataProductParams for each data product
+        elev_data = map_params.elev_data
+        slp_data = map_params.slp_data
+        asp_data = map_params.asp_data
+        fuel_data = map_params.fuel_data
 
-
-        self._sim_duration = sim_input.duration_s
-        self._time_step = sim_input.time_step
-
-        self._roads = sim_input.roads
-
-        # Parse input data
-        self.burnt_cells_input = sim_input.burnt_cells 
-        self.coarse_topography = np.empty(self._shape)
-        self._fire_breaks = sim_input.fire_breaks
-        self._topography_map = np.flipud(sim_input.elevation.map)
-        self.base_slope = sim_input.slope.map
-        self._slope_map = np.flipud(sim_input.slope.map)
-        self._aspect_map = np.flipud(sim_input.aspect.map)
+        # Get map for each data product
+        self._elevation_map = np.flipud(elev_data.map)
+        self._slope_map = np.flipud(slp_data.map)
+        self._aspect_map = np.flipud(asp_data.map)
         self._aspect_map = (180 + self._aspect_map) % 360 
-        self._fuel_map = np.flipud(sim_input.fuel.map)
-        self._initial_ignition = sim_input.initial_ignition
-        self._north_dir_deg = sim_input.north_angle
+        self._fuel_map = np.flipud(fuel_data.map)
 
-        # Get data map resolutions
-        self._topography_res = sim_input.elevation.res
-        self._aspect_res = sim_input.aspect.res
-        self._slope_res = sim_input.slope.res
-        self._fuel_res = sim_input.fuel.res
-        self._wind_res = sim_input.wind.res
+        # Get resolution for each data product map
+        self._elevation_res = elev_data.resolution
+        self._aspect_res = asp_data.resolution
+        self._slope_res = slp_data.resolution
+        self._fuel_res = fuel_data.resolution
+
+        # Load scenario specific data
+        scenario = map_params.scenario_data
+        self._fire_breaks = zip(scenario.fire_breaks, scenario.fuel_vals)
+        self._initial_ignition = scenario.initial_ign
+
+        # TODO: this should give us more weather data
+        forecast, weather_t_step = generate_weather(sim_params)
 
         # Get wind data
-        self.wind_forecast = sim_input.wind.map
-
+        self._wind_res = sim_params.weather_input.mesh_resolution
+        self.wind_forecast = forecast
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
         # Iterate over each layer (time step or vertical level, depending on the dataset structure)
@@ -213,7 +221,7 @@ class BaseFireSim:
             self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
         
         self.wind_forecast = self.flipud_forecast
-        self.wind_forecast_t_step = sim_input.wind.time_step * 60 # convert to seconds
+        self.wind_forecast_t_step = weather_t_step * 60 # convert to seconds
 
     def _add_cell_neighbors(self):
         """Populate the "neighbors" property of each cell in the simulation with each cell's
@@ -291,9 +299,8 @@ class BaseFireSim:
             - Modifies the fuel content of grid cells along firebreaks.
             - Updates the `_fire_break_cells` list with affected cells.
         """
-        for fire_break in self.fire_breaks:
-            line = fire_break['geometry']
-            fuel_val = fire_break['fuel_value']
+
+        for line, fuel_val in self.fire_breaks:
             length = line.length
 
             step_size = 0.5
@@ -928,10 +935,10 @@ class BaseFireSim:
         return self._finished
 
     @property
-    def topography_map(self) -> np.ndarray:
+    def elevation_map(self) -> np.ndarray:
         """2D array that represents the elevation in meters at each point in space
         """
-        return self._topography_map
+        return self._elevation_map
 
     @property
     def fuel_map(self) -> np.ndarray:
@@ -942,10 +949,10 @@ class BaseFireSim:
         return self._fuel_map
 
     @property
-    def topography_res(self) -> float:
-        """Resolution of the topography map in meters
+    def elevation_res(self) -> float:
+        """Resolution of the elevation map in meters
         """
-        return self._topography_res
+        return self._elevation_res
 
     @property
     def fuel_res(self) -> float:

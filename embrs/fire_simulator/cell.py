@@ -170,10 +170,6 @@ class Cell:
             - The acceleration factor (`self.a_a`) and elapsed time (`self.t_elapsed_min`) 
             influence how quickly the fire reaches steady-state ROS.
             - A small epsilon (`1e-7`) is added to prevent division by zero.
-
-        TODO:
-            - Validate correctness of the fire acceleration implementation.
-
         Side Effects:
             - Updates `self.r_t` (current rate of spread).
             - Updates `self.I_t` (current fireline intensity).

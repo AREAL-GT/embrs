@@ -110,7 +110,7 @@ class VisualizationTool:
         X, Y = np.meshgrid(x, y)
 
         cont = h_ax.contour(X*self.sim['cell_size']*np.sqrt(3),Y*self.sim['cell_size']*1.5,
-                            self.sim['coarse_topography'], colors='k', zorder=2)
+                            self.sim['coarse_elevation'], colors='k', zorder=2)
         h_ax.clabel(cont, inline=True, fontsize=10, zorder=3)
 
         self.loader_window.increment_progress()

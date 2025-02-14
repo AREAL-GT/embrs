@@ -12,6 +12,7 @@ import os
 import msgpack
 
 from embrs.fire_simulator.fire import FireSim
+from embrs.utilities.data_classes import SimParams
 
 class Logger:
     """Logger class used to generate log files from sim data
@@ -61,8 +62,8 @@ class Logger:
             'cell_dict': fire_obj.cell_dict,
             'cell_grid': fire_obj.cell_grid,
             'fire_breaks': fire_obj.fire_breaks,
-            'topography_map': fire_obj.topography_map,
-            'coarse_topography': fire_obj.coarse_topography,
+            'elevation_map': fire_obj.elevation_map,
+            'coarse_elevation': fire_obj.coarse_elevation,
             'fuel_map': fire_obj.fuel_map,
             'wind_forecast': fire_obj.wind_forecast,
             'wind_forecast_time_step': fire_obj.wind_forecast_t_step
@@ -133,7 +134,7 @@ class Logger:
             self.log_message(f"Exception {e} occurred while attempting to save data.")
 
     # ~~~ STATUS LOGGING ~~~ #
-    def store_metadata(self, params: dict, fire: FireSim):
+    def store_metadata(self, sim_params: SimParams, fire: FireSim):
         """Store metadata for the status log describing the parameters used to run a simulation.
         
         Resulting metadata will be used in all status logs generated with a given simulation

@@ -18,7 +18,7 @@ import numpy as np
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.utilities.fire_util import CellStates, FuelConstants, UtilFuncs, HexGridMath
-from embrs.utilities.sim_input import SimInput
+from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.rothermel import *
@@ -62,7 +62,7 @@ class FireSim(BaseFireSim):
         - The simulation tracks both fire progression and suppression efforts.
 
     """
-    def __init__(self, sim_input: SimInput):
+    def __init__(self, sim_params: SimParams):
         """Initializes the wildfire simulation with input parameters and sets up core tracking structures.
 
         This constructor initializes key attributes related to fire progression, cell state tracking, 
@@ -131,7 +131,7 @@ class FireSim(BaseFireSim):
         self._curr_wind_idx = 0
         self._last_wind_update = 0
 
-        super().__init__(sim_input)
+        super().__init__(sim_params)
         
         self._init_iteration()
 

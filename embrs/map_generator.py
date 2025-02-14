@@ -30,7 +30,7 @@ from embrs.utilities.file_io import MapGenFileSelector
 from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import FuelConstants as fc
-from embrs.utilities.data_classes import MapParams, DataProductParams, MapDrawerData
+from embrs.utilities.data_classes import MapParams, DataProductParams, MapDrawerData, GeoInfo
 from typing import cast
 
 DATA_RESOLUTION = 30 # meters
@@ -102,7 +102,10 @@ def generate_map_from_file(map_params: MapParams, data_res: float, min_cell_size
         roads = None
 
     map_params.roads = roads
-    map_params.bounds = bounds # TODO: this may not be the best way to get bounds
+    map_params.geo_info = GeoInfo()
+    map_params.geo_info.bounds = bounds
+    map_params.geo_info.calc_center_coords()
+    map_params.geo_info.calc_time_zone()
 
 def find_warping_angle(array: np.ndarray) -> float:
     """_summary_
@@ -170,7 +173,7 @@ def crop_map_data(map_params: MapParams) -> float:
 
     angle = find_warping_angle(crop_tool.data)
 
-    return angle
+    map_params.north_angle_deg = np.rad2deg(angle)
 
 
 def crop_data_products(map_params: MapParams, bounds: list) -> bool:
@@ -185,7 +188,7 @@ def crop_data_products(map_params: MapParams, bounds: list) -> bool:
     """
 
     # TODO: How should we handle uniform fuel and elevation case?
-    output_dir = map_params.output_folder
+    output_dir = map_params.folder
 
     data_attrs = ['fuel_data', 'elev_data', 'asp_data', 'slp_data']
     cropped_filenames = ['fuel.tif', 'elevation.tif', 'aspect.tif', 'slope.tif']
@@ -251,7 +254,7 @@ def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
 
     return 0
     
-def save_to_file(map_params: MapParams, user_data: MapDrawerData, north_dir: float):
+def save_to_file(map_params: MapParams, user_data: MapDrawerData):
     """_summary_
 
     Args:
@@ -261,13 +264,17 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData, north_dir: flo
     """
 
     # Extract relevant data from params
-    save_path = map_params.output_folder
-    bounds = map_params.bounds
+    save_path = map_params.folder
     fuel_data = map_params.fuel_data
     elev_data = map_params.elev_data    
     slope_data = map_params.slp_data
     aspect_data = map_params.asp_data
     roads = map_params.roads
+
+    if map_params.geo_info is not None:
+        bounds = map_params.geo_info.bounds
+    else:
+        bounds = None
 
     data = {}
 
@@ -276,37 +283,21 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData, north_dir: flo
     np.save(fuel_path, fuel_data.map)
     fuel_data.np_filepath = fuel_path
 
-    data['north_angle_deg'] = np.rad2deg(north_dir)
+    data['north_angle_deg'] = map_params.north_angle_deg
 
     if bounds is None:
         data['geo_info'] = None
+        map_params.geo_info = None
 
     else:
-        # Manually set the correct EPSG code for NAD83 / Conus Albers
-        epsg_code = "EPSG:5070"
-
-        # Compute midpoint in projected coordinates
-        mid_x = (bounds.left + bounds.right) / 2
-        mid_y = (bounds.bottom + bounds.top) / 2
-
-        # Define the transformation from raster CRS (NAD83 / Conus Albers) to WGS84 (EPSG:4326)
-        transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
-
-        # Transform the midpoint from projected coordinates to lat/lon
-        lon, lat = transformer.transform(mid_x, mid_y)
-
-        # Get the time zone at the location to sample
-        tf = TimezoneFinder()
-        timezone = tf.timezone_at(lng=lon, lat=lat)
-
         data['geo_info'] = {
             'south_lim': bounds[0],
             'north_lim': bounds[1],
             'west_lim': bounds[2],
             'east_lim': bounds[3],
-            'center_lat': lat,
-            'center_lon': lon,
-            'timezone': timezone
+            'center_lat': map_params.geo_info.center_lat,
+            'center_lon': map_params.geo_info.center_lon,
+            'timezone': map_params.geo_info.timezone
         }
 
     data['fuel'] = {'file': fuel_path,
@@ -373,8 +364,8 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData, north_dir: flo
 
     data['roads'] = {'file': road_path}
 
-    data['initial_igntion'] = user_data.initial_ign
-    data['fire_breaks'] = user_data.fire_breaks
+    data['initial_igntion'] = [mapping(polygon) for polygon in user_data.initial_ign]
+    data['fire_breaks'] = [{"geometry": mapping(line), "fuel_value": fuel_value} for line, fuel_value in zip(user_data.fire_breaks, user_data.fuel_vals)]
 
     map_params.scenario_data = user_data
 
@@ -845,19 +836,14 @@ def get_user_data(fig: matplotlib.figure.Figure) -> dict:
     transformed_polygons = transform_polygons(polygons)
     shapely_polygons = get_shapely_polys(transformed_polygons)
 
-    polygons = [mapping(polygon) for polygon in shapely_polygons]
-
     lines, fuel_vals = drawer.get_fire_breaks()
-
     transformed_lines = transform_lines(lines, DATA_RESOLUTION)
-
     line_strings = [LineString(line) for line in transformed_lines]
 
-    fire_breaks = [{"geometry": mapping(line), "fuel_value": fuel_value} for line, fuel_value in zip(line_strings, fuel_vals)]
-
     user_data = MapDrawerData(
-        fire_breaks = fire_breaks,
-        initial_ign = polygons
+        fire_breaks = line_strings,
+        fuel_vals = fuel_vals,
+        initial_ign = shapely_polygons
     )
 
     return user_data
@@ -936,16 +922,8 @@ def main():
         print("User exited before submitting necessary files.")
         sys.exit(0)
 
-
-    # file_params = {'Output Map Folder': '/Users/rui/Documents/Research/Code/embrs_maps/denver_demo',
-    #                'Metadata Path': '', 'Import Roads': False, 'Uniform Fuel': False,
-    #                'Fuel Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2023_FBFM13_240_CONUS/LC23_F13_240.tif',
-    #                'Uniform Elev': False, 'elevation Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_Elev_220_CONUS/LC20_Elev_220.tif',
-    #                'Aspect Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_Asp_220_CONUS/LC20_Asp_220.tif',
-    #                'Slope Map Path': '/Users/rui/Documents/Research/Code/embrs_raw_data/west_of_denver/LF2020_SlpD_220_CONUS/LC20_SlpD_220.tif'}
-    
-
-    north_dir = crop_map_data(map_params)
+    # Prompt user to crop their ROI
+    crop_map_data(map_params)
 
     # Initialize figure for user data GUI
     fig = plt.figure(figsize=(15, 10))
@@ -954,7 +932,7 @@ def main():
 
     generate_map_from_file(map_params, DATA_RESOLUTION, 1)
     user_data = get_user_data(fig)
-    save_to_file(map_params, user_data, north_dir)
+    save_to_file(map_params, user_data)
 
 if __name__ == "__main__":
     main()

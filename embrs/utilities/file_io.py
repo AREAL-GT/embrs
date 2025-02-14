@@ -2,25 +2,24 @@
 """
 
 from tkinter import BOTH, filedialog
-from tkinter import ttk
+from datetime import datetime, time
+from typing import Callable, Tuple
 import tkinter.simpledialog as sd
-import tkinter as tk
+from tkcalendar import DateEntry
+from tkinter import ttk
 from time import sleep
-import sys
-import os
+import tkinter as tk
+import numpy as np
 import importlib
 import inspect
-import json
-from typing import Callable, Tuple
-import numpy as np
+import pickle
 import time
-from datetime import datetime, date, time
-from tkcalendar import DateEntry
+import sys
+import os
 
+from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams
 from embrs.utilities.fire_util import FuelConstants
 from embrs.base_classes.control_base import ControlClass
-
-from embrs.utilities.data_classes import MapParams
 
 class FileSelectBase:
     """Base class for creating tkinter file and folder selector interfaces
@@ -252,7 +251,7 @@ class MapGenFileSelector(FileSelectBase):
         tk.OptionMenu(uniform_fuel_frame, self.fuel_selection,
                       *FuelConstants.fuel_names.values()).grid(row=0, column=1)
 
-        # Create frame for topography map selection
+        # Create frame for elevation map selection
         _, _, self.elev_button, self.elev_frame = self.create_file_selector(frame,
                                                   "Elevation Map: ", self.elev_map_filename,
                     [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
@@ -392,113 +391,46 @@ class MapGenFileSelector(FileSelectBase):
         else:
             metadata_path = ""
 
-        self.result = MapParams()
+        map_params = MapParams()
 
-        self.result.output_folder = self.output_map_folder.get()
-        self.result.metadata_path = metadata_path
-        self.result.import_roads = self.import_roads.get()
+        map_params.folder = self.output_map_folder.get()
+        map_params.metadata_path = metadata_path
+        map_params.import_roads = self.import_roads.get()
 
         if self.uniform_fuel.get():
-            self.result.uniform_fuel = True
-            self.result.fuel_type = self.fuel_selection_val
-            self.result.fuel_data.tiff_filepath = ""
+            map_params.uniform_fuel = True
+            map_params.fuel_type = self.fuel_selection_val
+            map_params.fuel_data.tiff_filepath = ""
         
         else:
-            self.result.uniform_fuel = False
-            self.result.fuel_data.tiff_filepath = self.fuel_map_filename.get()
+            map_params.uniform_fuel = False
+            map_params.fuel_data.tiff_filepath = self.fuel_map_filename.get()
 
         if self.uniform_elev.get():
-            self.result.uniform_elev = True
-            self.result.elev_data.tiff_filepath = ""
-            self.result.asp_data.tiff_filepath = ""
-            self.result.slp_data.tiff_filepath = ""
+            map_params.uniform_elev = True
+            map_params.elev_data.tiff_filepath = ""
+            map_params.asp_data.tiff_filepath = ""
+            map_params.slp_data.tiff_filepath = ""
         
         else:
-            self.result.uniform_elev = False
-            self.result.elev_data.tiff_filepath = self.elev_map_filename.get()
-            self.result.asp_data.tiff_filepath = self.aspect_map_filename.get()
-            self.result.slp_data.tiff_filepath = self.slope_map_filename.get()
+            map_params.uniform_elev = False
+            map_params.elev_data.tiff_filepath = self.elev_map_filename.get()
+            map_params.asp_data.tiff_filepath = self.aspect_map_filename.get()
+            map_params.slp_data.tiff_filepath = self.slope_map_filename.get()
 
         if self.uniform_elev.get() and self.uniform_fuel.get():
-            self.result.width_m = self.sim_width.get()
-            self.result.height_m = self.sim_width.get()
+            map_params.width_m = self.sim_width.get()
+            map_params.height_m = self.sim_width.get()
+
+        else:
+            map_params.width_m = map_params.elev_data.width_m
+            map_params.height_m = map_params.elev_data.height_m
+
+
+        self.result = map_params
 
         self.root.withdraw()
         self.root.quit()
-
-class HistoricFireSelector(MapGenFileSelector):
-    """Class used to prompt user for historic fire data along with map generation files
-    """
-    def __init__(self):
-        """Constructor method, populates tk window with necessary elements and initializes variables"""
-        super().__init__()
-
-        # Define new variables
-        self.ignition_date = tk.StringVar()
-        self.scenario_start_date = tk.StringVar()
-        self.ignition_lat = tk.DoubleVar()
-        self.ignition_lon = tk.DoubleVar()
-
-        frame = self.create_frame(self.root)
-
-        # Create fields for Ignition Date and Scenario Start Date
-        tk.Label(frame, text="Ignition Date:").pack(pady=5)
-        self.ignition_date_entry = DateEntry(frame, textvariable=self.ignition_date, date_pattern="y-mm-dd")
-        self.ignition_date_entry.pack(pady=5)
-
-        tk.Label(frame, text="Scenario Start Date:").pack(pady=5)
-        self.scenario_start_date_entry = DateEntry(frame, textvariable=self.scenario_start_date, date_pattern="y-mm-dd")
-        self.scenario_start_date_entry.pack(pady=5)
-
-        # Create fields for Ignition Location (Lat, Lon)
-        ignition_location_frame = tk.Frame(frame)
-        ignition_location_frame.pack(padx=10, pady=5)
-
-        tk.Label(ignition_location_frame, text="Ignition Latitude:").grid(row=0, column=0)
-        self.lat_entry = tk.Entry(ignition_location_frame, textvariable=self.ignition_lat)
-        self.lat_entry.grid(row=0, column=1)
-
-        tk.Label(ignition_location_frame, text="Ignition Longitude:").grid(row=0, column=2)
-        self.lon_entry = tk.Entry(ignition_location_frame, textvariable=self.ignition_lon)
-        self.lon_entry.grid(row=0, column=3)
-
-        # Modify the submit button callback to include validation for dates and location
-        self.submit_button.config(command=self.submit)
-
-    def submit(self):
-        """Override the submit method to include validation for historic fire data"""
-        # Validate the ignition date and scenario start date
-        try:
-            ignition_date = datetime.strptime(self.ignition_date.get(), "%Y-%m-%d")
-            scenario_start_date = datetime.strptime(self.scenario_start_date.get(), "%Y-%m-%d")
-            if scenario_start_date <= ignition_date:
-                raise ValueError("Scenario Start Date must be after Ignition Date.")
-        except ValueError as e:
-            tk.messagebox.showerror("Date Error", str(e))
-            return
-
-        # Validate the ignition location (latitude and longitude)
-        if not (-90 <= self.ignition_lat.get() <= 90):
-            tk.messagebox.showerror("Input Error", "Latitude must be between -90 and 90.")
-            return
-        if not (-180 <= self.ignition_lon.get() <= 180):
-            tk.messagebox.showerror("Input Error", "Longitude must be between -180 and 180.")
-            return
-
-        # Call the original submit method to handle the map generation part
-        super().submit()
-
-        # Extend the result dictionary with the additional data
-        self.result["Ignition Date"] = self.ignition_date.get()
-        self.result["Scenario Start Date"] = self.scenario_start_date.get()
-        self.result["Ignition Latitude"] = self.ignition_lat.get()
-        self.result["Ignition Longitude"] = self.ignition_lon.get()
-
-        # Close the window after successful submission
-        self.root.quit() 
-
-
-
 
 class SimFolderSelector(FileSelectBase):
     # TODO: need to deal with duration based on the weather file currently input
@@ -515,18 +447,18 @@ class SimFolderSelector(FileSelectBase):
         # Define variables
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
-        self.weather = tk.StringVar()
+        self.weather_file = tk.StringVar()
         self.time_step = tk.IntVar()
         self.cell_size = tk.IntVar()
-        self.sim_time = tk.DoubleVar()
+        self.duration = tk.DoubleVar()
         self.time_unit = tk.StringVar()
         self.num_runs = tk.IntVar()
         self.user_path = tk.StringVar()
         self.user_class_name = tk.StringVar()
         self.viz_on = tk.BooleanVar()
-        self.no_log = tk.BooleanVar()
-        self.open_meteo = tk.BooleanVar()
-        self.weather_file = tk.BooleanVar()
+        self.skip_log = tk.BooleanVar()
+        self.use_open_meteo = tk.BooleanVar()
+        self.use_weather_file = tk.BooleanVar()
         self.mesh_resolution = tk.IntVar()
         self.start_date = tk.StringVar()
         self.end_date = tk.StringVar() 
@@ -546,13 +478,13 @@ class SimFolderSelector(FileSelectBase):
         # Set some initial values
         self.time_step.set(5)
         self.cell_size.set(10)
-        self.sim_time.set(1.0)
+        self.duration.set(1.0)
         self.num_runs.set(1)
         self.viz_on.set(False)
         self.time_unit.set("hours")
-        self.no_log.set(False)
-        self.open_meteo.set(True)
-        self.weather_file.set(False)
+        self.skip_log.set(False)
+        self.use_open_meteo.set(True)
+        self.use_weather_file.set(False)
         self.mesh_resolution.set(250)
         self.start_hour.set(12)
         self.start_min.set(0)
@@ -569,16 +501,16 @@ class SimFolderSelector(FileSelectBase):
         # Create frame for log folder selection
         _, self.log_entry, self.log_button, self.log_frame = self.create_folder_selector(frame, "Log folder:     ", self.log_folder)
         tk.Checkbutton(self.log_frame, text='Disable logging',
-                variable=self.no_log).grid(row=0, column=3)
+                variable=self.skip_log).grid(row=0, column=3)
 
 
         weather_option_frame = self.create_frame(frame)
         tk.Label(weather_option_frame, text="Weather Option:").grid(row=0, column=0)
         tk.Checkbutton(weather_option_frame, text='Import OpenMeteo Weather',
-                       variable=self.open_meteo).grid(row=0, column=1)
+                       variable=self.use_open_meteo).grid(row=0, column=1)
         
         tk.Checkbutton(weather_option_frame, text='Import Weather .json File',
-                       variable=self.weather_file).grid(row=0, column=2)
+                       variable=self.use_weather_file).grid(row=0, column=2)
 
         self.open_meteo_frame = self.create_frame(frame)
 
@@ -605,9 +537,9 @@ class SimFolderSelector(FileSelectBase):
         self.end_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
 
         # Create frame for wind file selection
-        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(frame, "Weather file: ", self.weather, [("JavaScript Object Notation","*.JSON")])
+        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(frame, "Weather file: ", self.weather_file, [("JavaScript Object Notation","*.JSON")])
 
-        self.weather.set("")
+        self.weather_file.set("")
         self.weather_button.configure(state='disabled')
         self.weather_entry.configure(state='disabled')
 
@@ -620,14 +552,14 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(frame, "Cell size:       ", 100, self.cell_size, "meters")
 
         # Create frame for sim time selection
-        sim_time_frame = self.create_frame(frame)
-        tk.Label(sim_time_frame, text="Duration:       ").grid(row=2, column=0)
+        duration_frame = self.create_frame(frame)
+        tk.Label(duration_frame, text="Duration:       ").grid(row=2, column=0)
 
-        self.duration_spinbox = tk.Spinbox(sim_time_frame, from_=1, to=self.max_duration,
-                                           textvariable=self.sim_time, width=5, format='%.2f', increment = 0.5)
+        self.duration_spinbox = tk.Spinbox(duration_frame, from_=1, to=self.max_duration,
+                                           textvariable=self.duration, width=5, format='%.2f', increment = 0.5)
 
         self.duration_spinbox.grid(row=2, column=1, sticky='w')
-        tk.OptionMenu(sim_time_frame, self.time_unit,
+        tk.OptionMenu(duration_frame, self.time_unit,
                       "seconds", "minutes", "hours").grid(row=2, column=2)
 
         # Create frame for num runs selection
@@ -659,13 +591,13 @@ class SimFolderSelector(FileSelectBase):
         # Define variable callbacks
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
-        self.sim_time.trace_add("write", self.duration_changed)
+        self.duration.trace_add("write", self.duration_changed)
         self.time_unit.trace_add("write", self.time_unit_changed)
         self.user_path.trace_add("write", self.user_path_changed)
         self.user_class_name.trace_add("write", self.class_changed)
-        self.no_log.trace_add("write", self.write_logs_toggled)
-        self.open_meteo.trace_add("write", self.open_meteo_toggled)
-        self.weather_file.trace_add("write", self.weather_file_toggled)
+        self.skip_log.trace_add("write", self.write_logs_toggled)
+        self.use_open_meteo.trace_add("write", self.open_meteo_toggled)
+        self.use_weather_file.trace_add("write", self.weather_file_toggled)
 
         self.start_hour.trace_add("write", self.update_datetime)
         self.start_min.trace_add("write", self.update_datetime)
@@ -693,12 +625,12 @@ class SimFolderSelector(FileSelectBase):
         the max being input
         """
         try:
-            self.sim_time.get()
+            self.duration.get()
         except tk.TclError:
             return
 
-        if self.sim_time.get() > self.max_duration:
-            self.sim_time.set(self.max_duration)
+        if self.duration.get() > self.max_duration:
+            self.duration.set(self.max_duration)
 
     def map_folder_changed(self, *args):
         """Callback function that handles the map folder selection being changed, sets the max
@@ -707,7 +639,7 @@ class SimFolderSelector(FileSelectBase):
         # open json
         folderpath = self.map_folder.get()
         foldername = os.path.basename(folderpath)
-        map_filepath = folderpath + "/" + foldername + ".json"
+        map_filepath = folderpath + "/" + foldername + "map_params.pkl"
 
         if os.path.exists(map_filepath):
             pass
@@ -749,10 +681,10 @@ class SimFolderSelector(FileSelectBase):
         self.max_duration *= ratio
         self.duration_spinbox.configure(to=self.max_duration)
 
-        # Update sim_time
-        current_sim_time = float(self.sim_time.get())
-        new_sim_time = current_sim_time * ratio
-        self.sim_time.set(new_sim_time)
+        # Update duration
+        current_duration = float(self.duration.get())
+        new_duration = current_duration * ratio
+        self.duration.set(new_duration)
 
         # Update prev_t_unit
         self.prev_t_unit = self.time_unit.get()
@@ -818,9 +750,9 @@ class SimFolderSelector(FileSelectBase):
 
     def open_meteo_toggled(self, *args):
         """Callback for the OpenMeteo toggle button. Ensures only OpenMeteo is selected."""
-        if self.open_meteo.get():
+        if self.use_open_meteo.get():
             # Turn off weather file option
-            self.weather_file.set(False)
+            self.use_weather_file.set(False)
             # Disable weather file widgets
             self.weather.set("")
             self.weather_button.configure(state='disabled')
@@ -829,7 +761,7 @@ class SimFolderSelector(FileSelectBase):
             for widget in self.open_meteo_frame.winfo_children():
                 widget.configure(state='normal')
         else:
-            self.weather_file.set(True)
+            self.use_weather_file.set(True)
             for widget in self.open_meteo_frame.winfo_children():
                 widget.configure(state='disabled')
 
@@ -840,9 +772,9 @@ class SimFolderSelector(FileSelectBase):
 
     def weather_file_toggled(self, *args):
         """Callback for the Weather File toggle button. Ensures only Weather File is selected."""
-        if self.weather_file.get():
+        if self.use_weather_file.get():
             # Turn off OpenMeteo option
-            self.open_meteo.set(False)
+            self.use_open_meteo.set(False)
             # Disable OpenMeteo widgets
             for widget in self.open_meteo_frame.winfo_children():
                 widget.configure(state='disabled')
@@ -851,8 +783,8 @@ class SimFolderSelector(FileSelectBase):
             self.weather_entry.configure(state='normal')
         else:
             # Prevent both options from being off
-            self.open_meteo.set(True)
-            self.weather_file.set(False)
+            self.use_open_meteo.set(True)
+            self.use_weather_file.set(False)
             # Disable weather file widgets
             self.weather.set("")
             self.weather_button.configure(state='disabled')
@@ -864,7 +796,7 @@ class SimFolderSelector(FileSelectBase):
         self.validate_fields()
 
     def write_logs_toggled(self, *args):
-        if self.no_log.get():
+        if self.skip_log.get():
             self.log_button.configure(state='disabled')
             self.log_entry.configure(state='disabled')
             self.log_folder.set("")
@@ -888,7 +820,7 @@ class SimFolderSelector(FileSelectBase):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
-        if self.map_folder.get() and  (self.no_log.get() or self.log_folder.get()) and (self.open_meteo.get() or self.weather.get()):
+        if self.map_folder.get() and  (self.skip_log.get() or self.log_folder.get()) and (self.use_open_meteo.get() or self.weather.get()):
             self.submit_button.config(state='normal')
         else:
             self.submit_button.config(state='disabled')
@@ -897,41 +829,48 @@ class SimFolderSelector(FileSelectBase):
         """Callback when the submit button is pressed. Stores all the relevant data in the result
         variable so it can be retrieved
         """
-        sim_time_raw = self.sim_time.get()
+        duration_raw = self.duration.get()
 
         if self.time_unit.get() == "seconds":
-            sim_time = sim_time_raw
+            duration = duration_raw
 
         elif self.time_unit.get() == "minutes":
-            sim_time = sim_time_raw * 60
+            duration = duration_raw * 60
 
         elif self.time_unit.get() == "hours":
-            sim_time = sim_time_raw * 3600
+            duration = duration_raw * 3600
 
         if not (self.start_datetime < self.end_datetime < datetime.now()):
             tk.messagebox.showwarning("Invalid Date Selection", 
                                 "Start date and time must be before the end date and time, and the end date must be in the past.")
 
         else:
-            self.result = {
-                "input": self.map_folder.get(),
-                "log": self.log_folder.get(),
-                "weather_type": "OpenMeteo" if self.open_meteo.get() else "Weather File",
-                "weather_file": self.weather.get(),
-                "mesh_resolution": self.mesh_resolution.get(),
-                "start_datetime": self.start_datetime,
-                "end_datetime": self.end_datetime,
-                "t_step": self.time_step.get(),
-                "cell_size": self.cell_size.get(),
-                "sim_time": sim_time,
-                "viz_on": self.viz_on.get(),
-                "num_runs": self.num_runs.get(),
-                "user_path": self.user_path.get(),
-                "class_name": self.user_class_name.get(),
-                "write_log_files": not self.no_log.get()
-            }
+            with open(os.path.join(self.map_folder.get(), "map_params.pkl"), "rb") as f:
+                map_params = pickle.load(f)
 
-            self.submit_callback(self.result)
+            weather_input = WeatherParams(
+                input_type = "OpenMeteo" if self.use_open_meteo.get() else "WeatherFile",
+                file = self.weather_file.get(),
+                mesh_resolution = self.mesh_resolution.get(),
+                start_datetime = self.start_datetime if self.use_open_meteo.get() else None,
+                end_datetime = self.end_datetime if self.use_open_meteo.get() else None
+             )
+
+            sim_params = SimParams(
+                map_params = map_params,
+                log_folder = self.log_folder.get(),
+                weather_input = weather_input,
+                t_step_s = self.time_step.get(),
+                cell_size = self.cell_size.get(),
+                duration_s = duration,
+                visualize = self.viz_on.get(),
+                num_runs = self.num_runs.get(),
+                user_path = self.user_path.get(),
+                user_class = self.user_class_name.get(),
+                write_logs = not self.skip_log.get()
+            )
+
+            self.submit_callback(sim_params)
 
 class VizFolderSelector(FileSelectBase):
     """Class used to prompt user for log files to be visualized

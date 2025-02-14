@@ -64,7 +64,7 @@ class Visualizer:
         X, Y = np.meshgrid(x, y)
 
         cont = h_ax.contour(X*sim.cell_size*np.sqrt(3),Y*sim.cell_size*1.5,
-                            sim.coarse_topography, colors='k')
+                            sim.coarse_elevation, colors='k')
 
         h_ax.clabel(cont, inline=True, fontsize=10, zorder=2)
 
@@ -213,6 +213,9 @@ class Visualizer:
             self.legend_elements = legend_elements
 
             # Plot wind vector field
+            # TODO: make visualization more uniform in sampling and size (depending on the size of the visualization window and mesh_resolution)
+            # TODO: add a key to show wind spees
+            # TODO: add a checkbox that toggles showing wind or not
             curr_forecast = sim.wind_forecast[sim._curr_wind_idx]
             # Downsample the wind data for plotting
             downsample_factor = 5
