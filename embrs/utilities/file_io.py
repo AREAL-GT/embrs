@@ -2,7 +2,7 @@
 """
 
 from tkinter import BOTH, filedialog
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Callable, Tuple
 import tkinter.simpledialog as sd
 from tkcalendar import DateEntry
@@ -13,7 +13,7 @@ import numpy as np
 import importlib
 import inspect
 import pickle
-import time
+import json
 import sys
 import os
 
@@ -451,7 +451,6 @@ class SimFolderSelector(FileSelectBase):
         self.time_step = tk.IntVar()
         self.cell_size = tk.IntVar()
         self.duration = tk.DoubleVar()
-        self.time_unit = tk.StringVar()
         self.num_runs = tk.IntVar()
         self.user_path = tk.StringVar()
         self.user_class_name = tk.StringVar()
@@ -481,7 +480,6 @@ class SimFolderSelector(FileSelectBase):
         self.duration.set(1.0)
         self.num_runs.set(1)
         self.viz_on.set(False)
-        self.time_unit.set("hours")
         self.skip_log.set(False)
         self.use_open_meteo.set(True)
         self.use_weather_file.set(False)
@@ -543,24 +541,17 @@ class SimFolderSelector(FileSelectBase):
         self.weather_button.configure(state='disabled')
         self.weather_entry.configure(state='disabled')
 
-        self.create_spinbox_with_two_labels(frame, "Wind Mesh Resolution:       ", 250, self.mesh_resolution, "meters")
+        self.create_spinbox_with_two_labels(frame, "Wind Mesh Resolution:       ", np.inf, self.mesh_resolution, "meters") # TODO: the max val of this should probably be set based on sim size
 
         # Create frame for time step selection
-        self.create_spinbox_with_two_labels(frame, "Time step:     ", 100, self.time_step, "seconds")
+        self.create_spinbox_with_two_labels(frame, "Time step:     ", np.inf, self.time_step, "seconds")
 
         # Create frame for cell size selection
-        self.create_spinbox_with_two_labels(frame, "Cell size:       ", 100, self.cell_size, "meters")
+        self.create_spinbox_with_two_labels(frame, "Cell size:       ", np.inf, self.cell_size, "meters") # TODO: the max val of this should probably be set based on sim size
 
         # Create frame for sim time selection
-        duration_frame = self.create_frame(frame)
-        tk.Label(duration_frame, text="Duration:       ").grid(row=2, column=0)
+        self.create_spinbox_with_two_labels(frame, "Duration:       ", self.max_duration, self.duration, "hours")
 
-        self.duration_spinbox = tk.Spinbox(duration_frame, from_=1, to=self.max_duration,
-                                           textvariable=self.duration, width=5, format='%.2f', increment = 0.5)
-
-        self.duration_spinbox.grid(row=2, column=1, sticky='w')
-        tk.OptionMenu(duration_frame, self.time_unit,
-                      "seconds", "minutes", "hours").grid(row=2, column=2)
 
         # Create frame for num runs selection
         self.create_spinbox_with_two_labels(frame, "Iterations:      ", np.inf,
@@ -591,8 +582,8 @@ class SimFolderSelector(FileSelectBase):
         # Define variable callbacks
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
+        self.weather_file.trace_add("write", self.weather_file_changed)
         self.duration.trace_add("write", self.duration_changed)
-        self.time_unit.trace_add("write", self.time_unit_changed)
         self.user_path.trace_add("write", self.user_path_changed)
         self.user_class_name.trace_add("write", self.class_changed)
         self.skip_log.trace_add("write", self.write_logs_toggled)
@@ -606,7 +597,6 @@ class SimFolderSelector(FileSelectBase):
         self.end_min.trace_add("write", self.update_datetime)
         self.end_ampm.trace_add("write", self.update_datetime)
 
-
         self.update_datetime()
 
 
@@ -619,6 +609,17 @@ class SimFolderSelector(FileSelectBase):
         end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
         end_time = time(end_hr, self.end_min.get())
         self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
+
+        if self.end_datetime < self.start_datetime:
+            # User is likely still working on entering dates, don't limit duration
+            self.max_duration = np.inf
+
+        else:
+            # Update max duration based on length of forecast
+            forecast_len = self.end_datetime - self.start_datetime
+            forecast_len_hr = forecast_len.total_seconds() / 3600
+            self.max_duration = forecast_len_hr
+            self.duration.set(self.max_duration)
 
     def duration_changed(self, *args):
         """Callback function that handles the sim duration changing, prevents values greater than 
@@ -669,25 +670,35 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", msg)
             window.destroy()
 
-    def time_unit_changed(self, *args):
-        """Callback function that handles the time unit selection being changed, adjusts the 
-        displayed duration based on the unit
+    def weather_file_changed(self, *args):
+        """Callback function to handle weather file input being changed. Sets the max duration of
+        the simulation to the duration of the forecast.
         """
-        time_units = {"seconds": 1.0, "minutes": 60.0, "hours": 3600.0}
 
-        # Get the ratio between the new and old time unit
-        ratio = time_units[self.prev_t_unit] / time_units[self.time_unit.get()]
+        filepath = self.weather_file.get()
 
-        self.max_duration *= ratio
-        self.duration_spinbox.configure(to=self.max_duration)
+        if os.path.exists(filepath):
+            with open(filepath, "rb") as f:
+                weather = json.load(f)
 
-        # Update duration
-        current_duration = float(self.duration.get())
-        new_duration = current_duration * ratio
-        self.duration.set(new_duration)
+            # get wind duration and set max_duration
+            weather_time_step_min = weather['time_step_min']
+            weather_time_step_hr = weather_time_step_min / 60
+            num_entries = len(weather['weather entries'])
 
-        # Update prev_t_unit
-        self.prev_t_unit = self.time_unit.get()
+            weather_duration = weather_time_step_hr * num_entries
+            self.max_duration = weather_duration
+
+        elif filepath == "":
+            pass
+
+        else:
+            self.wind_forecast.set("")
+            window = tk.Tk()
+            window.withdraw()
+            tk.messagebox.showwarning("Error", "Selected folder does not contain a valid wind forecast!")
+            window.destroy()
+
 
     def user_path_changed(self, *args):
         """Callback function that handles the user module path selection being changed, it gets
@@ -754,7 +765,7 @@ class SimFolderSelector(FileSelectBase):
             # Turn off weather file option
             self.use_weather_file.set(False)
             # Disable weather file widgets
-            self.weather.set("")
+            self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
             # Enable OpenMeteo widgets
@@ -767,6 +778,7 @@ class SimFolderSelector(FileSelectBase):
 
             self.weather_button.configure(state='normal')
             self.weather_entry.configure(state='normal')
+            self.max_duration = np.inf # No limit on duration when using a file
 
         self.validate_fields()
 
@@ -786,7 +798,7 @@ class SimFolderSelector(FileSelectBase):
             self.use_open_meteo.set(True)
             self.use_weather_file.set(False)
             # Disable weather file widgets
-            self.weather.set("")
+            self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
             # Enable OpenMeteo widgets
@@ -830,15 +842,7 @@ class SimFolderSelector(FileSelectBase):
         variable so it can be retrieved
         """
         duration_raw = self.duration.get()
-
-        if self.time_unit.get() == "seconds":
-            duration = duration_raw
-
-        elif self.time_unit.get() == "minutes":
-            duration = duration_raw * 60
-
-        elif self.time_unit.get() == "hours":
-            duration = duration_raw * 3600
+        duration_s = duration_raw * 3600
 
         if not (self.start_datetime < self.end_datetime < datetime.now()):
             tk.messagebox.showwarning("Invalid Date Selection", 
@@ -862,7 +866,7 @@ class SimFolderSelector(FileSelectBase):
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
                 cell_size = self.cell_size.get(),
-                duration_s = duration,
+                duration_s = duration_s,
                 visualize = self.viz_on.get(),
                 num_runs = self.num_runs.get(),
                 user_path = self.user_path.get(),
@@ -1236,16 +1240,9 @@ class WindForecastGen(FileSelectBase):
             curr_duration = 0  # default value if Spinbox is empty
 
         # If duration was the last changed variable, update time_step
-        if self.duration_last_changed > self.time_step_last_changed:
             if len(self.wind_forecast) > 0:
                 new_time_step = curr_duration * 60 / len(self.wind_forecast)  # Convert duration to minutes
                 self.time_step.set(new_time_step)
-        else:
-            # Update duration based on new time_step and number of entries
-            self.duration.set(len(self.wind_forecast) * self.time_step.get() / 60)  # Convert to hours
-
-        # Update the last change time for duration
-        self.duration_last_changed = time.time()
 
         self.validate_fields()
 
