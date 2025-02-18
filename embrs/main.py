@@ -6,15 +6,19 @@ import importlib
 import sys
 import copy
 import os
+import pickle
 from typing import Tuple
 from tqdm import tqdm
+import argparse
+import configparser
+from datetime import datetime
 from embrs.fire_simulator.visualizer import Visualizer
 from embrs.fire_simulator.logger import Logger
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.base_classes.control_base import ControlClass
-from embrs.utilities.data_classes import SimParams
+from embrs.utilities.data_classes import SimParams, WeatherParams
 
 def initialize(sim_params: SimParams) -> Tuple[FireSim, bool, Visualizer]:
     """Initializes a fireSim object and a Visualizer(if selected) based on user inputs
@@ -196,9 +200,136 @@ def sim_loop(sim_params: SimParams):
     print("")
     print(f"Finished running {num_runs} simulation(s)")
 
+def load_sim_params(cfg_path: str) -> SimParams:
+    """Load simulation parameters from .cfg file"""
+    config = configparser.ConfigParser()
+    config.read(cfg_path)
+
+    # Parse Map Data
+    map_params = None
+    if "Map" in config:
+        folder = config["Map"]["folder"]
+        pkl_path = os.path.join(folder, "map_params.pkl")
+
+        print(f"pkl_path: {pkl_path}")
+
+        if os.path.exists(pkl_path):
+            with open(pkl_path, "rb") as f:
+                map_params = pickle.load(f)
+        else:
+            raise FileNotFoundError(f"Error in {cfg_path}: MapParams file not found in '{folder}'. Ensure 'map_params.pkl' exists.")
+    else:
+        raise ValueError(f"Error in {cfg_path}: Missing 'Map' section in the .cfg file.")
+
+    # Parse weather data
+    weather_input_type = config["Weather"].get("input_type", None)
+
+    if weather_input_type is None:
+        raise ValueError(f"Error in {cfg_path}: 'input_type' must be specified in the [Weather] section.")
+
+    mesh_resolution = config["Weather"].getint("mesh_resolution", None)
+
+    print(f"mesh_res: {mesh_resolution}")
+
+    if mesh_resolution is None:
+        mesh_resolution = 250
+        print(f"Warning: Mesh resolution for WindNinja not specified in {cfg_path}, defaulting to 250m.")
+
+    start_iso_datetime = config["Weather"].get("start_datetime", None)
+    end_iso_datetime = config["Weather"].get("end_datetime", None)
+
+    if start_iso_datetime is None or end_iso_datetime is None:
+        raise ValueError(f"Error in {cfg_path}: Both 'start_datetime' and 'end_datetime' must be specified in the [Weather] section.")
+
+    weather_params = WeatherParams(
+        input_type=weather_input_type,
+        file=config["Weather"].get("file", None),
+        mesh_resolution=mesh_resolution,
+        start_datetime=datetime.fromisoformat(start_iso_datetime),
+        end_datetime=datetime.fromisoformat(end_iso_datetime),
+    )
+
+    write_logs = config["Simulation"].getboolean("write_logs", None)
+    log_folder = config["Simulation"].get("log_folder", None)
+
+    if write_logs is None:
+        if log_folder is None:
+            write_logs = False
+        else:
+            write_logs = True
+    elif write_logs and log_folder is None:
+        raise ValueError(f"Error in {cfg_path}: 'log_folder' must be specified if 'write_logs' is set to True.")
+
+    detect_duration = config["Simulation"].getboolean("detect_duration", None)
+    duration_s = config["Simulation"].getint("duration_s", None)
+
+    if detect_duration is None:
+        if duration_s is None:
+            detect_duration = True
+            print(f"Warning: No 'duration_s' specified in {cfg_path}. Defaulting to the time difference between start and end datetimes.")
+        else:
+            detect_duration = False
+
+    elif detect_duration and duration_s is not None:
+        raise ValueError(f"Error in {cfg_path}: 'detect_duration' cannot be True while 'duration_s' is specified.")
+    
+    elif not detect_duration and duration_s is None:
+        raise ValueError(f"Error in {cfg_path}: either 'detect_duration' must be True or 'duration_s' needs to be specified.")
+
+    if weather_params.start_datetime >= weather_params.end_datetime:
+        raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
+
+    if detect_duration:
+        duration = weather_params.end_datetime - weather_params.start_datetime
+        duration_s = duration.total_seconds()
+
+    t_step_s = config["Simulation"].getint("t_step_s", None)
+    if t_step_s is None:
+        raise ValueError(f"Error in {cfg_path}: 't_step_s' (time step) must be specified in the [Simulation] section.")
+
+    cell_size = config["Simulation"].getint("cell_size", None)
+    if cell_size is None:
+        raise ValueError(f"Error in {cfg_path}: 'cell_size' must be specified in the [Simulation] section.")
+
+    user_class = config["Simulation"].get("user_class", None)
+    user_path = config["Simulation"].get("user_path", None)
+
+    if user_class is None or user_path is None:
+        user_class = ""
+        user_path = ""
+
+    sim_params = SimParams(
+        map_params=map_params,
+        log_folder=log_folder,
+        weather_input=weather_params,
+        t_step_s=t_step_s,
+        duration_s=duration_s,
+        cell_size=cell_size,
+        num_runs=config["Simulation"].getint("num_runs", 1),
+        visualize=config["Simulation"].getboolean("visualize", False),
+        user_path=user_path,
+        user_class=user_class,
+    )
+
+    return sim_params
+
 def main():
-    folder_selector = SimFolderSelector(sim_loop)
-    folder_selector.run()
+
+    parser = argparse.ArgumentParser(description="Run fire simulation")
+    parser.add_argument("--config", type=str, help="Path to .cfg file")
+
+    args = parser.parse_args()
+
+    if args.config:
+        print(f"Loading simulation params from {args.config}...")
+        sim_params = load_sim_params(args.config)
+
+        sim_loop(sim_params)
+
+    else:
+        print("Starting sim initialization GUI")
+        folder_selector = SimFolderSelector(sim_loop)
+        folder_selector.run()
 
 if __name__ == "__main__":
     main()
