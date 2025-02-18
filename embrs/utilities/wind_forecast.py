@@ -59,6 +59,8 @@ def run_windninja_single(task: WindNinjaTask):
 
     curr_datetime = task.start_datetime + timedelta(minutes=task.index * task.time_step)
 
+    wind_dir = (task.entry.wind_dir_deg + task.north_angle) % 360
+
     command = [
         cli_path,
         "--initialization_method", "domainAverageInitialization",
@@ -83,7 +85,7 @@ def run_windninja_single(task: WindNinjaTask):
         "--units_output_wind_height", "m",
         "--input_speed", str(task.entry.wind_speed),
         "--input_speed_units", task.input_speed_units,
-        "--input_direction", str(task.entry.wind_dir_deg + task.north_angle),
+        "--input_direction", str(wind_dir),
         "--input_wind_height", str(task.wind_height),
         "--units_input_wind_height", task.wind_height_units,
         "--write_ascii_output", "true",
@@ -207,7 +209,7 @@ def rename_windninja_outputs(output_path: str, time_step_index: int):
             elif "_cld" in file_name:
                 new_file_name = f"cloud_cover_{time_step_index}{extension}"
             elif extension == ".kmz" or extension == ".kml":
-                new_file_name = f"old_path{extension}"
+                new_file_name = f"google_earth_{time_step_index}{extension}"
             else:
                 continue
 

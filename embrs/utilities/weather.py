@@ -52,7 +52,7 @@ def retrieve_openmeteo_data(weather: WeatherParams, geo: GeoInfo):
 
     end_datetime = weather.end_datetime
     end_datetime = local_tz.localize(end_datetime)
-    buffered_end = start_datetime + timedelta(days=1)
+    buffered_end = end_datetime + timedelta(days=1)
     end_datetime_utc = buffered_end.astimezone(pytz.utc)
 
     lat = geo.center_lat
