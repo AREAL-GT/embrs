@@ -73,6 +73,9 @@ class BaseFireSim:
                 new_cell = Cell(id, i, j, self._cell_size)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
+                # TODO: this code is very repetitive
+                    # TODO: make it into a loop over the different data products
+
                 # Set cell elevation from elevation map
                 top_col = int(np.floor(cell_x/self.elevation_res))
                 top_row = int(np.floor(cell_y/self.elevation_res))
@@ -95,6 +98,19 @@ class BaseFireSim:
                 slope_col = int(np.floor(cell_x/self._slope_res))
                 slope_row = int(np.floor(cell_y/self._slope_res))
                 new_cell._set_slope(self._slope_map[slope_row, slope_col])
+
+                # Set canopy cover from canopy cover map
+                cc_col = int(np.floor(cell_x/self._cc_res))
+                cc_row = int(np.floor(cell_y/self._cc_res))
+                new_cell._set_canopy_cover(self._cc_map[cc_row, cc_col])
+
+                # Set canopy height from canopy height map
+                ch_col = int(np.floor(cell_x/self._ch_res))
+                ch_row = int(np.floor(cell_y/self._ch_res))
+                new_cell._set_canopy_height(self._ch_map[ch_row, ch_col])
+
+                # Set WAF for the cell
+                new_cell._set_wind_adj_factor()
 
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))
@@ -189,6 +205,8 @@ class BaseFireSim:
         slp_data = map_params.slp_data
         asp_data = map_params.asp_data
         fuel_data = map_params.fuel_data
+        cc_data = map_params.cc_data
+        ch_data = map_params.ch_data
 
         # Get map for each data product
         self._elevation_map = np.flipud(elev_data.map)
@@ -196,12 +214,16 @@ class BaseFireSim:
         self._aspect_map = np.flipud(asp_data.map)
         self._aspect_map = (180 + self._aspect_map) % 360 
         self._fuel_map = np.flipud(fuel_data.map)
+        self._cc_map = np.flipud(cc_data.map)
+        self._ch_map = np.flipud(ch_data.map)
 
         # Get resolution for each data product map
         self._elevation_res = elev_data.resolution
         self._aspect_res = asp_data.resolution
         self._slope_res = slp_data.resolution
         self._fuel_res = fuel_data.resolution
+        self._cc_res = cc_data.resolution
+        self._ch_res = ch_data.resolution
 
         # Load scenario specific data
         scenario = map_params.scenario_data

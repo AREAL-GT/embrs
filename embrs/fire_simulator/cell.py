@@ -44,7 +44,7 @@ class Cell:
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
 
-    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, fuel_type=Anderson13(1)):
+    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, fuel_type=Anderson13(1)):
         """Initializes a simulation cell with terrain, fire properties, and fuel characteristics.
 
             The cell is positioned within a **point-up hexagonal grid** and stores relevant 
@@ -94,6 +94,15 @@ class Cell:
 
         # Slope angle in degrees
         self.slope_deg = slope_deg
+
+        # Canopy cover as a percentage
+        self.canopy_cover = canopy_cover
+
+        # Canopy height as 10 * m
+        self.canopy_height = canopy_height
+        
+        # Wind adjustment factor based on sheltering condition
+        self.wind_adj_factor = 1
 
         self._cell_size = cell_size # defined as the edge length of hexagon
         self._cell_area = self.calc_cell_area()
@@ -274,6 +283,56 @@ class Cell:
             - Updates the `aspect` attribute with the new aspect value.
         """
         self.aspect = aspect
+
+
+    def _set_canopy_cover(self, canopy_cover: float):
+        """Sets the canopy cover (as a percentage) of the cell
+
+        Args:
+            canopy_cover (float): canopy cover as a percentage
+        """
+        self.canopy_cover = canopy_cover
+
+    def _set_canopy_height(self, canopy_height: float):
+        """Sets the average top of canopy height within the cell in meters
+
+        Args:
+            canopy_height (float): average top of canopy height within the cell in meters
+        """
+        self.canopy_height = canopy_height
+
+    def _set_wind_adj_factor(self):
+        """Sets the wind adjustment factor (WAF) for the cell based on the fuel type and canopy characteristics.
+        The wind adjustment factor is calculated using equations adapted from Albini and Baughman (1979).
+        It adjusts the wind speed to account for the effects of vegetation and canopy cover on fire spread.
+        If the fuel type is not burnable, the wind adjustment factor is set to 1. Otherwise, the factor is 
+        calculated based on the canopy cover and height.
+        For canopy cover less than or equal to 5%, an unsheltered WAF equation is used:
+            WAF = 1.83 / log((20 + 0.36 * H) / (0.13 * H))
+        where H is the fuel depth in feet.
+        For canopy cover greater than 5%, a sheltered WAF equation is used:
+            WAF = 0.555 / (sqrt(f * 3.28 * H) * log((20 + 1.18 * H) / (0.43 * H)))
+        where H is the canopy height in feet and f is the crown fill portion.
+        Attributes:
+            wind_adj_factor (float): The calculated wind adjustment factor.
+        """
+        
+        if not self.fuel_type.burnable:
+            self.wind_adj_factor = 1
+
+        else:
+            # Calcuate crown fill portion
+            f = (self.canopy_cover / 100) * (np.pi / 12)
+
+            if f <= 0.05:
+                # Use un-sheltered WAF equation
+                H = self.fuel_type.fuel_depth_ft
+                self.wind_adj_factor = 1.83 / np.log((20 + 0.36*H)/(0.13*H))
+
+            else:
+                # Use sheltered WAF equation
+                H = self.canopy_height
+                self.wind_adj_factor = 0.555/(np.sqrt(f*3.28*H) * np.log((20 + 1.18*H)/(0.43*H)))
 
     def _set_fuel_content(self, fuel_content: float):
         """Sets the remaining fuel content in the cell.

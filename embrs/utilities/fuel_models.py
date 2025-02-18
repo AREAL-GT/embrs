@@ -76,7 +76,7 @@ class Fuel:
         self.model_num = model_num
         self.fuel_load_params = fuel_load_params
         self.sav_ratio = sav_ratio
-        self.fuel_depth = fuel_depth
+        self.fuel_depth_ft = fuel_depth
         self.m_x = m_x
         self.heat_content = 8000 # btu/lb
 

@@ -18,7 +18,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
 
-    wind_speed_ft_min = 196.85 * wind_speed_m_s
+    wind_speed_ft_min = 196.85 * wind_speed_m_s * cell.wind_adj_factor
 
     slope_angle_deg = cell.slope_deg
     slope_dir_deg = cell.aspect

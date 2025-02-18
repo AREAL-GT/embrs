@@ -81,6 +81,8 @@ class MapParams:
     elev_data: Optional[DataProductParams] = DataProductParams()
     asp_data: Optional[DataProductParams] = DataProductParams()
     slp_data: Optional[DataProductParams] = DataProductParams()
+    cc_data: Optional[DataProductParams] = DataProductParams()
+    ch_data: Optional[DataProductParams] = DataProductParams()
     roads: Optional[List] = field(default_factory=list)
     width_m: Optional[float] = None
     height_m: Optional[float] = None

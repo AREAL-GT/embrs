@@ -327,7 +327,7 @@ def main():
         sim_loop(sim_params)
 
     else:
-        print("Starting sim initialization GUI")
+        print("Starting sim initialization GUI...")
         folder_selector = SimFolderSelector(sim_loop)
         folder_selector.run()
 
