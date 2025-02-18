@@ -34,6 +34,16 @@ class GeoInfo:
     center_lon: Optional[float] = None
     timezone: Optional[str] = None
 
+    def save_bounds(self, bounds: BoundingBox):
+        epsg_code = "EPSG:5070"
+
+        transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
+
+        left, bottom = transformer.transform(bounds.left, bounds.bottom)
+        right, top = transformer.transform(bounds.right, bounds.top)
+
+        self.bounds = BoundingBox(left, bottom, right, top)
+
     def calc_center_coords(self):
         if self.bounds is None:
             raise ValueError("Can't perform this function without bounds")

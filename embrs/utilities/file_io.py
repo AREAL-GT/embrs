@@ -366,35 +366,9 @@ class MapGenFileSelector(FileSelectBase):
         """Callback when the submit button is pressed. Stores all the relevant data in the result
         variable so it can be retrieved
         """
-        if self.import_roads.get():
-            # check that metadata.xml exists
-            elev_path = os.path.dirname(self.elev_map_filename.get())
-            fuel_path = os.path.dirname(self.fuel_map_filename.get())
-            asp_path  = os.path.dirname(self.aspect_map_filename.get())
-            slope_path = os.path.dirname(self.slope_map_filename.get())
-
-            if os.path.exists(elev_path + "/metadata.xml"):
-                metadata_path = elev_path + "/metadata.xml"
-
-            elif os.path.exists(fuel_path + "/metadata.xml"):
-                metadata_path = fuel_path + "/metadata.xml"
-
-            else:
-                self.import_roads.set(False)
-                metadata_path = ""
-                window = tk.Tk()
-                window.withdraw()
-                tk.messagebox.showwarning("Error",
-                "Cannot locate 'metadata.xml' file, roads will not be imported.")
-
-                window.destroy()
-        else:
-            metadata_path = ""
-
         map_params = MapParams()
 
         map_params.folder = self.output_map_folder.get()
-        map_params.metadata_path = metadata_path
         map_params.import_roads = self.import_roads.get()
 
         if self.uniform_fuel.get():
@@ -639,8 +613,7 @@ class SimFolderSelector(FileSelectBase):
         """
         # open json
         folderpath = self.map_folder.get()
-        foldername = os.path.basename(folderpath)
-        map_filepath = folderpath + "/" + foldername + "map_params.pkl"
+        map_filepath = folderpath + "/map_params.pkl"
 
         if os.path.exists(map_filepath):
             pass

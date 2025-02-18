@@ -13,6 +13,7 @@ from rasterio.warp import reproject
 from rasterio.enums import Resampling as ResamplingMethod
 from rasterio.transform import Affine
 from rasterio.windows import from_bounds
+from rasterio.coords import BoundingBox
 import requests
 import pyproj
 import utm
@@ -89,23 +90,18 @@ def generate_map_from_file(map_params: MapParams, data_res: float, min_cell_size
     else: # Both fuel and elevation are uniform # TODO: Handle uniform cases
         pass
 
-    if import_roads:
-        print("Starting road data retrieval")
-        # get road data
-        metadata_path = map_params.metadata_path
-        road_data, bounds = get_road_data(metadata_path)
-        if road_data is not None:
-            roads = parse_road_data(road_data, bounds, map_params.fuel_data)
 
-        print("Finished road retrieval")
-    else:
-        roads = None
-
-    map_params.roads = roads
     map_params.geo_info = GeoInfo()
-    map_params.geo_info.bounds = bounds
+    map_params.geo_info.save_bounds(bounds)
     map_params.geo_info.calc_center_coords()
     map_params.geo_info.calc_time_zone()
+    
+    if import_roads:
+        # get road data
+        map_params.roads = get_road_data(map_params)
+    else:
+        map_params.roads = None
+
 
 def find_warping_angle(array: np.ndarray) -> float:
     """_summary_
@@ -377,7 +373,7 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
     with open(save_path + "/" + folder_name + ".json", 'w') as f:
         json.dump(data, f, indent=4)
 
-def get_road_data(path:str) -> Tuple[dict, list]:
+def get_road_data(map: MapParams) -> Tuple[dict, list]:
     """Function that queries the openStreetMap API for the road data at the same region as the
     elevation and fuel maps
     
@@ -386,31 +382,26 @@ def get_road_data(path:str) -> Tuple[dict, list]:
     :return: tuple with dictionary of road data and a list of the geobounds
     :rtype: Tuple[dict, list]
     """
-    # TODO: Do this without metadata file
-    
-    # Load the xml file
-    tree = ET.parse(path)
-    root = tree.getroot()
-    
-    west_bounding = float(root.find(".//westbc").text)
-    east_bounding = float(root.find(".//eastbc").text)
-    north_bounding = float(root.find(".//northbc").text)
-    south_bounding = float(root.find(".//southbc").text)
+
+    west_bound = map.geo_info.bounds.left
+    east_bound = map.geo_info.bounds.right
+    north_bound = map.geo_info.bounds.top
+    south_bound = map.geo_info.bounds.bottom
 
     overpass_url = "http://overpass-api.de/api/interpreter"
 
     overpass_query = f"""
     [out:json];
     (way["highway"]
-    ({south_bounding}, {west_bounding}, {north_bounding}, {east_bounding});
+    ({south_bound}, {west_bound}, {north_bound}, {east_bound});
     );
     out body;
     >;
     out skel qt;
     """
 
-    print(f"Querying OSM for road data at: [west: {west_bounding}, north: {north_bounding}," +
-          f"east: {east_bounding}, south: {south_bounding}]")
+    print(f"Querying OSM for road data at: [west: {west_bound}, north: {north_bound}," +
+          f"east: {east_bound}, south: {south_bound}]")
 
     print("Awaiting response...")
 
@@ -425,47 +416,16 @@ def get_road_data(path:str) -> Tuple[dict, list]:
 
     road_data = response.json()
 
-    print("Road data retrieved successfully!")
-
-    return road_data, [south_bounding, north_bounding, west_bounding, east_bounding]
-
-def parse_road_data(road_data: dict, bounds: list, data: dict) -> list:
-    """Function that takes the raw road data, trims it to fit with the map and interpolates it to
-    decrease the spacing between points on roads.
-
-    :param road_data: dictionary containing raw road data from openStreetMap
-    :type road_data: dict
-    :param bounds: geographic bounds of the region the data is from
-    :type bounds: list
-    :param data: dictionary containing data about the fuel or elevation map
-    :type data: dict
-    :return: list of roads in the form of [((x,y), road type)]
-    :rtype: list
-    """
-    # Extract the bounding coordinates from the data dictionary
-    bbox = {
-        'south': bounds[0],
-        'north': bounds[1],
-        'west': bounds[2],
-        'east': bounds[3] 
-    }
-
-    # Calculate the central point of the bounding box
-    central_lat = (bbox['south'] + bbox['north']) / 2
-    central_lon = (bbox['west'] + bbox['east']) / 2
-
-    # Get the UTM zone of the central point
-    _, _, utm_zone, _ = utm.from_latlon(central_lat, central_lon)
-
     # Get projection based on the utm_zone
+    _, _, utm_zone, _ = utm.from_latlon(map.geo_info.center_lat, map.geo_info.center_lon)    
+
     proj = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84')
+    
+    # Get the origin in x,y coordinates
+    origin_x, origin_y = proj(map.geo_info.bounds.left, map.geo_info.bounds.bottom)
 
     # A dict to hold node coordinates
     nodes = {}
-
-    # Get the origin in x,y coordinates
-    origin_x, origin_y = proj(bbox['west'], bbox['south'])
-
     # First pass: get all node elements with their coordinates
     for element in road_data['elements']:
         if element['type'] == 'node':
@@ -473,10 +433,6 @@ def parse_road_data(road_data: dict, bounds: list, data: dict) -> list:
             lat = element['lat']
             lon = element['lon']
             x, y = proj(lon, lat)
-
-            # account for buffer on other data
-            x -= 120
-            y -= 120
 
             nodes[node_id] = (x - origin_x, y - origin_y)
 
@@ -491,6 +447,8 @@ def parse_road_data(road_data: dict, bounds: list, data: dict) -> list:
                 road = [nodes[node_id] for node_id in node_ids if node_id in nodes]
                 if road:
                     roads.append((road, road_type))
+    
+    print("Road data retrieved successfully!")
 
     # Interpolate points so that each point in roads is at most 0.5m apart
     roads = interpolate_points(roads, 0.5)
@@ -501,9 +459,9 @@ def parse_road_data(road_data: dict, bounds: list, data: dict) -> list:
 
         x, y = zip(*road[0])
         for i in range(len(x)):
-            if 0 < x[i]/30 < data['cols']-1 and 0 < y[i]/30 < data['rows']-1:
-                x_trimmed.append(x[i]/30)
-                y_trimmed.append(y[i]/30)
+            if 0 < x[i] < map.fuel_data.width_m and 0 < y[i] < map.fuel_data.height_m:
+                x_trimmed.append(x[i]/map.fuel_data.resolution)
+                y_trimmed.append(y[i]/map.fuel_data.resolution)
 
         x = tuple(xi for xi in x_trimmed)
         y = tuple(yi for yi in y_trimmed)
