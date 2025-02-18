@@ -13,7 +13,6 @@ from rasterio.warp import reproject
 from rasterio.enums import Resampling as ResamplingMethod
 from rasterio.transform import Affine
 from rasterio.windows import from_bounds
-from rasterio.coords import BoundingBox
 import requests
 import pyproj
 import utm
@@ -24,8 +23,6 @@ from shapely.geometry import Polygon, LineString
 from shapely.geometry import mapping
 from scipy import ndimage, stats
 import numpy as np
-from pyproj import Transformer
-from timezonefinder import TimezoneFinder
 
 from embrs.utilities.file_io import MapGenFileSelector
 from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
@@ -36,21 +33,16 @@ from typing import cast
 
 DATA_RESOLUTION = 30 # meters
 
-def generate_map_from_file(map_params: MapParams, data_res: float, min_cell_size: float):
-    """Generate a simulation map. Take in user's selections of fuel and elevation files
-    along with the drawings they overlay for initial ignitions and fire-breaks and generate a
-    usable map.
+def generate_map_from_file(map_params: MapParams):
+    """_summary_
 
-    :param file_params: Dictionary containing the input parameters/files to generate map from
-    :type file_parmas: dict
-    :param data_res: Resolution of the fuel and elevation data
-    :type data_res: float
-    :param min_cell_size: minimum cell size for this map, used for interpolation of elevation
-                          and fuel data
-    :type min_cell_size: float
-    :raises ValueError: if elevation and fuel data selected are not from the same region
+    Args:
+        map_params (MapParams): _description_
+
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
     """
-
     # Get file paths for all data files
     uniform_fuel = map_params.uniform_fuel
     uniform_elev = map_params.uniform_elev
@@ -63,6 +55,11 @@ def generate_map_from_file(map_params: MapParams, data_res: float, min_cell_size
         elev_bounds = geotiff_to_numpy(map_params.elev_data)
         geotiff_to_numpy(map_params.asp_data)
         geotiff_to_numpy(map_params.slp_data)
+        geotiff_to_numpy(map_params.cc_data)
+        geotiff_to_numpy(map_params.ch_data)
+
+        # Convert canopy height to actual value in meters
+        map_params.ch_data.map = map_params.ch_data.map / 10
 
         # Ensure that the elevation and fuel data are from same region
         for e_bound, f_bound in zip(elev_bounds, fuel_bounds):
@@ -186,8 +183,8 @@ def crop_data_products(map_params: MapParams, bounds: list) -> bool:
     # TODO: How should we handle uniform fuel and elevation case?
     output_dir = map_params.folder
 
-    data_attrs = ['fuel_data', 'elev_data', 'asp_data', 'slp_data']
-    cropped_filenames = ['fuel.tif', 'elevation.tif', 'aspect.tif', 'slope.tif']
+    data_attrs = ['fuel_data', 'elev_data', 'asp_data', 'slp_data', 'cc_data', 'ch_data']
+    cropped_filenames = ['fuel.tif', 'elevation.tif', 'aspect.tif', 'slope.tif', 'canopy_cover.tif', 'canopy_height.tif']
 
     for i, attr in enumerate(data_attrs):
         data_product = getattr(map_params, attr)  # Get the DataProductParams instance
@@ -265,6 +262,8 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
     elev_data = map_params.elev_data    
     slope_data = map_params.slp_data
     aspect_data = map_params.asp_data
+    cc_data = map_params.cc_data
+    ch_data = map_params.ch_data
     roads = map_params.roads
 
     if map_params.geo_info is not None:
@@ -351,6 +350,34 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
                       'resolution': slope_data.resolution,
                       'uniform': slope_data.uniform,
                       'tif_file_path': slope_data.tiff_filepath
+                      }
+    
+    canopy_cover_path = save_path + '/canopy_cover.npy'
+    np.save(canopy_cover_path, cc_data.map)
+    cc_data.np_filepath = canopy_cover_path
+
+    data['canopy_cover'] = {'file': canopy_cover_path,
+                      'width_m': cc_data.width_m,
+                      'height_m': cc_data.height_m,
+                      'rows': cc_data.rows,
+                      'cols': cc_data.cols,
+                      'resolution': cc_data.resolution,
+                      'uniform': cc_data.uniform,
+                      'tif_file_path': cc_data.tiff_filepath
+                      }
+    
+    canopy_height_path = save_path + '/canopy_height.npy'
+    np.save(canopy_height_path, ch_data.map)
+    ch_data.np_filepath = canopy_height_path
+
+    data['canopy_height'] = {'file': canopy_height_path,
+                      'width_m': ch_data.width_m,
+                      'height_m': ch_data.height_m,
+                      'rows': ch_data.rows,
+                      'cols': ch_data.cols,
+                      'resolution': ch_data.resolution,
+                      'uniform': ch_data.uniform,
+                      'tif_file_path': ch_data.tiff_filepath
                       }
 
     # Save the roads data
@@ -888,7 +915,7 @@ def main():
     plt.tick_params(left = False, right = False, bottom = False, labelleft = False,
                     labelbottom = False)
 
-    generate_map_from_file(map_params, DATA_RESOLUTION, 1)
+    generate_map_from_file(map_params)
     user_data = get_user_data(fig)
     save_to_file(map_params, user_data)
 

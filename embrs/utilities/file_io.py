@@ -212,14 +212,16 @@ class MapGenFileSelector(FileSelectBase):
         self.uniform_fuel.trace_add("write", self.uniform_options_toggled)
         self.fuel_selection = tk.StringVar()
         self.fuel_selection.set("Short grass")
-        self.fuel_selection.trace_add("write", self.fuel_selection_changed)
         self.fuel_selection_val = 1
         self.fuel_map_filename = tk.StringVar()
         self.uniform_elev = tk.BooleanVar()
         self.uniform_elev.trace_add("write", self.uniform_options_toggled)
+        self.input_folder = tk.StringVar()
         self.elev_map_filename = tk.StringVar()
         self.aspect_map_filename = tk.StringVar()
         self.slope_map_filename = tk.StringVar()
+        self.cc_map_filename = tk.StringVar()
+        self.ch_map_filename = tk.StringVar()
         self.output_map_folder = tk.StringVar()
         self.import_roads = tk.BooleanVar()
         self.import_roads.set(False)
@@ -232,6 +234,9 @@ class MapGenFileSelector(FileSelectBase):
 
         # Create field to select save destination
         self.create_folder_selector(frame, "Save map to:   ", self.output_map_folder)
+
+        # Create field to select folder of LF data
+        self.create_folder_selector(frame, "Landfire Input Folder:   ", self.input_folder)
 
         # Create frame for fuel map selection
         _, _, self.fuel_button, self.fuel_frame = self.create_file_selector(frame, "Fuel Map:         ",
@@ -270,8 +275,17 @@ class MapGenFileSelector(FileSelectBase):
         _, _, self.slope_button, self.slope_frame = self.create_file_selector(frame,
                                                 "Slope Map: ", self.slope_map_filename,
             [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
-
-
+        
+        # Create frame for canopy cover map selection
+        _, _, self.cc_button, self.cc_frame = self.create_file_selector(frame,
+                                                "Canopy Cover Map: ", self.cc_map_filename,
+            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
+        
+        # Create frame for canopy height map selection
+        _, _, self.ch_button, self.ch_frame = self.create_file_selector(frame,
+                                                "Canopy Height Map: ", self.ch_map_filename,
+            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
+        
         # Create frame for importing roads
         import_road_frame = tk.Frame(frame)
         import_road_frame.pack(padx=10,pady=5)
@@ -298,6 +312,9 @@ class MapGenFileSelector(FileSelectBase):
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
         self.submit_button.pack(pady=10)
+
+        self.fuel_selection.trace_add("write", self.fuel_selection_changed)
+        self.input_folder.trace_add("write", self.load_tif_files)
 
     def uniform_options_toggled(self, *args):
         """Callback function that handles uniform fuel and uniform elevation options,
@@ -347,6 +364,34 @@ class MapGenFileSelector(FileSelectBase):
         """
         self.fuel_selection_val = FuelConstants.fuel_type_reverse_lookup[self.fuel_selection.get()]
 
+    def load_tif_files(self, *args):
+        input_folder = self.input_folder.get()
+
+        print("In load tif files")
+
+        file_mapping = {
+            "fuel": "F13",
+            "elev": "Elev",
+            "aspect": "Asp",
+            "slope": "SlpD",
+            "cc": "CC",
+            "ch": "CH"
+        }
+
+        for subfolder in os.listdir(input_folder):
+
+            print(f"subfolder: {subfolder}")
+
+            subfolder_path = os.path.join(input_folder, subfolder)
+            for key, code_word in file_mapping.items():
+                for file in os.listdir(subfolder_path):
+                    if code_word in file and file.endswith(".tif"):
+                        full_path = os.path.join(subfolder_path, file)
+                        getattr(self, f"{key}_map_filename").set(full_path)
+                        print(f"Found .tif for {key}")
+                        break
+        
+        self.validate_fields()
 
     def validate_fields(self):
         """Function used to validate the inputs, primarily responsible for activating/disabling
@@ -354,7 +399,8 @@ class MapGenFileSelector(FileSelectBase):
         """
         # Check that all fields are filled before enabling submit button
         if all([(self.fuel_map_filename.get() or self.uniform_fuel.get()),
-                ((self.elev_map_filename.get() and self.aspect_map_filename.get() and self.slope_map_filename.get()) or self.uniform_elev.get()),
+                ((self.elev_map_filename.get() and self.aspect_map_filename.get() and self.slope_map_filename.get(),
+                  self.cc_map_filename.get() and self.ch_map_filename.get()) or self.uniform_elev.get()),
                  self.output_map_folder.get()]):
 
             self.submit_button.config(state='normal')
@@ -391,6 +437,8 @@ class MapGenFileSelector(FileSelectBase):
             map_params.elev_data.tiff_filepath = self.elev_map_filename.get()
             map_params.asp_data.tiff_filepath = self.aspect_map_filename.get()
             map_params.slp_data.tiff_filepath = self.slope_map_filename.get()
+            map_params.cc_data.tiff_filepath = self.cc_map_filename.get()
+            map_params.ch_data.tiff_filepath = self.ch_map_filename.get()
 
         if self.uniform_elev.get() and self.uniform_fuel.get():
             map_params.width_m = self.sim_width.get()
@@ -399,7 +447,6 @@ class MapGenFileSelector(FileSelectBase):
         else:
             map_params.width_m = map_params.elev_data.width_m
             map_params.height_m = map_params.elev_data.height_m
-
 
         self.result = map_params
 
