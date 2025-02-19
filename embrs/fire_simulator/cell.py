@@ -100,6 +100,10 @@ class Cell:
 
         # Canopy height as 10 * m
         self.canopy_height = canopy_height
+
+        self.canopy_base_height = 0
+
+        self.canopy_bulk_density = 0
         
         # Wind adjustment factor based on sheltering condition
         self.wind_adj_factor = 1
@@ -300,6 +304,13 @@ class Cell:
             canopy_height (float): average top of canopy height within the cell in meters
         """
         self.canopy_height = canopy_height
+
+    def _set_canopy_base_height(self, canopy_base_height: float):
+        self.canopy_base_height = canopy_base_height
+
+    
+    def _set_canopy_bulk_density(self, canopy_bulk_density: float):
+        self.canopy_bulk_density = canopy_bulk_density
 
     def _set_wind_adj_factor(self):
         """Sets the wind adjustment factor (WAF) for the cell based on the fuel type and canopy characteristics.

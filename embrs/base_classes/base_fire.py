@@ -73,41 +73,34 @@ class BaseFireSim:
                 new_cell = Cell(id, i, j, self._cell_size)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
-                # TODO: this code is very repetitive
-                    # TODO: make it into a loop over the different data products
+                data_col = int(np.floor(cell_x/self._data_res))
+                data_row = int(np.floor(cell_y/self._data_res))
 
                 # Set cell elevation from elevation map
-                top_col = int(np.floor(cell_x/self.elevation_res))
-                top_row = int(np.floor(cell_y/self.elevation_res))
-                new_cell._set_elev(self._elevation_map[top_row, top_col])
+                new_cell._set_elev(self._elevation_map[data_row, data_col])
                 self.coarse_elevation[j, i] = new_cell.z
 
                 # Set cell fuel type from fuel map
-                fuel_col = int(np.floor(cell_x/self.fuel_res))
-                fuel_row = int(np.floor(cell_y/self.fuel_res))
-                fuel_key = self._fuel_map[fuel_row, fuel_col]
+                fuel_key = self._fuel_map[data_row, data_col]
                 new_cell._set_fuel_type(Anderson13(fuel_key))
 
                 # Set cell aspect from aspect map
-                aspect_col = int(np.floor(cell_x/self._aspect_res))
-                aspect_row = int(np.floor(cell_y/self._aspect_res))
-
-                new_cell._set_aspect(self._aspect_map[aspect_row, aspect_col])
+                new_cell._set_aspect(self._aspect_map[data_row, data_col])
 
                 # Set cell slope from slope map
-                slope_col = int(np.floor(cell_x/self._slope_res))
-                slope_row = int(np.floor(cell_y/self._slope_res))
-                new_cell._set_slope(self._slope_map[slope_row, slope_col])
+                new_cell._set_slope(self._slope_map[data_row, data_col])
 
                 # Set canopy cover from canopy cover map
-                cc_col = int(np.floor(cell_x/self._cc_res))
-                cc_row = int(np.floor(cell_y/self._cc_res))
-                new_cell._set_canopy_cover(self._cc_map[cc_row, cc_col])
+                new_cell._set_canopy_cover(self._cc_map[data_row, data_col])
 
                 # Set canopy height from canopy height map
-                ch_col = int(np.floor(cell_x/self._ch_res))
-                ch_row = int(np.floor(cell_y/self._ch_res))
-                new_cell._set_canopy_height(self._ch_map[ch_row, ch_col])
+                new_cell._set_canopy_height(self._ch_map[data_row, data_col])
+
+                # Set canopy base height from cbh map
+                new_cell._set_canopy_base_height(self._cbh_map[data_row, data_col])
+
+                # Set canopy bulk density from cbd map
+                new_cell._set_canopy_bulk_density(self._cbd_map[data_row, data_col])
 
                 # Set WAF for the cell
                 new_cell._set_wind_adj_factor()
@@ -201,29 +194,21 @@ class BaseFireSim:
         self.coarse_elevation = np.empty(self._shape)
 
         # Load DataProductParams for each data product
-        elev_data = map_params.elev_data
-        slp_data = map_params.slp_data
-        asp_data = map_params.asp_data
-        fuel_data = map_params.fuel_data
-        cc_data = map_params.cc_data
-        ch_data = map_params.ch_data
+        lcp_data = map_params.lcp_data
 
         # Get map for each data product
-        self._elevation_map = np.flipud(elev_data.map)
-        self._slope_map = np.flipud(slp_data.map)
-        self._aspect_map = np.flipud(asp_data.map)
+        self._elevation_map = np.flipud(lcp_data.elevation_map)
+        self._slope_map = np.flipud(lcp_data.slope_map)
+        self._aspect_map = np.flipud(lcp_data.aspect_map)
         self._aspect_map = (180 + self._aspect_map) % 360 
-        self._fuel_map = np.flipud(fuel_data.map)
-        self._cc_map = np.flipud(cc_data.map)
-        self._ch_map = np.flipud(ch_data.map)
+        self._fuel_map = np.flipud(lcp_data.fuel_map)
+        self._cc_map = np.flipud(lcp_data.canopy_cover_map)
+        self._ch_map = np.flipud(lcp_data.canopy_height_map)
+        self._cbh_map = np.flipud(lcp_data.canopy_base_height_map)
+        self._cbd_map = np.flipud(lcp_data.canopy_bulk_density_map)
 
-        # Get resolution for each data product map
-        self._elevation_res = elev_data.resolution
-        self._aspect_res = asp_data.resolution
-        self._slope_res = slp_data.resolution
-        self._fuel_res = fuel_data.resolution
-        self._cc_res = cc_data.resolution
-        self._ch_res = ch_data.resolution
+        # Get resolution for data products
+        self._data_res = lcp_data.resolution
 
         # Load scenario specific data
         scenario = map_params.scenario_data
@@ -288,16 +273,14 @@ class BaseFireSim:
         """
         #TODO: need to figure out how we are going to model roads going forward
         if self.roads is not None:
-            for road in self.roads:
-                for point in road[0]:
-                    road_x, road_y = point[0], point[1]
-
+            for road, road_type in self.roads:
+                for road_x, road_y in zip(road[0], road[1]):
                     road_cell = self.get_cell_from_xy(road_x, road_y, oob_ok = True)
 
                     if road_cell is not None:
                         if road_cell.state == CellStates.FIRE:
                             road_cell._set_state(CellStates.FUEL)
-                        road_cell._set_fuel_content(rc.road_fuel_vals[road[1]])
+                        road_cell._set_fuel_content(rc.road_fuel_vals[road_type])
 
     def _set_firebreaks(self):
         """Updates the simulation grid to incorporate firebreaks.

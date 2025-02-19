@@ -9,19 +9,6 @@ from timezonefinder import TimezoneFinder
 # TODO: Add comments/docstrings for dataclasses
 
 @dataclass
-class DataProductParams:
-    width_m: Optional[float] = None
-    height_m: Optional[float] = None
-    rows: Optional[int] = None
-    cols: Optional[int] = None
-    resolution: Optional[int] = None
-    map: Optional[np.ndarray] = None
-    uniform: Optional[bool] = None
-    tiff_filepath: Optional[str] = None
-    cropped_filepath: Optional[str] = None
-    np_filepath: Optional[str] = None
-
-@dataclass
 class MapDrawerData:
     fire_breaks: Optional[Dict] = field(default_factory=dict)
     fuel_vals: Optional[List] = field(default_factory=list)
@@ -34,22 +21,12 @@ class GeoInfo:
     center_lon: Optional[float] = None
     timezone: Optional[str] = None
 
-    def save_bounds(self, bounds: BoundingBox):
-        epsg_code = "EPSG:5070"
-
-        transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
-
-        left, bottom = transformer.transform(bounds.left, bounds.bottom)
-        right, top = transformer.transform(bounds.right, bounds.top)
-
-        self.bounds = BoundingBox(left, bottom, right, top)
-
     def calc_center_coords(self):
         if self.bounds is None:
             raise ValueError("Can't perform this function without bounds")
 
         # Manually set the correct EPSG code for NAD83 / Conus Albers
-        epsg_code = "EPSG:5070"
+        epsg_code = "EPSG:5070" # TODO: this should probably not be hard-coded
 
         # Compute midpoint in projected coordinates
         mid_x = (self.bounds.left + self.bounds.right) / 2
@@ -68,34 +45,43 @@ class GeoInfo:
         # Get the time zone at the location to sample
         tf = TimezoneFinder()
         self.timezone = tf.timezone_at(lng=self.center_lon, lat=self.center_lat)
-        
+
+@dataclass
+class LandscapeData:
+    elevation_map: np.ndarray
+    slope_map: np.ndarray
+    aspect_map: np.ndarray
+    fuel_map: np.ndarray
+    canopy_cover_map: np.ndarray
+    canopy_height_map: np.ndarray
+    canopy_base_height_map: np.ndarray
+    canopy_bulk_density_map: np.ndarray
+    rows: int
+    cols: int
+    resolution: int
+    width_m: float
+    height_m: float
+    transform: any
+    crs: any
+
 @dataclass
 class MapParams:
     folder: Optional[str] = None
-    metadata_path: Optional[str] = None
+    lcp_filepath: Optional[str] = None
+    cropped_lcp_path: Optional[str] = None
     import_roads: Optional[bool] = None
-    uniform_fuel: Optional[bool] = None
-    uniform_elev: Optional[bool] = None
-    fuel_type: Optional[int] = None
-    fuel_data: Optional[DataProductParams] = DataProductParams()
-    elev_data: Optional[DataProductParams] = DataProductParams()
-    asp_data: Optional[DataProductParams] = DataProductParams()
-    slp_data: Optional[DataProductParams] = DataProductParams()
-    cc_data: Optional[DataProductParams] = DataProductParams()
-    ch_data: Optional[DataProductParams] = DataProductParams()
+    lcp_data: Optional[LandscapeData] = None
     roads: Optional[List] = field(default_factory=list)
-    width_m: Optional[float] = None
-    height_m: Optional[float] = None
     geo_info: Optional[GeoInfo] = None
     north_angle_deg: Optional[float] = None
     scenario_data: Optional[MapDrawerData] = None
 
     def size(self) -> Tuple[float, float]:
-        return (self.width_m, self.height_m)
+        return (self.lcp_data.width_m, self.lcp_data.height_m)
     
     def shape(self, cell_size: int) -> Tuple[int, int]:
-        rows = int(np.floor(self.elev_data.height_m/(1.5*cell_size))) 
-        cols = int(np.floor(self.elev_data.width_m/(np.sqrt(3)*cell_size)))
+        rows = int(np.floor(self.lcp_data.height_m/(1.5*cell_size))) 
+        cols = int(np.floor(self.lcp_data.width_m/(np.sqrt(3)*cell_size)))
 
         return (rows, cols)
 
@@ -145,7 +131,6 @@ class WindNinjaTask:
     time_step: float
     entry: WeatherEntry
     elevation_path: str
-    vegetation_path: str
     timezone: str
     north_angle: float
     mesh_resolution: float

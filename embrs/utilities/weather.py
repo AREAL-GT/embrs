@@ -100,7 +100,6 @@ def retrieve_openmeteo_data(weather: WeatherParams, geo: GeoInfo):
     return forecast_seed
 
 def openmeteo_ninjaify(hourly_data: dict, params: WeatherParams) -> WeatherSeed:
-    # TODO: do we want to pass these options as inputs to generalize this function
     weather_seed = WeatherSeed(
         params = params,
         time_step = 60,

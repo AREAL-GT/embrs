@@ -208,83 +208,21 @@ class MapGenFileSelector(FileSelectBase):
         super().__init__("Select Input Data Files and Map Destination Folder")
 
         # Define variables
-        self.uniform_fuel = tk.BooleanVar()
-        self.uniform_fuel.trace_add("write", self.uniform_options_toggled)
-        self.fuel_selection = tk.StringVar()
-        self.fuel_selection.set("Short grass")
-        self.fuel_selection_val = 1
-        self.fuel_map_filename = tk.StringVar()
-        self.uniform_elev = tk.BooleanVar()
-        self.uniform_elev.trace_add("write", self.uniform_options_toggled)
-        self.input_folder = tk.StringVar()
-        self.elev_map_filename = tk.StringVar()
-        self.aspect_map_filename = tk.StringVar()
-        self.slope_map_filename = tk.StringVar()
-        self.cc_map_filename = tk.StringVar()
-        self.ch_map_filename = tk.StringVar()
         self.output_map_folder = tk.StringVar()
+        self.lcp_filename = tk.StringVar()
         self.import_roads = tk.BooleanVar()
         self.import_roads.set(False)
-        self.sim_width = tk.IntVar()
-        self.sim_width.set(1000)
-        self.sim_height = tk.IntVar()
-        self.sim_height.set(1000)
+
 
         frame = self.create_frame(self.root)
 
         # Create field to select save destination
         self.create_folder_selector(frame, "Save map to:   ", self.output_map_folder)
 
-        # Create field to select folder of LF data
-        self.create_folder_selector(frame, "Landfire Input Folder:   ", self.input_folder)
-
-        # Create frame for fuel map selection
-        _, _, self.fuel_button, self.fuel_frame = self.create_file_selector(frame, "Fuel Map:         ",
-                                                  self.fuel_map_filename,
-                                                  [("Tagged Image File Format","*.tif"),
-                                                  ("Tagged Image File Format","*.tiff")])
-
-        # Create field for uniform fuel option
-        tk.Checkbutton(self.fuel_frame, text='Uniform Fuel',
-                       variable=self.uniform_fuel).grid(row=0, column=3)
-
-        uniform_fuel_frame = tk.Frame(frame)
-        uniform_fuel_frame.pack(padx=10,pady=5)
-        tk.Label(uniform_fuel_frame, text="Uniform Fuel Type:",
-                 anchor="center").grid(row=0, column=0)
-
-        tk.OptionMenu(uniform_fuel_frame, self.fuel_selection,
-                      *FuelConstants.fuel_names.values()).grid(row=0, column=1)
-
-        # Create frame for elevation map selection
-        _, _, self.elev_button, self.elev_frame = self.create_file_selector(frame,
-                                                  "Elevation Map: ", self.elev_map_filename,
-                    [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
-
-        # Create field for uniform elev option
-        tk.Checkbutton(self.elev_frame, text="Uniform Elevation",
-                       variable=self.uniform_elev).grid(row=0, column=3)
-
-        # Create frame for aspect map selection
-        _, _, self.asp_button, self.asp_frame = self.create_file_selector(frame,
-                                                "Aspect Map: ", self.aspect_map_filename,
-            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
-
-
-        # Create frame for slope map selection
-        _, _, self.slope_button, self.slope_frame = self.create_file_selector(frame,
-                                                "Slope Map: ", self.slope_map_filename,
-            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
-        
-        # Create frame for canopy cover map selection
-        _, _, self.cc_button, self.cc_frame = self.create_file_selector(frame,
-                                                "Canopy Cover Map: ", self.cc_map_filename,
-            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
-        
-        # Create frame for canopy height map selection
-        _, _, self.ch_button, self.ch_frame = self.create_file_selector(frame,
-                                                "Canopy Height Map: ", self.ch_map_filename,
-            [("Tagged Image File Format","*.tif"), ("Tagged Image File Format","*.tiff")])
+        _, _, self.lcp_button, self.lcp_frame = self.create_file_selector(frame, "Landscape File:     ",
+                                                self.lcp_filename,
+                                                [("Tagged Image File Format","*.tif"),
+                                                ("Tagged Image File Format","*.tiff")])
         
         # Create frame for importing roads
         import_road_frame = tk.Frame(frame)
@@ -295,114 +233,20 @@ class MapGenFileSelector(FileSelectBase):
 
         self.import_roads_button.grid(row=0, column=0)
 
-        # Create frame for specifying sim size
-        sim_size_frame = tk.Frame(frame)
-        sim_size_frame.pack(padx=10,pady=5)
-        tk.Label(sim_size_frame, text="width (m)", anchor="center").grid(row=0, column=0)
-        self.width_entry = tk.Entry(sim_size_frame, textvariable=self.sim_width, width=20,
-                                                                         state='disabled')
-
-        self.width_entry.grid(row=0, column=1)
-        tk.Label(sim_size_frame, text="height (m)", anchor="center").grid(row=0, column=2)
-        self.height_entry = tk.Entry(sim_size_frame, textvariable=self.sim_height, width=20,
-                                     state='disabled')
-
-        self.height_entry.grid(row=0, column=3)
-
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
         self.submit_button.pack(pady=10)
 
-        self.fuel_selection.trace_add("write", self.fuel_selection_changed)
-        self.input_folder.trace_add("write", self.load_tif_files)
-
-    def uniform_options_toggled(self, *args):
-        """Callback function that handles uniform fuel and uniform elevation options,
-        turns on/off functionality based on these selections
-        """
-        if self.uniform_fuel.get() and self.uniform_elev.get():
-            self.fuel_button.configure(state='disabled')
-            self.elev_button.configure(state='disabled')
-            self.asp_button.configure(state='disabled')
-            self.slope_button.configure(state='disabled')
-            self.height_entry.config(state='normal')
-            self.width_entry.config(state='normal')
-            self.import_roads_button.config(state='disabled')
-            self.import_roads.set(False)
-
-        elif self.uniform_fuel.get() and not self.uniform_elev.get():
-            self.fuel_button.configure(state='disabled')
-            self.elev_button.configure(state='active')
-            self.elev_button.configure(state='active')
-            self.asp_button.configure(state='active')
-            self.height_entry.config(state='disabled')
-            self.width_entry.config(state='disabled')
-            self.import_roads_button.config(state='active')
-
-        elif not self.uniform_fuel.get() and self.uniform_elev.get():
-            self.fuel_button.configure(state='active')
-            self.elev_button.configure(state='disabled')
-            self.slope_button.configure(state='disabled')
-            self.asp_button.configure(state='disabled')
-            self.height_entry.config(state='disabled')
-            self.width_entry.config(state='disabled')
-            self.import_roads_button.config(state='active')
-
-        else:
-            self.fuel_button.configure(state='active')
-            self.elev_button.configure(state='active')
-            self.slope_button.configure(state='active')
-            self.asp_button.configure(state='active')
-            self.width_entry.config(state='disabled')
-            self.height_entry.config(state='disabled')
-            self.import_roads_button.config(state='active')
-
-        self.validate_fields()
-
-    def fuel_selection_changed(self, *args):
-        """Callback function to handle the uniform fuel type value being changed
-        """
-        self.fuel_selection_val = FuelConstants.fuel_type_reverse_lookup[self.fuel_selection.get()]
-
-    def load_tif_files(self, *args):
-        input_folder = self.input_folder.get()
-
-        print("In load tif files")
-
-        file_mapping = {
-            "fuel": "F13",
-            "elev": "Elev",
-            "aspect": "Asp",
-            "slope": "SlpD",
-            "cc": "CC",
-            "ch": "CH"
-        }
-
-        for subfolder in os.listdir(input_folder):
-
-            print(f"subfolder: {subfolder}")
-
-            subfolder_path = os.path.join(input_folder, subfolder)
-            for key, code_word in file_mapping.items():
-                for file in os.listdir(subfolder_path):
-                    if code_word in file and file.endswith(".tif"):
-                        full_path = os.path.join(subfolder_path, file)
-                        getattr(self, f"{key}_map_filename").set(full_path)
-                        print(f"Found .tif for {key}")
-                        break
         
-        self.validate_fields()
+        self.output_map_folder.trace_add("write", self.validate_fields)
+        self.lcp_filename.trace_add("write", self.validate_fields)
 
-    def validate_fields(self):
+    def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
         # Check that all fields are filled before enabling submit button
-        if all([(self.fuel_map_filename.get() or self.uniform_fuel.get()),
-                ((self.elev_map_filename.get() and self.aspect_map_filename.get() and self.slope_map_filename.get(),
-                  self.cc_map_filename.get() and self.ch_map_filename.get()) or self.uniform_elev.get()),
-                 self.output_map_folder.get()]):
-
+        if self.lcp_filename.get() and self.output_map_folder.get():
             self.submit_button.config(state='normal')
 
         else:
@@ -415,38 +259,8 @@ class MapGenFileSelector(FileSelectBase):
         map_params = MapParams()
 
         map_params.folder = self.output_map_folder.get()
+        map_params.lcp_filepath = self.lcp_filename.get()
         map_params.import_roads = self.import_roads.get()
-
-        if self.uniform_fuel.get():
-            map_params.uniform_fuel = True
-            map_params.fuel_type = self.fuel_selection_val
-            map_params.fuel_data.tiff_filepath = ""
-        
-        else:
-            map_params.uniform_fuel = False
-            map_params.fuel_data.tiff_filepath = self.fuel_map_filename.get()
-
-        if self.uniform_elev.get():
-            map_params.uniform_elev = True
-            map_params.elev_data.tiff_filepath = ""
-            map_params.asp_data.tiff_filepath = ""
-            map_params.slp_data.tiff_filepath = ""
-        
-        else:
-            map_params.uniform_elev = False
-            map_params.elev_data.tiff_filepath = self.elev_map_filename.get()
-            map_params.asp_data.tiff_filepath = self.aspect_map_filename.get()
-            map_params.slp_data.tiff_filepath = self.slope_map_filename.get()
-            map_params.cc_data.tiff_filepath = self.cc_map_filename.get()
-            map_params.ch_data.tiff_filepath = self.ch_map_filename.get()
-
-        if self.uniform_elev.get() and self.uniform_fuel.get():
-            map_params.width_m = self.sim_width.get()
-            map_params.height_m = self.sim_width.get()
-
-        else:
-            map_params.width_m = map_params.elev_data.width_m
-            map_params.height_m = map_params.elev_data.height_m
 
         self.result = map_params
 
@@ -454,7 +268,6 @@ class MapGenFileSelector(FileSelectBase):
         self.root.quit()
 
 class SimFolderSelector(FileSelectBase):
-    # TODO: need to deal with duration based on the weather file currently input
     """Class used to prompt user for inputs to set up a sim
     """
     def __init__(self, submit_callback:Callable):

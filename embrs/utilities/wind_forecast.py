@@ -66,7 +66,6 @@ def run_windninja_single(task: WindNinjaTask):
         "--initialization_method", "domainAverageInitialization",
         "--elevation_file", task.elevation_path,
         "--output_path", output_path,
-        "--vegetation", task.vegetation_path,
         "--mesh_resolution", str(task.mesh_resolution),
         "--units_mesh_resolution", "m",
         "--time_zone", task.timezone,
@@ -144,8 +143,7 @@ def run_windninja(map: MapParams, weather: WeatherSeed) -> Tuple[np.ndarray, flo
             index=i,
             time_step=time_step,
             entry=entry,
-            elevation_path=map.elev_data.cropped_filepath,
-            vegetation_path="trees", # TODO: implement vegetation
+            elevation_path=map.cropped_lcp_path,
             timezone=timezone,
             north_angle=north_angle,
             mesh_resolution=mesh_resolution,

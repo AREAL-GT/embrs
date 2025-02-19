@@ -229,8 +229,6 @@ def load_sim_params(cfg_path: str) -> SimParams:
 
     mesh_resolution = config["Weather"].getint("mesh_resolution", None)
 
-    print(f"mesh_res: {mesh_resolution}")
-
     if mesh_resolution is None:
         mesh_resolution = 250
         print(f"Warning: Mesh resolution for WindNinja not specified in {cfg_path}, defaulting to 250m.")

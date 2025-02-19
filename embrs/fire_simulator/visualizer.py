@@ -173,26 +173,17 @@ class Visualizer:
 
             # Plot roads if they exist
             if sim.roads is not None:
-                for road in sim.roads:
-                    x_trimmed = []
-                    y_trimmed = []
+                for road, road_type in sim.roads:
+                    
+                    x, y = road[0], road[1]
 
-                    x, y = zip(*road[0])
-                    for i, x_i in enumerate(x):
-                        if 0 < x_i/30 < sim.grid_width and 0 < y[i]/30 < sim.grid_height:
-                            x_trimmed.append(x_i)
-                            y_trimmed.append(y[i])
-
-                    x = tuple(xi for xi in x_trimmed)
-                    y = tuple(yi for yi in y_trimmed)
-
-                    road_color = rc.road_color_mapping[road[1]]
+                    road_color = rc.road_color_mapping[road_type]
                     h_ax.plot(x, y, color= road_color)
 
                     if road_color not in added_colors:
                         added_colors.append(road_color)
                         legend_elements.append(mpatches.Patch(color=road_color,
-                                               label = f"Road - {road[1]}"))
+                                               label = f"Road - {road_type}"))
 
             # Plot firebreaks if they exist
             if sim.fire_breaks is not None:
@@ -244,19 +235,9 @@ class Visualizer:
 
             # Plot roads if they exist
             if sim.roads is not None:
-                for road in sim.roads:
-                    x_trimmed = []
-                    y_trimmed = []
-
-                    x, y = zip(*road[0])
-                    for i, x_i in enumerate(x):
-                        if 0 < x_i/30 < sim.grid_width and 0 < y[i]/30 < sim.grid_height:
-                            x_trimmed.append(x_i)
-                            y_trimmed.append(y[i])
-
-                    x = tuple(xi for xi in x_trimmed)
-                    y = tuple(yi for yi in y_trimmed)
-
+                for road, road_type in sim.roads:
+                    x, y = road[0], road[1]
+                    
                     road_color = fc.fuel_color_mapping[91]
                     h_ax.plot(x, y, color= road_color)
 

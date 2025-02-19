@@ -49,11 +49,14 @@ class CropTiffTool:
         """Loads and plots the TIFF data."""
         with rasterio.open(self.tiff_path) as dataset:
             self.extent = [dataset.bounds.left, dataset.bounds.right, dataset.bounds.bottom, dataset.bounds.top]
-            self.data = dataset.read(1)  # Assuming single-band TIFF
+            self.fuel_data = dataset.read(4) # Read fuel data from raster
             
-            nodata_value = dataset.nodata
+            nodata_value = -9999
+
+            print(f"nodata_value: {nodata_value}")
+
             if nodata_value is not None:
-                self.data[self.data == nodata_value] = -100
+                self.fuel_data[self.fuel_data == nodata_value] = -100
 
         # Create a color list in the right order
         colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
@@ -64,7 +67,7 @@ class CropTiffTool:
         # Create a norm object to map your data points to the colormap
         norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
 
-        self.ax.imshow(self.data, extent=self.extent, cmap=cmap, norm=norm)
+        self.ax.imshow(self.fuel_data, extent=self.extent, cmap=cmap, norm=norm)
         self.ax.set_title("Draw a bounding box to crop the TIFF file")
         
     def on_select(self, eclick, erelease):
@@ -91,6 +94,8 @@ class CropTiffTool:
         """Returns the selected bounding box coordinates."""
         return self.coords
 
+
+# TODO: this class needs to be fixed
 class PolygonDrawer:
     """Class used for drawing polygons on top of sim map for specifying locations of initial
     ignitions and fire-breaks.
