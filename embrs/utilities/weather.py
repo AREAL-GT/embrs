@@ -20,7 +20,7 @@ def generate_weather(sim_params: SimParams):
     if weather.input_type == "OpenMeteo":
         forecast, time_step = open_meteo_weather(map, weather)
 
-    elif weather.input_type == "WeatherFile":
+    elif weather.input_type == "File":
         forecast, time_step = weather_from_file(map, weather)
         
     return forecast, time_step
@@ -126,6 +126,7 @@ def file_ninjaify(data: dict, weather: WeatherParams) -> WeatherSeed:
         params = weather,
         time_step = data["time_step_min"],
         input_wind_ht = data["wind_height"],
+        input_wind_ht_units=data["wind_height_units"],
         input_wind_vel_units = data["wind_speed_units"],
         input_temp_units = data["temperature_units"]
     )
@@ -161,4 +162,7 @@ def weather_from_file(map: MapParams, weather: WeatherParams):
     with open(weather.file, 'r') as file:
         seed_data = json.load(file)
 
-    return file_ninjaify(seed_data, map, weather)
+    forecast_seed = file_ninjaify(seed_data, weather)
+
+    return run_windninja(map, forecast_seed)
+

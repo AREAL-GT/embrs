@@ -53,7 +53,6 @@ class CropTiffTool:
             
             nodata_value = -9999
 
-            print(f"nodata_value: {nodata_value}")
 
             if nodata_value is not None:
                 self.fuel_data[self.fuel_data == nodata_value] = -100

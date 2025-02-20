@@ -520,7 +520,9 @@ class SimFolderSelector(FileSelectBase):
             num_entries = len(weather['weather entries'])
 
             weather_duration = weather_time_step_hr * num_entries
+            self.end_datetime = self.start_datetime + timedelta(hours=weather_duration)
             self.max_duration = weather_duration
+            self.duration.set(self.max_duration)
 
         elif filepath == "":
             pass
@@ -665,7 +667,7 @@ class SimFolderSelector(FileSelectBase):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
-        if self.map_folder.get() and  (self.skip_log.get() or self.log_folder.get()) and (self.use_open_meteo.get() or self.weather.get()):
+        if self.map_folder.get() and  (self.skip_log.get() or self.log_folder.get()) and (self.use_open_meteo.get() or self.weather_file.get()):
             self.submit_button.config(state='normal')
         else:
             self.submit_button.config(state='disabled')

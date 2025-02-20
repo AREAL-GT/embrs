@@ -5,6 +5,7 @@ import signal
 import importlib
 import sys
 import copy
+import json
 import os
 import pickle
 from typing import Tuple
@@ -278,8 +279,18 @@ def load_sim_params(cfg_path: str) -> SimParams:
         raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
 
     if detect_duration:
-        duration = weather_params.end_datetime - weather_params.start_datetime
-        duration_s = duration.total_seconds()
+        if weather_input_type == "OpenMeteo":
+            duration = weather_params.end_datetime - weather_params.start_datetime
+            duration_s = duration.total_seconds()
+        elif weather_input_type == "File":
+            with open(weather_params.file, "rb") as f:
+                weather = json.load(f)
+
+            # get duration from number of entries
+            weather_time_step_min = weather['time_step_min']
+            weather_time_step_hr = weather_time_step_min / 60
+            num_entries = len(weather['weather entries'])
+            duration_s = weather_time_step_hr * num_entries * 3600
 
     t_step_s = config["Simulation"].getint("t_step_s", None)
     if t_step_s is None:
