@@ -58,13 +58,15 @@ def retrieve_openmeteo_data(weather: WeatherParams, geo: GeoInfo):
     lat = geo.center_lat
     lon = geo.center_lon
 
+    print(f"input latitude: {lat}, output longitude: {lon}")
+
     url = "https://archive-api.open-meteo.com/v1/archive"
     api_input = {
         "latitude": lat,
         "longitude": lon,
         "start_date": start_datetime_utc.date().strftime("%Y-%m-%d"),
         "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
-        "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover"],
+        "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
         "wind_speed_unit": "ms",
         "temperature_unit": "fahrenheit",
         "timezone": "auto"
@@ -78,6 +80,9 @@ def retrieve_openmeteo_data(weather: WeatherParams, geo: GeoInfo):
     hourly_temperature_2m = hourly.Variables(2).ValuesAsNumpy()
     hourly_rel_humidity_2m = hourly.Variables(3).ValuesAsNumpy()
     hourly_cloud_cover = hourly.Variables(4).ValuesAsNumpy()
+    hourly_ghi = hourly.Variables(5).ValuesAsNumpy()
+    hourly_dhi = hourly.Variables(6).ValuesAsNumpy()
+    hourly_dni = hourly.Variables(7).ValuesAsNumpy()
 
     hourly_data = {}
 
@@ -93,6 +98,9 @@ def retrieve_openmeteo_data(weather: WeatherParams, geo: GeoInfo):
     hourly_data["temperature_2m"] = hourly_temperature_2m
     hourly_data["rel_humidity_2m"] = hourly_rel_humidity_2m
     hourly_data["cloud_cover"] = hourly_cloud_cover
+    hourly_data["ghi"] = hourly_ghi
+    hourly_data["dhi"] = hourly_dhi
+    hourly_data["dni"] = hourly_dni
 
     hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
     forecast_seed = openmeteo_ninjaify(hourly_data, weather)
