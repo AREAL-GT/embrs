@@ -20,6 +20,7 @@ class GeoInfo:
     center_lat: Optional[float] = None
     center_lon: Optional[float] = None
     timezone: Optional[str] = None
+    north_angle_deg: Optional[float] = None
 
     def calc_center_coords(self):
         if self.bounds is None:
@@ -73,7 +74,6 @@ class MapParams:
     lcp_data: Optional[LandscapeData] = None
     roads: Optional[List] = field(default_factory=list)
     geo_info: Optional[GeoInfo] = None
-    north_angle_deg: Optional[float] = None
     scenario_data: Optional[MapDrawerData] = None
 
     def size(self) -> Tuple[float, float]:
@@ -92,6 +92,12 @@ class WeatherEntry:
     temp: float
     rel_humidity: float
     cloud_cover: float
+    rain: float
+    dni: float
+    dhi: float
+    ghi: float
+    solar_zenith: float
+    solar_azimuth: float
 
 @dataclass
 class WeatherParams:
@@ -102,7 +108,7 @@ class WeatherParams:
     end_datetime: Optional[datetime] = None
 
 @dataclass
-class WeatherSeed:
+class WeatherSeed: # TODO: this is going to be replaced by WeatherStream
     params: Optional[WeatherParams] = None
     time_step: Optional[float] = None
     input_wind_ht: Optional[float] = None

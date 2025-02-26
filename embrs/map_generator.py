@@ -210,8 +210,8 @@ def crop_map_data(map_params: MapParams) -> float:
         crop_done = crop_and_save_tiff(lcp_path, output_path, bounds)
 
     map_params.cropped_lcp_path = output_path
-    map_params.north_angle_deg = np.rad2deg(angle)
     map_params.geo_info = GeoInfo()
+    map_params.geo_info.north_angle_deg = np.rad2deg(angle)
 
 def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
     """_summary_
@@ -274,8 +274,6 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
 
     data = {}
 
-    data['north_angle_deg'] = map_params.north_angle_deg
-
     if bounds is None:
         data['geo_info'] = None
         map_params.geo_info = None
@@ -288,7 +286,8 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
             'east_lim': bounds[3],
             'center_lat': map_params.geo_info.center_lat,
             'center_lon': map_params.geo_info.center_lon,
-            'timezone': map_params.geo_info.timezone
+            'timezone': map_params.geo_info.timezone,
+            'north_angle_deg': map_params.geo_info.north_angle_deg
         }
 
     # Save numpy arrays to files for debugging

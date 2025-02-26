@@ -41,7 +41,8 @@ import numpy as np
 from typing import Tuple
 from multiprocessing import cpu_count, Pool
 from tqdm import tqdm
-from embrs.utilities.data_classes import MapParams, WindNinjaTask, WeatherSeed
+from embrs.utilities.data_classes import MapParams, WindNinjaTask
+from embrs.utilities.weather import WeatherStream
 from datetime import timedelta, datetime
 import pytz
 
@@ -102,7 +103,7 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_windninja(map: MapParams, weather: WeatherSeed) -> Tuple[np.ndarray, float]:
+def run_windninja(weather: WeatherStream) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization in parallel."""
     
     # Extract data from forecast seed
@@ -155,7 +156,7 @@ def run_windninja(map: MapParams, weather: WeatherSeed) -> Tuple[np.ndarray, flo
             input_speed_units=input_speed_units,
             temperature_units=temperature_units
         )
-        for i, entry in enumerate(weather.weather_entries)
+        for i, entry in enumerate(weather.stream)
     ]
     # Use multiprocessing Pool to parallelize
     num_tasks = len(tasks)

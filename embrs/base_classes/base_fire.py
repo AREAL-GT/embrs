@@ -18,7 +18,8 @@ from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 from embrs.utilities.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
-from embrs.utilities.weather import generate_weather
+from embrs.utilities.weather import WeatherStream
+from embrs.utilities.wind_forecast import run_windninja # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
 
 class BaseFireSim:
     def __init__(self, sim_params: SimParams):
@@ -190,7 +191,7 @@ class BaseFireSim:
         self._size = map_params.size()
         self._shape = map_params.shape(self._cell_size)
         self._roads = map_params.roads
-        self._north_dir_deg = map_params.north_angle_deg
+        self._north_dir_deg = map_params.geo_info.north_angle_deg
         self.coarse_elevation = np.empty(self._shape)
 
         # Load DataProductParams for each data product
@@ -215,12 +216,13 @@ class BaseFireSim:
         self._fire_breaks = zip(scenario.fire_breaks, scenario.fuel_vals)
         self._initial_ignition = scenario.initial_ign
 
-        # TODO: this should give us more weather data
-        forecast, weather_t_step = generate_weather(sim_params)
-
+        # Generate a weather stream
+        self._weather_stream = WeatherStream(sim_params.weather_input)
+        self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
+        
         # Get wind data
         self._wind_res = sim_params.weather_input.mesh_resolution
-        self.wind_forecast = forecast
+        self.wind_forecast = run_windninja(self._weather_stream)
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
         # Iterate over each layer (time step or vertical level, depending on the dataset structure)
@@ -228,7 +230,6 @@ class BaseFireSim:
             self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
         
         self.wind_forecast = self.flipud_forecast
-        self.wind_forecast_t_step = weather_t_step * 60 # convert to seconds
 
     def _add_cell_neighbors(self):
         """Populate the "neighbors" property of each cell in the simulation with each cell's

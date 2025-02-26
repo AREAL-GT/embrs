@@ -517,7 +517,7 @@ class FireSim(BaseFireSim):
             - Resets `_curr_wind_idx` to `0` if out of bounds and raises an error.
         """
         # Check if a wind forecast time step has elapsed since last update
-        wind_changed = self.curr_time_s - self._last_wind_update >= self.wind_forecast_t_step
+        wind_changed = self.curr_time_s - self._last_wind_update >= self.weather_t_step
 
         if wind_changed:
             # Reset last wind update to current time
