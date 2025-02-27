@@ -10,6 +10,7 @@ Also contains various properties on the overall state of the fire.
 from typing import Tuple
 from shapely.geometry import Point
 import numpy as np
+from tqdm import tqdm
 
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
@@ -68,7 +69,7 @@ class BaseFireSim:
 
         # Populate cell_grid with cells
         id = 0
-        for i in range(self._shape[1]):
+        for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
             for j in range(self._shape[0]):
                 # Initialize cell object
                 new_cell = Cell(id, i, j, self._cell_size)
@@ -777,8 +778,6 @@ class BaseFireSim:
                                         f"{msg} Program terminated.")
             
             raise ValueError(msg)
-
-        cell._set_dead_m(fuel_moisture)
 
         # Add cell to update dictionary
         self._updated_cells[cell.id] = cell
