@@ -43,7 +43,7 @@ class Fuel:
         - set_net_fuel_load(): Computes the net fuel load based on the fuel properties.
         - set_fuel_moisture(moisture): Placeholder for updating fuel moisture dynamically.
     """
-    def __init__(self, name: str, model_num: int, fuel_load_params: dict, sav_ratio: int, fuel_depth: float,
+    def __init__(self, name: str, model_num: int, fuel_load_params: dict, f_weights: dict, sav_ratio: int, fuel_depth: float,
                  m_x: float, rel_packing_ratio: float, rho_b: float, burnable: bool):
         """Initializes a generic fuel model with its physical and combustion properties.
 
@@ -75,6 +75,7 @@ class Fuel:
         self.name = name
         self.model_num = model_num
         self.fuel_load_params = fuel_load_params
+        self.f_weights = f_weights
         self.sav_ratio = sav_ratio
         self.fuel_depth_ft = fuel_depth
         self.m_x = m_x
@@ -95,6 +96,7 @@ class Fuel:
             self.net_fuel_load = self.set_net_fuel_load()
 
     def set_net_fuel_load(self) -> float:
+        # TODO: Should we change this to just use the g-weights directly?
         """Computes the net fuel load for the fuel model.
 
         The net fuel load is calculated using the fuel loading parameters, 
@@ -138,9 +140,15 @@ class Fuel:
 
         return net_fuel_load
 
-    def set_fuel_moisture(self, moisture):
-        # TODO: this can be set as a function of relative humidity and temperature
-        return
+    def calc_fuel_moisture(self, dfms):
+        # Calculated weighted sum of fuel moisture for different fuel classes
+        fuel_classes = ["1-h", "10-h", "100-h"]
+
+        m_f = 0
+        for i, dfm in enumerate(dfms):
+            m_f += self.f_weights[fuel_classes[i]] * dfm.meanWtdMoisture()
+
+        return m_f
 
     def __str__(self):
         return (f"Fuel Model: {self.name}\n"
@@ -194,24 +202,24 @@ class Anderson13(Fuel):
         
         # TODO: convert fuel load to lb/ft^2 (multiply by 0.0459137)
         fuel_models = {
-            1: {"name": "Short Grass",          "fuel_load_params": {"1-h": (0.74, 3500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 3500, "fuel_depth": 1.0,  "m_x": 0.12,  "rho_b": 0.03,  "rel_packing_ratio": 0.25},
-            2: {"name": "Timber Grass",         "fuel_load_params": {"1-h": (2.00, 3000), "10-h": (1.00, 109), "100-h": (0.50, 30), "Live H": (0.50, 1500), "Live W": (0.00, 0.00)}, "sav_ratio": 2784, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.18,  "rel_packing_ratio": 1.14},
-            3: {"name": "Tall Grass",           "fuel_load_params": {"1-h": (3.00, 1500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1500, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.06,  "rel_packing_ratio": 0.21},
-            4: {"name": "Chaparral",            "fuel_load_params": {"1-h": (5.00, 2000), "10-h": (4.00, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (5.00, 1500)}, "sav_ratio": 1739, "fuel_depth": 6.0,  "m_x": 0.20,  "rho_b": 0.12,  "rel_packing_ratio": 0.52},
-            5: {"name": "Brush",                "fuel_load_params": {"1-h": (1.00, 2000), "10-h": (0.50, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "sav_ratio": 1683, "fuel_depth": 2.0,  "m_x": 0.20,  "rho_b": 0.08,  "rel_packing_ratio": 0.33},
-            6: {"name": "Dormant Brush",        "fuel_load_params": {"1-h": (1.50, 1750), "10-h": (2.50, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1564, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.11,  "rel_packing_ratio": 0.43},
-            7: {"name": "Southern Rough",       "fuel_load_params": {"1-h": (1.10, 1750), "10-h": (1.90, 109), "100-h": (1.50, 30), "Live H": (0.00, 0.00), "Live W": (0.37, 1500)}, "sav_ratio": 1552, "fuel_depth": 2.5,  "m_x": 0.40,  "rho_b": 0.09,  "rel_packing_ratio": 0.34},
-            8: {"name": "Short Needle Litter",  "fuel_load_params": {"1-h": (1.50, 2000), "10-h": (1.00, 109), "100-h": (2.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1889, "fuel_depth": 0.2,  "m_x": 0.30,  "rho_b": 1.15,  "rel_packing_ratio": 5.17},
-            9: {"name": "Hardwood Litter",      "fuel_load_params": {"1-h": (2.90, 1500), "10-h": (0.41, 109), "100-h": (0.15, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 2484, "fuel_depth": 0.2,  "m_x": 0.25,  "rho_b": 0.80,  "rel_packing_ratio": 4.50},
-            10:{"name": "Timber Litter",        "fuel_load_params": {"1-h": (3.00, 2000), "10-h": (2.00, 109), "100-h": (5.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "sav_ratio": 1764, "fuel_depth": 1.0,  "m_x": 0.25,  "rho_b": 0.55,  "rel_packing_ratio": 2.35},
-            11:{"name": "Light Logging Slash",  "fuel_load_params": {"1-h": (1.50, 1500), "10-h": (4.50, 109), "100-h": (5.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1182, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.53,  "rel_packing_ratio": 1.62},
-            12:{"name": "Medium Logging Slash", "fuel_load_params": {"1-h": (4.00, 1500), "10-h": (14.0, 109), "100-h": (16.5, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1145, "fuel_depth": 2.3,  "m_x": 0.20,  "rho_b": 0.69,  "rel_packing_ratio": 2.06},
-            13:{"name": "Heavy Logging Slash",  "fuel_load_params": {"1-h": (7.00, 1500), "10-h": (23.0, 109), "100-h": (28.0, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 1159, "fuel_depth": 3.0,  "m_x": 0.25,  "rho_b": 0.89,  "rel_packing_ratio": 2.68},
-            91:{"name": "Urban",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            92:{"name": "Snow/Ice",             "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            93:{"name": "Agriculture",          "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            98:{"name": "Water",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            99:{"name": "Barren",               "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
+            1: {"name": "Short Grass",          "fuel_load_params": {"1-h": (0.74, 3500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 1,    "10-h": 0,    "100-h": 0,    "Live": 0,},   "sav_ratio": 3500, "fuel_depth": 1.0,  "m_x": 0.12,  "rho_b": 0.03,  "rel_packing_ratio": 0.25},
+            2: {"name": "Timber Grass",         "fuel_load_params": {"1-h": (2.00, 3000), "10-h": (1.00, 109), "100-h": (0.50, 30), "Live H": (0.50, 1500), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.98, "10-h": 0.02, "100-h": 0,    "Live": 1,},   "sav_ratio": 2784, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.18,  "rel_packing_ratio": 1.14},
+            3: {"name": "Tall Grass",           "fuel_load_params": {"1-h": (3.00, 1500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 1,    "10-h": 0,    "100-h": 0,    "Live": 0,},   "sav_ratio": 1500, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.06,  "rel_packing_ratio": 0.21},
+            4: {"name": "Chaparral",            "fuel_load_params": {"1-h": (5.00, 2000), "10-h": (4.00, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (5.00, 1500)}, "f_weights": {"1-h": 0.95, "10-h": 0.04, "100-h": 0.01, "Live": 1,},   "sav_ratio": 1739, "fuel_depth": 6.0,  "m_x": 0.20,  "rho_b": 0.12,  "rel_packing_ratio": 0.52},
+            5: {"name": "Brush",                "fuel_load_params": {"1-h": (1.00, 2000), "10-h": (0.50, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "f_weights": {"1-h": 0.97, "10-h": 0.03, "100-h": 0,    "Live": 1,},   "sav_ratio": 1683, "fuel_depth": 2.0,  "m_x": 0.20,  "rho_b": 0.08,  "rel_packing_ratio": 0.33},
+            6: {"name": "Dormant Brush",        "fuel_load_params": {"1-h": (1.50, 1750), "10-h": (2.50, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.89, "10-h": 0.09, "100-h": 0.02, "Live": 0,},   "sav_ratio": 1564, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.11,  "rel_packing_ratio": 0.43},
+            7: {"name": "Southern Rough",       "fuel_load_params": {"1-h": (1.10, 1750), "10-h": (1.90, 109), "100-h": (1.50, 30), "Live H": (0.00, 0.00), "Live W": (0.37, 1500)}, "f_weights": {"1-h": 0.88, "10-h": 0.10, "100-h": 0.02, "Live": 1,},   "sav_ratio": 1552, "fuel_depth": 2.5,  "m_x": 0.40,  "rho_b": 0.09,  "rel_packing_ratio": 0.34},
+            8: {"name": "Short Needle Litter",  "fuel_load_params": {"1-h": (1.50, 2000), "10-h": (1.00, 109), "100-h": (2.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.94, "10-h": 0.03, "100-h": 0.02, "Live": 0,},   "sav_ratio": 1889, "fuel_depth": 0.2,  "m_x": 0.30,  "rho_b": 1.15,  "rel_packing_ratio": 5.17},
+            9: {"name": "Hardwood Litter",      "fuel_load_params": {"1-h": (2.90, 1500), "10-h": (0.41, 109), "100-h": (0.15, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.99, "10-h": 0.01, "100-h": 0,    "Live": 0,},   "sav_ratio": 2484, "fuel_depth": 0.2,  "m_x": 0.25,  "rho_b": 0.80,  "rel_packing_ratio": 4.50},
+            10:{"name": "Timber Litter",        "fuel_load_params": {"1-h": (3.00, 2000), "10-h": (2.00, 109), "100-h": (5.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "f_weights": {"1-h": 0.94, "10-h": 0.03, "100-h": 0.02, "Live": 1,},   "sav_ratio": 1764, "fuel_depth": 1.0,  "m_x": 0.25,  "rho_b": 0.55,  "rel_packing_ratio": 2.35},
+            11:{"name": "Light Logging Slash",  "fuel_load_params": {"1-h": (1.50, 1500), "10-h": (4.50, 109), "100-h": (5.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.77, "10-h": 0.17, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1182, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.53,  "rel_packing_ratio": 1.62},
+            12:{"name": "Medium Logging Slash", "fuel_load_params": {"1-h": (4.00, 1500), "10-h": (14.0, 109), "100-h": (16.5, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.75, "10-h": 0.19, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1145, "fuel_depth": 2.3,  "m_x": 0.20,  "rho_b": 0.69,  "rel_packing_ratio": 2.06},
+            13:{"name": "Heavy Logging Slash",  "fuel_load_params": {"1-h": (7.00, 1500), "10-h": (23.0, 109), "100-h": (28.0, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.76, "10-h": 0.18, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1159, "fuel_depth": 3.0,  "m_x": 0.25,  "rho_b": 0.89,  "rel_packing_ratio": 2.68},
+            91:{"name": "Urban",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
+            92:{"name": "Snow/Ice",             "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
+            93:{"name": "Agriculture",          "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
+            98:{"name": "Water",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
+            99:{"name": "Barren",               "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
         }
 
         if model_number not in fuel_models:
@@ -223,7 +231,7 @@ class Anderson13(Fuel):
         # Set burnable variable
         burnable = model_number <= 13
 
-        super().__init__(model["name"], model_number, model["fuel_load_params"], model["sav_ratio"], model["fuel_depth"], model["m_x"], model["rel_packing_ratio"], model["rho_b"], burnable)
+        super().__init__(model["name"], model_number, model["fuel_load_params"], model["f_weights"], model["sav_ratio"], model["fuel_depth"], model["m_x"], model["rel_packing_ratio"], model["rho_b"], burnable)
 
 
 # class ScottBurgan40(Fuel):

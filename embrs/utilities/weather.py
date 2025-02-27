@@ -131,5 +131,46 @@ def filter_hourly_data(hourly_data, start_datetime, end_datetime):
     filtered_data = {key: np.array(value)[mask] for key, value in hourly_data.items()}
     return filtered_data
 
-
 # TODO: need to implement a version of above for file input
+
+def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherEntry):
+    ## elev_ref is in meters, temp_air is in Fahrenheit, rh_air is %
+    elev_diff = elev_ref - cell.z 
+    elev_diff *= 3.2808 # convert to ft
+
+    dewptref = -398.0-7469.0 / (np.log(curr_weather.rel_humidity/100.0)-7469.0/(curr_weather.temp+398.0))
+
+    temp = curr_weather.temp + elev_diff/1000.0*5.5 # Stephenson 1988 found summer adiabat at 3.07 F/1000ft
+    dewpt = dewptref + elev_diff/1000.0*1.1 # new humidity, new dewpt, and new humidity
+    rh = 7469.0*(1.0/(temp+398.0)-1.0/(dewpt+398.0))
+    rh = np.exp(rh)*100.0 #convert from ln units
+    if (rh > 99.0):
+        rh=99.0
+
+    # Convert temp to celius
+    temp = temp-32
+    temp /= 1.8 
+
+    # Return humidity as a decimal
+    rh /= 100.0
+
+    return temp, rh
+
+def calc_local_solar_radiation(cell, curr_weather: WeatherEntry):
+    # Calculate total irradiance using pvlib
+    total_irradiance = pvlib.irradiance.get_total_irradiance(
+        surface_tilt=cell.slope_deg,
+        surface_azimuth=cell.aspect,
+        solar_zenith=curr_weather.solar_zenith,
+        solar_azimuth=curr_weather.solar_azimuth,
+        dni=curr_weather.dni,
+        ghi=curr_weather.ghi,
+        dhi=curr_weather.dhi,
+        model='isotropic'
+    )
+
+    # Adjust for canopy transmittance (Only thing not modelled in pvlib)
+    canopy_transmittance = 1 - (cell.canopy_cover/100)
+    I = total_irradiance['poa_global'] * canopy_transmittance
+
+    return I

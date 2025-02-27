@@ -45,13 +45,13 @@ class FireSim(BaseFireSim):
         _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
         _agent_list (list): Tracks agents (e.g., firefighters, sensors) interacting with the fire.
         _agents_added (bool): Indicates whether agents have been added to the simulation.
-        _curr_wind_idx (int): The index of the current wind forecast entry.
+        _curr_weather_idx (int): The index of the current wind forecast entry.
         _last_wind_update (float): The last recorded time (in seconds) when wind was updated.
 
     Methods:
         iterate(): Advances the simulation by one time step.
         ignite_neighbors(): Attempts to ignite neighboring cells based on spread conditions.
-        _update_wind(): Updates the current wind conditions if the forecast has changed.
+        _update_weather(): Updates the current wind conditions if the forecast has changed.
         _init_iteration(): Resets and updates key variables at the start of each time step.
         log_changes(): Records simulation updates for logging and visualization.
 
@@ -89,7 +89,7 @@ class FireSim(BaseFireSim):
                 - `_agents_added` (bool): Indicates whether agents have been added to the simulation.
 
             - **Wind Conditions:**
-                - `_curr_wind_idx` (int): Index tracking the current wind forecast entry.
+                - `_curr_weather_idx` (int): Index tracking the current wind forecast entry.
                 - `_last_wind_update` (float): Timestamp of the last wind update.
 
             - **Logging & Monitoring:**
@@ -128,8 +128,8 @@ class FireSim(BaseFireSim):
         self._agents_added = False
 
         # Variables to keep track of current wind conditions
-        self._curr_wind_idx = 0
-        self._last_wind_update = 0
+        self._curr_weather_idx = 0
+        self._last_weather_update = 0
 
         super().__init__(sim_params)
         
@@ -144,11 +144,11 @@ class FireSim(BaseFireSim):
 
         Behavior:
             - On the first iteration (`_iters == 0`):
-                - Marks `self.wind_changed` as `True`.
+                - Marks `self.weather_changed` as `True`.
                 - Initializes `_new_ignitions` with `starting_ignitions`.
                 - Sets the state of newly ignited cells to `CellStates.FIRE` and computes 
                 their initial fire spread parameters.
-            - Updates wind conditions if necessary (`_update_wind()`).
+            - Updates wind conditions if necessary (`_update_weather()`).
             - Adds new ignitions to `_burning_cells` and resets `_new_ignitions`.
             - Calls `_init_iteration()` to prepare for the time step.
             - Iterates through burning cells and:
@@ -172,7 +172,7 @@ class FireSim(BaseFireSim):
             - A mass-loss approach for fuel consumption is **not yet implemented**.
         """
         if self._iters == 0:
-            self.wind_changed = True
+            self.weather_changed = True
             self._new_ignitions = self.starting_ignitions
             for cell, loc in self._new_ignitions:
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
@@ -180,7 +180,7 @@ class FireSim(BaseFireSim):
                 self._updated_cells[cell.id] = cell
         
         # Update wind if necessary
-        self.wind_changed = self._update_wind()
+        self.weather_changed = self._update_weather()
         
         # Add any new ignitions to the current set of burning cells
         self._burning_cells.extend(self._new_ignitions)
@@ -194,12 +194,12 @@ class FireSim(BaseFireSim):
 
         for cell, loc in self._burning_cells:
             # Check if conditions have changed
-            if self.wind_changed or not cell.has_steady_state: 
+            if self.weather_changed or not cell.has_steady_state: 
                 # Reset the elapsed time counters
                 cell.t_elapsed_min = 0
 
                 # Update wind in cell
-                cell._update_wind(self._curr_wind_idx)
+                cell._update_weather(self._curr_weather_idx, self._weather_stream)
                 
                 # Set previous rate of spreads to the most recent value
                 if cell.r_t is not None:
@@ -298,6 +298,7 @@ class FireSim(BaseFireSim):
                 # Check that neighbor state is burnable
                 if neighbor.state == CellStates.FUEL and neighbor.fuel_type.burnable:
                     # Make ignition calculation
+                    neighbor._update_weather(self._curr_weather_idx, self._weather_stream)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma)
                     
                     # Check that ignition ros meets threshold
@@ -305,7 +306,6 @@ class FireSim(BaseFireSim):
                         self._new_ignitions.append((neighbor, n_loc))
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
-                        neighbor._update_wind(self._curr_wind_idx)
                         neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here 
 
                         self._updated_cells[neighbor.id] = neighbor
@@ -355,10 +355,10 @@ class FireSim(BaseFireSim):
             - Currently, fuel moisture content updates are not implemented.
         """
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_gamma * calc_heat_sink(cell.fuel_type, cell.dead_m) # TODO: make sure this computation is valid (I think it is)
+        heat_source = r_gamma * calc_heat_sink(cell.fuel_type, cell.m_f) # TODO: make sure this computation is valid (I think it is)
 
         # Get the heat sink using the neighbors fuel and moisture content
-        heat_sink = calc_heat_sink(neighbor.fuel_type, neighbor.dead_m) # TODO: need to implement updating fuel moisture in each cell
+        heat_sink = calc_heat_sink(neighbor.fuel_type, neighbor.m_f) # TODO: need to implement updating fuel moisture in each cell
         
         # Calculate a ignition rate of spread
         r_ign = heat_source / heat_sink
@@ -496,7 +496,7 @@ class FireSim(BaseFireSim):
 
         return False
     
-    def _update_wind(self) -> bool:
+    def _update_weather(self) -> bool:
         """Updates the current wind conditions based on the forecast.
 
 
@@ -513,25 +513,25 @@ class FireSim(BaseFireSim):
 
         Side Effects:
             - Updates `_last_wind_update` to the current simulation time.
-            - Increments `_curr_wind_idx` to the next wind forecast entry.
-            - Resets `_curr_wind_idx` to `0` if out of bounds and raises an error.
+            - Increments `_curr_weather_idx` to the next wind forecast entry.
+            - Resets `_curr_weather_idx` to `0` if out of bounds and raises an error.
         """
         # Check if a wind forecast time step has elapsed since last update
-        wind_changed = self.curr_time_s - self._last_wind_update >= self.weather_t_step
+        weather_changed = self.curr_time_s - self._last_weather_update >= self.weather_t_step
 
-        if wind_changed:
+        if weather_changed:
             # Reset last wind update to current time
-            self._last_wind_update = self.curr_time_s
+            self._last_weather_update = self.curr_time_s
 
             # Increment wind index
-            self._curr_wind_idx += 1
+            self._curr_weather_idx += 1
 
             # Check for out of bounds index
-            if self._curr_wind_idx >= len(self.wind_forecast):
-                self._curr_wind_idx = 0
-                raise ValueError("Wind forecast has no more entries!")
+            if self._curr_weather_idx >= len(self._weather_stream.stream):
+                self._curr_weather_idx = 0
+                raise ValueError("Weather forecast has no more entries!")
         
-        return wind_changed
+        return weather_changed
 
     def _get_agent_updates(self):
         """Returns a list of dictionaries describing the location of each agent in __agent_list

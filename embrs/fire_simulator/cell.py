@@ -16,8 +16,7 @@ from shapely.geometry import Polygon
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fuel_models import Fuel, Anderson13
 from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
-from embrs.utilities.weather import WeatherStream
-
+from embrs.utilities.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
@@ -42,7 +41,6 @@ class Cell:
         state (CellStates): Current fire state (FUEL, FIRE, BURNT).
         neighbors (dict): Dictionary of adjacent cell neighbors.
         burnable_neighbors (dict): Subset of `neighbors` that are in a burnable state.
-        dead_m (float): Dead fuel moisture fraction (0.0 to 1.0).
         wind_forecast (list): Forecasted wind conditions [(speed, direction)].
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
@@ -73,7 +71,6 @@ class Cell:
                 - `_fuel_type`: Assigned fuel model.
                 - `_state`: Set to `CellStates.FUEL` if burnable, otherwise `CellStates.BURNT`.
                 - `_neighbors`, `_burnable_neighbors`: Dictionaries for tracking adjacency.
-                - `_dead_m`: Default dead fuel moisture content (0.08).
                 - `polygon`: Shapely polygon representation of the hexagonal cell.
                 - `distances`, `directions`, `end_pts`: Fire spread direction variables.
                 - `r_t`, `fire_spread`, `r_prev_list`, `t_elapsed_min`: Fire dynamics variables.
@@ -142,8 +139,10 @@ class Cell:
         self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
         self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
 
-        self.moisture = self.calc_moisture()
+        self.dfms = [self.dfm1, self.dfm10, self.dfm100]
 
+        self.init_mf = 0.1        # TODO: this needs to be done based on conditioning
+        
         self.moist_update = -1
 
         # Get shapely polygon representation of cell
@@ -166,7 +165,8 @@ class Cell:
         self.has_steady_state = False
 
         # Wind forecast and current wind within cell
-        self.wind_forecast = []
+        self.forecast_wind_speeds = []
+        self.forecast_wind_dirs = []
         self.curr_wind = (0,0)
 
         # Constant defining fire acceleration characteristics
@@ -232,49 +232,62 @@ class Cell:
 
         Notes:
             - Wind direction is assumed to be in degrees, following cartesian convention.
-        """
-        self.wind_forecast = [(speed, dir) for speed, dir in zip(wind_speed, wind_dir)]
-        self.curr_wind = self.wind_forecast[0] # Note: (m/s, degrees)
+        """ 
+        self.forecast_wind_speeds = wind_speed
+        self.forecast_wind_dirs = wind_dir
 
-    def _get_curr_moisture(self, sim_time: float, weather_t_step: int):
+        self.curr_wind = (self.forecast_wind_speeds[0], self.forecast_wind_dirs[0]) # Note: (m/s, degrees)
 
-        if sim_time - self.moist_update > weather_t_step:
-            self._update_moisture(sim_time, weather_t_step)
+    def _step_moisture(self, weather_stream: WeatherStream, idx: int):
+
+        elev_ref = weather_stream.ref_elev
+
+        curr_weather = weather_stream.stream[idx]
+
+        bp0 = 0.0218
+        update_interval_hr = 1
+
+        t_f_celsius, h_f_frac = apply_site_specific_correction(self, elev_ref, curr_weather)
+        solar_radiation = calc_local_solar_radiation(self, curr_weather)
+
+        for dfm in self.dfms:
+            if not dfm.initialized():
+                dfm.initializeEnvironment(
+                    t_f_celsius, # Intial ambient air temeperature
+                    h_f_frac, # Initial ambient air rel. humidity (g/g)
+                    solar_radiation, # Initial solar radiation (W/m^2)
+                    curr_weather.rain, # Initial cumulative rainfall (cm)
+                    t_f_celsius, # Initial stick temperature (degrees C)
+                    h_f_frac, # Intial stick surface relative humidity (g/g)
+                    self.init_mf, # Initial stick fuel moisture fraction (g/g) # TODO: implement how to get this
+                    bp0) # Initial stick barometric pressure (cal/cm^3)
+
+            dfm.update_internal(
+                update_interval_hr, # Elapsed time since the previous observation (hours)
+                t_f_celsius, # Current observation's ambient air temperature (degrees C)
+                h_f_frac, # Current observation's ambient air relative humidity (g/g)
+                solar_radiation, # Current observation's solar radiation (W/m^2)
+                curr_weather.rain, # Current observation's total cumulative rainfall (cm)
+                bp0) # Current observation's stick barometric pressure (cal/cm^3)
+
+    def _update_moisture(self, idx: float, weather_stream: WeatherStream):
+        if self.moist_update == idx:
+            return
         
-        return self.m_f
+        else:
+            # TODO: need to check that these indices are right
+            for i in range(self.moist_update + 1, idx + 1): 
+                self._step_moisture(weather_stream, i)
 
+        self.moist_update = idx
+        self.m_f = self._fuel_type.calc_fuel_moisture(self.dfms)
 
-    def _update_moisture(self, sim_time: float, weather_stream: WeatherStream):
-        # TODO: Update moisture from last update until sim_time
-        
+    def _update_weather(self, idx: int, weather_stream: WeatherStream):
+        # Update moisture content based on weather stream
+        self._update_moisture(idx, weather_stream)
 
-        self._calc_moisture()
-        pass
-    
-    def _calc_moisture(self):
-        # TODO: calculate moisture as used in Rothermel model
-        # set self.m_f
-        pass
-
-    def _update_wind(self, idx: int):
-        """Updates the current wind conditions based on the forecast index.
-
-        This method selects the wind speed and direction from the stored wind forecast 
-        (`self.wind_forecast`) at the specified index and updates the current wind conditions 
-        (`self.curr_wind`).
-
-        Args:
-            idx (int): The index of the wind forecast array to use for updating the current wind.
-
-        Side Effects:
-            - Updates `self.curr_wind` to the wind conditions at the given forecast index.
-
-        Notes:
-            - Assumes `idx` is within the valid range of `self.wind_forecast`.
-            - Wind conditions are stored as tuples `(wind_speed, wind_direction)`, where 
-            wind speed is in meters per second (m/s) and wind direction is in degrees.
-        """
-        self.curr_wind = self.wind_forecast[idx]
+        # Update wind to next value in forecast
+        self.curr_wind = (self.forecast_wind_speeds[idx], self.forecast_wind_dirs[idx])
 
     def _set_elev(self, elevation: float):
         """Sets the elevation of the cell.
@@ -430,22 +443,6 @@ class Cell:
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
             self.I_ss = np.zeros(len(self.directions))
-
-    def _set_dead_m(self, dead_m: float):
-        """Sets the dead fuel moisture content at the cell.
-
-        Dead fuel moisture affects fire propagation, with higher moisture levels slowing 
-        the rate of spread. Moisture content is expressed as a fraction between 0 and 1.
-
-        Args:
-            dead_m (float): The dead fuel moisture content, where:
-                - `0.0` represents completely dry fuel.
-                - `1.0` represents fully saturated fuel.
-
-        Side Effects:
-            - Updates the `_dead_m` attribute with the specified moisture value.
-        """
-        self._dead_m = dead_m
 
     def __str__(self):
         """Returns a formatted string representation of the cell.
@@ -646,9 +643,3 @@ class Cell:
         - "(dx, dy)" is the difference between the column and row respectively of the cell and its neighbor
         """
         return self._burnable_neighbors
-
-    @property
-    def dead_m(self) -> float:
-        """Dead fuel moisture of the cell, as a fraction (0 to 1)
-        """
-        return self._dead_m

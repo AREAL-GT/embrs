@@ -326,7 +326,7 @@ def calc_r_h(cell: Cell, wind_speed: float,
         Tuple[float, float, float, float]: _description_
     """
     fuel = cell.fuel_type
-    m_f = cell.dead_m
+    m_f = cell.m_f
     
     if R_0 is None or I_r is None:
         R_0, I_r = calc_r_0(fuel, m_f)

@@ -207,7 +207,7 @@ class Visualizer:
             # TODO: make visualization more uniform in sampling and size (depending on the size of the visualization window and mesh_resolution)
             # TODO: add a key to show wind spees
             # TODO: add a checkbox that toggles showing wind or not
-            curr_forecast = sim.wind_forecast[sim._curr_wind_idx]
+            curr_forecast = sim.wind_forecast[sim._curr_weather_idx]
             # Downsample the wind data for plotting
             downsample_factor = 5
             wind_speed = curr_forecast[::downsample_factor, ::downsample_factor, 0]
@@ -221,7 +221,7 @@ class Visualizer:
 
             # Plot the wind vectors
             self.wind_grid = h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap='jet', width=0.002, zorder=3)
-            self.wind_idx = sim._curr_wind_idx
+            self.wind_idx = sim._curr_weather_idx
 
         # Reload visualizer from initial state
         else:
@@ -312,9 +312,9 @@ class Visualizer:
         """
         self.simtext.set_visible(False)
 
-        if self.wind_idx != sim._curr_wind_idx:
+        if self.wind_idx != sim._curr_weather_idx:
             self.wind_grid.remove()
-            curr_forecast = sim.wind_forecast[sim._curr_wind_idx]
+            curr_forecast = sim.wind_forecast[sim._curr_weather_idx]
 
             # Downsample the wind data for plotting
             downsample_factor = 5
@@ -329,7 +329,7 @@ class Visualizer:
 
             # Plot the wind vectors
             self.wind_grid = self.h_ax.quiver(X, Y, U, V, wind_speed, scale=None, cmap= 'jet', width=0.002, zorder=3)
-            self.wind_idx = sim._curr_wind_idx
+            self.wind_idx = sim._curr_weather_idx
 
         fire_patches = []
         tree_patches = []
@@ -358,10 +358,10 @@ class Visualizer:
                 polygon.set_facecolor(color)
                 tree_patches.append(polygon)
 
-                if c.dead_m > 0.08: # fuel moisture not nominal
+                if c.m_f > 0.08: # fuel moisture not nominal
                     soak_xs.append(c.x_pos)
                     soak_ys.append(c.y_pos)
-                    c_val = c.dead_m/fc.dead_fuel_moisture_ext_table[c.fuel_type.model_num] # TODO: Use FuelModel value
+                    c_val = c.m_f/fc.dead_fuel_moisture_ext_table[c.fuel_type.model_num] # TODO: Use FuelModel value
                     c_val = np.min([1, c_val])
                     c_vals.append(c_val)
 
