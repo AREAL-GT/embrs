@@ -1,14 +1,14 @@
 import pvlib
 import numpy as np
 import pickle
-from dead_fuel_moisture import DeadFuelMoisture
+from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
 from embrs.fire_simulator.cell import Cell
 
 import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
 from embrs.utilities.weather import WeatherStream
-from embrs.utilities.data_classes import WeatherParams, GeoInfo
+from embrs.utilities.data_classes import WeatherParams
 from matplotlib.colors import Normalize
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -34,14 +34,6 @@ def site_specific(elev_diff, temp_air, rh_air):
 
     return temp, rh
 
-def get_solpos_arr(weather_stream):
-    times = weather_stream.times
-    latitude = weather_stream.lat
-    longitude = weather_stream.lon
-
-    solpos = pvlib.solarposition.get_solarposition(times, latitude, longitude)
-
-    return solpos
 
 def calc_solar_radiation(slope, aspect, canopy_cvr, curr_weather):
 

@@ -16,6 +16,7 @@ from shapely.geometry import Polygon
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fuel_models import Fuel, Anderson13
 from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
+from embrs.utilities.weather import WeatherStream
 
 
 class Cell:
@@ -141,6 +142,10 @@ class Cell:
         self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
         self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
 
+        self.moisture = self.calc_moisture()
+
+        self.moist_update = -1
+
         # Get shapely polygon representation of cell
         self.polygon = self.to_polygon()
 
@@ -230,6 +235,26 @@ class Cell:
         """
         self.wind_forecast = [(speed, dir) for speed, dir in zip(wind_speed, wind_dir)]
         self.curr_wind = self.wind_forecast[0] # Note: (m/s, degrees)
+
+    def _get_curr_moisture(self, sim_time: float, weather_t_step: int):
+
+        if sim_time - self.moist_update > weather_t_step:
+            self._update_moisture(sim_time, weather_t_step)
+        
+        return self.m_f
+
+
+    def _update_moisture(self, sim_time: float, weather_stream: WeatherStream):
+        # TODO: Update moisture from last update until sim_time
+        
+
+        self._calc_moisture()
+        pass
+    
+    def _calc_moisture(self):
+        # TODO: calculate moisture as used in Rothermel model
+        # set self.m_f
+        pass
 
     def _update_wind(self, idx: int):
         """Updates the current wind conditions based on the forecast index.

@@ -28,7 +28,6 @@ times = pd.date_range('2025-02-18 00:00', '2025-2-18 23:00', freq='H', tz='Ameri
 solpos = pvlib.solarposition.get_solarposition(times, latitude, longitude)
 
 aspect = np.load('/Users/rui/Documents/Research/Code/embrs_maps/grand_canyon/aspect.npy')
-# aspect = (aspect+ 180) % 360
 slope = np.load('/Users/rui/Documents/Research/Code/embrs_maps/grand_canyon/slope.npy')
 
 I_values = []  # list to store 2D arrays for each time step

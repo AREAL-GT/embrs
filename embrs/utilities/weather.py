@@ -12,7 +12,6 @@ from typing import Iterator
 from embrs.utilities.data_classes import *
 
 # TODO: Document this file
-# TODO: Process other data provided and determine how to send it all back to the sim
 
 class WeatherStream:
     def __init__(self, params: WeatherParams, geo: GeoInfo):
