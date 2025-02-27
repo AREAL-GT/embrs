@@ -15,6 +15,8 @@ from shapely.geometry import Polygon
 
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fuel_models import Fuel, Anderson13
+from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
+
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
@@ -133,8 +135,11 @@ class Cell:
         self._neighbors = {}
         self._burnable_neighbors = {}
 
-        # dead fuel moisture at this cell, value based on Anderson fuel model paper
-        self._dead_m = 0.08
+        # dead fuel moisture for each time-lag class
+        # TODO: need to apply conditioning for this
+        self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
+        self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
+        self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
 
         # Get shapely polygon representation of cell
         self.polygon = self.to_polygon()

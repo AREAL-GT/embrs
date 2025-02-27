@@ -1,0 +1,727 @@
+import numpy as np
+import datetime
+import random
+
+Aks = 2.0e-13
+Alb = 0.6
+Alpha = 0.25
+Ap = 0.000772
+Aw = 0.8
+Eps = 0.85
+Hfs = 0.99
+Kelvin = 273.2
+Pi = 3.141592654
+Pr = 0.7
+Sbc = 1.37e-12
+Sc = 0.58
+Smv = 94.743
+St = 72.8
+Tcd = 6.0
+Tcn = 3.0
+Thdiff = 8.0
+Wl = 0.0023
+Srf = 14.82052
+Wsf = 4.60517
+Hrd = 0.116171
+Hrn = 0.112467
+Sir = 0.0714285
+Scr = 0.285714
+
+class DeadFuelMoisture:
+    def __init__(self, radius):
+        self.m_semTime = None
+        self.initializeParameters(radius)
+
+    def initializeParameters(self, radius):
+        self.m_radius = radius
+        self.m_density = 0.4
+        self.m_length = 41.0
+        self.m_dSteps = self.deriveDiffusivitySteps(radius)
+        self.m_hc = self.derivePlanarHeatTransferRate(radius)
+        self.m_nodes = self.deriveStickNodes(radius)
+        self.m_rai0 = self.deriveRainfallRunoffFactor(radius)
+        self.m_rai1 = 0.5
+        self.m_stca = self.deriveAdsorptionRate(radius)
+        self.m_stcd = 0.06
+        self.m_mSteps = self.deriveMoistureSteps(radius)
+        self.m_stv = 9999.0
+        self.m_wmx = 0.6
+        self.m_wfilmk = 0.0
+        self.m_allowRainfall2 = True
+        self.m_allowRainstorm = True
+        self.m_pertubateColumn = True
+        self.m_rampRai0 = True
+        self.initializeStick()
+
+    def deriveDiffusivitySteps(self, radius):
+        return int(4.777 + 2.496 / radius ** 1.3)
+
+    def derivePlanarHeatTransferRate(self, radius):
+        return 0.2195 + 0.05260 / radius ** 2.5
+
+    def deriveStickNodes(self, radius):
+        nodes = int(10.727 + 0.1746 / radius)
+        if nodes % 2 == 0:
+            nodes += 1
+        return nodes
+
+    def deriveRainfallRunoffFactor(self, radius):
+        return 0.02822 + 0.1056 / radius ** 2.2
+
+    def deriveAdsorptionRate(self, radius):
+        return 0.0004509 + 0.006126 / radius ** 2.6
+
+    def deriveMoistureSteps(self, radius):
+        return int(9.8202 + 26.865 / radius ** 1.4)
+
+    def initializeStick(self):
+        # Internodal distance (cm)
+        self.m_dx = self.m_radius / (self.m_nodes - 1)
+        self.m_dx_2 = self.m_dx * 2
+
+        # Maximum possible stick moisture content (g/g)
+        self.m_wmax = (1.0 / self.m_density) - (1.0 / 1.53)
+
+        # Initialize ambient air temperature to 20 oC
+        self.m_t = [20.0] * self.m_nodes
+
+        # Initialize fiber saturation point to 0 g/g
+        self.m_s = [0.0] * self.m_nodes
+
+        # Initialize bound water diffusivity to 0 cm2/h
+        self.m_d = [0.0] * self.m_nodes
+
+        # Initialize moisture content to half the local maximum (g/g)
+        self.m_w = [0.5 * self.m_wmx] * self.m_nodes
+
+        # Derive nodal radial distances
+        self.m_x = [self.m_radius - (self.m_dx * i) for i in range(self.m_nodes - 1)]
+        self.m_x.append(0.0)
+
+        # Derive nodal volume fractions
+        self.m_v = []
+        ro = self.m_radius
+        ri = ro - 0.5 * self.m_dx
+        a2 = self.m_radius * self.m_radius
+        self.m_v.append((ro * ro - ri * ri) / a2)
+        vwt = self.m_v[0]
+        for i in range(1, self.m_nodes - 1):
+            ro = ri
+            ri = ro - self.m_dx
+            self.m_v.append((ro * ro - ri * ri) / a2)
+            vwt += self.m_v[i]
+        self.m_v.append(ri * ri / a2)
+        vwt += self.m_v[self.m_nodes - 1]
+
+        # Added by Stuart Brittain on 1/14/2007 for performance improvement in update()
+        self.m_Twold = [0.0] * self.m_nodes
+        self.m_Ttold = [0.0] * self.m_nodes
+        self.m_Tsold = [0.0] * self.m_nodes
+        self.m_Tv = [0.0] * self.m_nodes
+        self.m_To = [0.0] * self.m_nodes
+        self.m_Tg = [0.0] * self.m_nodes
+
+        # Initialize the environment, but set m_init to False when done
+        self.initializeEnvironment(
+            20.0,  # Ambient air temperature (oC)
+            0.20,  # Ambient air relative humidity (g/g)
+            0.0,   # Solar radiation (W/m2)
+            0.0,   # Cumulative rainfall (cm)
+            20.0,  # Initial stick temperature (oC)
+            0.20,  # Initial stick surface humidity (g/g)
+            0.5 * self.m_wmx,  # Initial stick moisture content
+            0.0218)  # Initial stick barometric pressure (cal/cm3
+        self.m_init = False
+
+        # Computation optimization parameters
+
+        # m_hwf == hw and aml computation factor used in update()
+        self.m_hwf = 0.622 * self.m_hc * (Pr / Sc) ** 0.667
+
+        # m_amlf == aml optimization factor
+        self.m_amlf = self.m_hwf / (0.24 * self.m_density * self.m_radius)
+
+        # m_capf = cap optimization factor
+        rcav = 0.5 * Aw * Wl
+        self.m_capf = 3600.0 * Pi * St * rcav * rcav / (16.0 * self.m_radius * self.m_radius * self.m_length * self.m_density)
+
+        # m_vf == optimization factor used in update()
+        self.m_vf = St / (self.m_density * Wl * Scr)
+
+    def diffusivity(self, bp):
+        for i in range(self.m_nodes):
+            tk = self.m_t[i] + 273.2
+            qv = 13550. - 10.22 * tk
+            cpv = 7.22 + .002374 * tk + 2.67e-07 * tk * tk
+            dv = 0.22 * 3600. * (0.0242 / bp) * ((tk / 273.2) ** 1.75)
+            ps1 = 0.0000239 * np.exp(20.58 - (5205. / tk))
+            c1 = 0.1617 - 0.001419 * self.m_t[i]
+            c2 = 0.4657 + 0.003578 * self.m_t[i]
+            wc = self.m_w[i] if self.m_w[i] < self.m_wsa else self.m_wsa
+            dhdm = 0.0
+            if self.m_w[i] < self.m_wsa:
+                if c2 != 1. and self.m_hf < 1.0 and c1 != 0.0 and c2 != 0.0:
+                    dhdm = (1.0 - self.m_hf) * ((-np.log(1.0 - self.m_hf)) ** (1.0 - c2)) / (c1 * c2)
+            else:
+                if c2 != 1. and Hfs < 1.0 and c1 != 0.0 and c2 != 0.0:
+                    dhdm = (1.0 - Hfs) * (Wsf ** (1.0 - c2)) / (c1 * c2)
+            daw = 1.3 - 0.64 * wc
+            svaw = 1. / daw
+            vfaw = svaw * wc / (0.685 + svaw * wc)
+            vfcw = (0.685 + svaw * wc) / ((1.0 / self.m_density) + svaw * wc)
+            rfcw = 1.0 - np.sqrt(1.0 - vfcw)
+            fac = 1.0 / (rfcw * vfcw)
+            con = 1.0 / (2.0 - vfaw)
+            qw = 5040. * np.exp(-14.0 * wc)
+            e = (qv + qw - cpv * tk) / 1.2
+            dvpr = 18.0 * 0.016 * (1.0 - vfcw) * dv * ps1 * dhdm / (self.m_density * 1.987 * tk)
+            self.m_d[i] = dvpr + 3600. * 0.0985 * con * fac * np.exp(-e / (1.987 * tk))
+
+    @staticmethod
+    def createDeadFuelMoisture1():
+        return DeadFuelMoisture(0.20)
+
+    @staticmethod
+    def createDeadFuelMoisture10():
+        return DeadFuelMoisture(0.64)
+
+    @staticmethod
+    def createDeadFuelMoisture100():
+        return DeadFuelMoisture(2.00)
+
+    @staticmethod
+    def createDeadFuelMoisture1000():
+        return DeadFuelMoisture(6.40)
+    
+    def initialized(self):
+        return self.m_init
+    
+    def initializeEnvironment(self, year, month, day, hour, minute, second, ta, ha, sr, rc, ti, hi, wi, bp):
+        self.m_semTime = datetime.datetime(year, month, day, hour, minute, second)
+        self.initializeEnvironment(ta, ha, sr, rc, ti, hi, wi, bp)
+
+    def initializeEnvironment(self, ta, ha, sr, rc, ti, hi, wi, bp):
+        self.m_ta0 = self.m_ta1 = ta
+        self.m_ha0 = self.m_ha1 = ha
+        self.m_sv0 = self.m_sv1 = sr / Smv
+        self.m_rc0 = self.m_rc1 = rc
+        self.m_ra0 = self.m_ra1 = 0.0
+        self.m_bp0 = self.m_bp1 = bp
+
+        self.m_hf = hi
+        self.m_wfilm = 0.0
+        self.m_wsa = wi + 0.1
+        self.m_t = [ti] * self.m_nodes
+        self.m_w = [wi] * self.m_nodes
+        self.m_s = [0.0] * self.m_nodes
+
+        self.diffusivity(self.m_bp0)
+        self.m_init = True
+
+    def meanMoisture(self):
+        wea, web = 0.0, 0.0
+        wec = self.m_w[0]
+        wei = self.m_dx / (3.0 * self.m_radius)
+        for i in range(1, self.m_nodes - 1, 2):
+            wea = 4.0 * self.m_w[i]
+            web = 2.0 * self.m_w[i + 1]
+            if (i + 1) == (self.m_nodes - 1):
+                web = self.m_w[self.m_nodes - 1]
+            wec += web + wea
+        wbr = wei * wec
+        wbr = min(wbr, self.m_wmx)
+        wbr += self.m_wfilm
+        return wbr
+
+    def meanWtdMoisture(self):
+        wbr = 0.0
+        for i in range(self.m_nodes):
+            wbr += self.m_w[i] * self.m_v[i]
+        wbr = min(wbr, self.m_wmx)
+        wbr += self.m_wfilm
+        return wbr
+
+    def meanWtdTemperature(self):
+        wbr = 0.0
+        for i in range(self.m_nodes):
+            wbr += self.m_t[i] * self.m_v[i]
+        return wbr
+
+    def pptRate(self):
+        return (self.m_ra1 / self.m_et) if self.m_et > 0.00 else 0.00
+
+    def setAdsorptionRate(self, adsorptionRate):
+        self.m_stca = adsorptionRate
+
+    def setAllowRainfall2(self, allow=True):
+        self.m_allowRainfall2 = allow
+
+    def setAllowRainstorm(self, allow=True):
+        self.m_allowRainstorm = allow
+
+    def setDesorptionRate(self, desorptionRate):
+        self.m_stcd = desorptionRate
+
+
+    def setDiffusivitySteps(self, diffusivitySteps):
+        self.m_dSteps = diffusivitySteps
+
+    def setMaximumLocalMoisture(self, localMaxMc):
+        self.m_wmx = localMaxMc
+    
+    def setMoistureSteps(self, moistureSteps):
+        self.m_mSteps = moistureSteps
+
+    def setPlanarHeatTransferRate(self, planarHeatTransferRate):
+        self.m_hc = planarHeatTransferRate
+
+    def setPertubateColumn(self, pertubate=True):
+        self.m_pertubateColumn = pertubate
+
+    def setRainfallRunoffFactor(self, rainfallRunoffFactor):
+        self.m_rai0 = rainfallRunoffFactor
+
+    def setRampRai0(self, ramp=True):
+        self.m_rampRai0 = ramp
+
+    def setStickDensity(self, stickDensity=0.40):
+        self.m_density = stickDensity
+
+    def setStickLength(self, stickLength=41.0):
+        self.m_length = stickLength
+
+    def setStickNodes(self, stickNodes=11):
+        self.m_nodes = stickNodes
+
+    def setWaterFilmContribution(self, waterFilm):
+        self.m_wfilm = waterFilm
+
+    def stateName(self):
+        states = [
+            "None",             # 0
+            "Adsorption",       # 1
+            "Desorption",       # 2
+            "Condensation1",    # 3
+            "Condensation2",    # 4
+            "Evaporation",      # 5
+            "Rainfall1",        # 6
+            "Rainfall2",        # 7
+            "Rainstorm",        # 8
+            "Stagnation",       # 9
+            "Error"             # 10
+        ]
+        return states[self.m_state]
+
+    @staticmethod
+    def uniformRandom(min_val, max_val):
+        return (max_val - min_val) * random.random() + min_val
+    
+    def update(self, year, month, day, hour, minute, second, at, rh, sW, rcum, bpr):
+        # Determine Julian date for this new observation
+        jd0 = self.m_semTime.toordinal() + 1721424.5
+        self.m_semTime = datetime.datetime(year, month, day, hour, minute, second)
+        jd1 = self.m_semTime.toordinal() + 1721424.5
+
+        # Determine elapsed time (h) between the current and previous dates
+        et = 24.0 * (jd1 - jd0)
+
+        # If the Julian date wasn't initialized, or if the new time is less than the old time, assume a 1-h elapsed time.
+        if jd1 < jd0:
+            et = 1.0
+
+        # Update!
+        return self.update_internal(et, at, rh, sW, rcum, bpr)
+
+    def update_internal(self, et, at, rh, sW, rcum, bpr):
+
+        # Catch bad data here
+        if et < 0.0000027:
+            print(f"DeadFuelMoisture::update() has a regressive elapsed time of {et} hours.")
+            return False
+
+        if rcum < self.m_rc1:
+            print(f"DeadFuelMoisture::update() has a regressive cumulative rainfall amount of {rcum} cm.")
+            self.m_rc1 = rcum
+            self.m_ra0 = 0.0
+            return False
+
+        if rh < 0.001 or rh > 1.0:
+            print(f"DeadFuelMoisture::update() has an out-of-range relative humidity of {rh} g/g.")
+            return False
+
+        if at < -60.0 or at > 60.0:
+            print(f"DeadFuelMoisture::update() has an out-of-range air temperature of {at} oC.")
+            return False
+
+        sW = max(0.0, sW)
+        if sW > 2000.0:
+            print(f"DeadFuelMoisture::update() has an out-of-range solar insolation of {sW} W/m2.")
+            return False
+
+        # Save the previous weather observation values
+        self.m_ta0 = self.m_ta1
+        self.m_ha0 = self.m_ha1
+        self.m_sv0 = self.m_sv1
+        self.m_rc0 = self.m_rc1
+        self.m_ra0 = self.m_ra1
+        self.m_bp0 = self.m_bp1
+
+        # Save the current weather observation values
+        self.m_ta1 = at
+        self.m_ha1 = rh
+        self.m_sv1 = sW / Smv
+        self.m_rc1 = rcum
+        self.m_bp1 = bpr
+        self.m_et = et
+
+        # Precipitation amount since last observation
+        self.m_ra1 = self.m_rc1 - self.m_rc0
+        self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur
+        self.m_pptrate = self.m_ra1 / et / Pi
+        self.m_mdt = et / self.m_mSteps
+        self.m_mdt_2 = self.m_mdt * 2.0
+        self.m_sf = 3600.0 * self.m_mdt / (self.m_dx_2 * self.m_density)
+        self.m_ddt = et / self.m_dSteps
+        rai0 = self.m_mdt * self.m_rai0 * (1.0 - np.exp(-100.0 * self.m_pptrate))
+        if self.m_ha1 < self.m_ha0:
+            if self.m_rampRai0:
+                rai0 *= (1.0 - ((self.m_ha0 - self.m_ha1) / self.m_ha0))
+            else:
+                rai0 *= 0.15
+        rai1 = self.m_mdt * self.m_rai1 * self.m_pptrate
+
+        tstate = [0] * 11
+        ddtNext = self.m_ddt
+        tt = self.m_mdt
+        for nstep in range(1, int(et / self.m_mdt) + 1):
+            tfract = tt / et
+            ta = self.m_ta0 + (self.m_ta1 - self.m_ta0) * tfract
+            ha = self.m_ha0 + (self.m_ha1 - self.m_ha0) * tfract
+            sv = self.m_sv0 + (self.m_sv1 - self.m_sv0) * tfract
+            bp = self.m_bp0 + (self.m_bp1 - self.m_bp0) * tfract
+            fsc = sv / Srf
+            tka = ta + Kelvin
+            tdw = 5205.0 / ((5205.0 / tka) - np.log(ha))
+            tdp = tdw - Kelvin
+            tsk = Tcn + Kelvin if fsc < 0.000001 else Tcd + Kelvin
+            hr = Hrn if fsc < 0.000001 else Hrd
+            sr = 0.0 if fsc < 0.000001 else Srf * fsc
+            psa = 0.0000239 * np.exp(20.58 - (5205.0 / tka))
+            pa = ha * psa
+            psd = 0.0000239 * np.exp(20.58 - (5205.0 / tdw))
+            self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur + self.m_mdt
+
+            tfd = ta + (sr - hr * (ta - tsk + Kelvin)) / (hr + self.m_hc)
+            qv = 13550.0 - 10.22 * (tfd + Kelvin)
+            qw = 5040.0 * np.exp(-14.0 * self.m_w[0])
+            hw = (self.m_hwf * Ap / 0.24) * qv / 18.0
+            self.m_t[0] = tfd - (hw * (tfd - ta) / (hr + self.m_hc + hw))
+            tkf = self.m_t[0] + Kelvin
+            gnu = 0.00439 + 0.00000177 * (338.76 - tkf) ** 2.1237
+
+            c1 = 0.1617 - 0.001419 * self.m_t[0]
+            c2 = 0.4657 + 0.003578 * self.m_t[0]
+            self.m_wsa = c1 * Wsf ** c2
+            wdiff = self.m_wmax - self.m_wsa
+            wdiff = max(0.000001, wdiff)
+            ps1 = 0.0000239 * np.exp(20.58 - (5205.0 / tkf))
+            p1 = pa + Ap * bp * (qv / (qv + qw)) * (tka - tkf)
+            p1 = max(0.000001, p1)
+            self.m_hf = min(p1 / ps1, Hfs)
+            hf_log = -np.log(1.0 - self.m_hf)
+            self.m_sem = c1 * hf_log ** c2
+
+            self.m_state = 0
+            self.m_wfilm = 0.0
+            aml = 0.0
+            bi = 0.0
+            s_new = self.m_s[0]
+            w_new = self.m_w[0]
+            w_old = self.m_w[0]
+
+            if self.m_ra1 > 0.0:
+                if self.m_allowRainstorm and self.m_pptrate >= self.m_stv:
+                    self.m_state = 8
+                    self.m_wfilm = self.m_wfilmk
+                    w_new = self.m_wmx
+                else:
+                    if self.m_rdur < 1.0 or not self.m_allowRainfall2:
+                        self.m_state = 6
+                        w_new = w_old + rai0
+                    else:
+                        self.m_state = 7
+                        w_new = w_old + rai1
+                self.m_wfilm = self.m_wfilmk
+                s_new = (w_new - self.m_wsa) / wdiff
+                self.m_t[0] = tfd
+                self.m_hf = Hfs
+            else:
+                if w_old > self.m_wsa:
+                    p1 = ps1
+                    self.m_hf = Hfs
+                    aml = self.m_amlf * (ps1 - psd) / bp
+                    if self.m_t[0] <= tdp and p1 > psd:
+                        aml = 0.0
+                    w_new = w_old - aml * self.m_mdt_2
+                    if aml > 0.0:
+                        w_new -= (self.m_mdt * self.m_capf / gnu)
+                    w_new = min(self.m_wmx, w_new)
+                    s_new = (w_new - self.m_wsa) / wdiff
+                    if w_new > w_old:
+                        self.m_state = 3
+                    elif w_new == w_old:
+                        self.m_state = 9
+                    else:
+                        self.m_state = 5
+                elif self.m_t[0] <= tdp:
+                    self.m_state = 4
+                    aml = 0.0 if p1 > psd else self.m_amlf * (p1 - psd) / bp
+                    w_new = w_old - aml * self.m_mdt_2
+                    s_new = (w_new - self.m_wsa) / wdiff
+                else:
+                    if w_old >= self.m_sem:
+                        self.m_state = 2
+                        bi = self.m_stcd * self.m_dx / self.m_d[0]
+                    else:
+                        self.m_state = 1
+                        bi = self.m_stca * self.m_dx / self.m_d[0]
+                    w_new = (self.m_w[1] + bi * self.m_sem) / (1.0 + bi)
+                    s_new = 0.0
+
+            self.m_w[0] = min(self.m_wmx, w_new)
+            self.m_s[0] = max(0.0, s_new)
+            tstate[self.m_state] += 1
+
+            for i in range(self.m_nodes):
+                self.m_Twold[i] = self.m_w[i]
+                self.m_Tsold[i] = self.m_s[i]
+                self.m_Ttold[i] = self.m_t[i]
+                self.m_Tv[i] = Thdiff * self.m_x[i]
+                self.m_To[i] = self.m_d[i] * self.m_x[i]
+
+            if self.m_state != 9:
+                for i in range(self.m_nodes):
+                    self.m_Tg[i] = 0.0
+                    svp = (self.m_w[i] - self.m_wsa) / wdiff
+                    if Sir <= svp <= Scr:
+                        ak = Aks * (2.0 * np.sqrt(svp / Scr) - 1.0)
+                        self.m_Tg[i] = (ak / (gnu * wdiff)) * self.m_x[i] * self.m_vf * (Scr / svp) ** 1.5
+
+                for i in range(1, self.m_nodes - 1):
+                    ae = self.m_Tg[i + 1] / self.m_dx
+                    aw = self.m_Tg[i - 1] / self.m_dx
+                    ar = self.m_x[i] * self.m_dx / self.m_mdt
+                    ap = ae + aw + ar
+                    self.m_s[i] = (ae * self.m_Tsold[i + 1] + aw * self.m_Tsold[i - 1] + ar * self.m_Tsold[i]) / ap
+                    self.m_s[i] = min(1.0, max(0.0, self.m_s[i]))
+                self.m_s[self.m_nodes - 1] = self.m_s[self.m_nodes - 2]
+
+                continuousLiquid = all(self.m_s[i] >= Sir for i in range(1, self.m_nodes - 1))
+                if continuousLiquid:
+                    for i in range(1, self.m_nodes - 1):
+                        self.m_w[i] = self.m_wsa + self.m_s[i] * wdiff
+                        if self.m_pertubateColumn:
+                            self.m_w[i] += self.uniformRandom(-0.0001, 0.0001)
+                        self.m_w[i] = min(self.m_wmx, max(0.0, self.m_w[i]))
+                else:
+                    for i in range(1, self.m_nodes - 1):
+                        ae = self.m_To[i + 1] / self.m_dx
+                        aw = self.m_To[i - 1] / self.m_dx
+                        ar = self.m_x[i] * self.m_dx / self.m_mdt
+                        ap = ae + aw + ar
+                        self.m_w[i] = (ae * self.m_Twold[i + 1] + aw * self.m_Twold[i - 1] + ar * self.m_Twold[i]) / ap
+                        self.m_w[i] = min(self.m_wmx, max(0.0, self.m_w[i]))
+                self.m_w[self.m_nodes - 1] = self.m_w[self.m_nodes - 2]
+
+            for i in range(1, self.m_nodes - 1):
+                ae = self.m_Tv[i + 1] / self.m_dx
+                aw = self.m_Tv[i - 1] / self.m_dx
+                ar = self.m_x[i] * self.m_dx / self.m_mdt
+                ap = ae + aw + ar
+                self.m_t[i] = (ae * self.m_Ttold[i + 1] + aw * self.m_Ttold[i - 1] + ar * self.m_Ttold[i]) / ap
+                self.m_t[i] = min(71.0, self.m_t[i])
+            self.m_t[self.m_nodes - 1] = self.m_t[self.m_nodes - 2]
+
+            if (ddtNext - tt) < (0.5 * self.m_mdt):
+                self.diffusivity(bp)
+                ddtNext += self.m_ddt
+
+        self.m_state = tstate.index(max(tstate))
+        return True
+
+    def zero(self):
+        self.m_semTime = None
+        self.m_density = 0.0
+        self.m_dSteps = 0
+        self.m_hc = 0.0
+        self.m_length = 0.0
+        self.m_nodes = 0
+        self.m_radius = 0.0
+        self.m_rai0 = 0.0
+        self.m_rai1 = 0.0
+        self.m_stca = 0.0
+        self.m_stcd = 0.0
+        self.m_mSteps = 0
+        self.m_stv = 0.0
+        self.m_wfilmk = 0.0
+        self.m_wmx = 0.0
+        self.m_dx = 0.0
+        self.m_wmax = 0.0
+        self.m_x = []
+        self.m_v = []
+        self.m_amlf = 0.0
+        self.m_capf = 0.0
+        self.m_hwf = 0.0
+        self.m_dx_2 = 0.0
+        self.m_vf = 0.0
+        self.m_bp0 = 0.0
+        self.m_ha0 = 0.0
+        self.m_rc0 = 0.0
+        self.m_sv0 = 0.0
+        self.m_ta0 = 0.0
+        self.m_init = False
+        self.m_bp1 = 0.0
+        self.m_et = 0.0
+        self.m_ha1 = 0.0
+        self.m_rc1 = 0.0
+        self.m_sv1 = 0.0
+        self.m_ta1 = 0.0
+        self.m_ddt = 0.0
+        self.m_mdt = 0.0
+        self.m_mdt_2 = 0.0
+        self.m_pptrate = 0.0
+        self.m_ra0 = 0.0
+        self.m_ra1 = 0.0
+        self.m_rdur = 0.0
+        self.m_sf = 0.0
+        self.m_hf = 0.0
+        self.m_wsa = 0.0
+        self.m_sem = 0.0
+        self.m_wfilm = 0.0
+        self.m_t = []
+        self.m_s = []
+        self.m_d = []
+        self.m_w = []
+        self.m_state = 0
+
+    def __str__(self):
+        output = []
+        output.append(f"m_semTime {self.m_semTime}")
+        output.append(f"m_density {self.m_density}")
+        output.append(f"m_dSteps {self.m_dSteps}")
+        output.append(f"m_hc {self.m_hc}")
+        output.append(f"m_length {self.m_length}")
+        output.append(f"m_nodes {self.m_nodes}")
+        output.append(f"m_radius {self.m_radius}")
+        output.append(f"m_rai0 {self.m_rai0}")
+        output.append(f"m_rai1 {self.m_rai1}")
+        output.append(f"m_stca {self.m_stca}")
+        output.append(f"m_stcd {self.m_stcd}")
+        output.append(f"m_mSteps {self.m_mSteps}")
+        output.append(f"m_stv {self.m_stv}")
+        output.append(f"m_wfilmk {self.m_wfilmk}")
+        output.append(f"m_wmx {self.m_wmx}")
+        output.append(f"m_dx {self.m_dx}")
+        output.append(f"m_wmax {self.m_wmax}")
+        output.append(f"m_x ({len(self.m_x)}) {' '.join(map(str, self.m_x))}")
+        output.append(f"m_v ({len(self.m_v)}) {' '.join(map(str, self.m_v))}")
+        output.append(f"m_amlf {self.m_amlf}")
+        output.append(f"m_capf {self.m_capf}")
+        output.append(f"m_hwf {self.m_hwf}")
+        output.append(f"m_dx_2 {self.m_dx_2}")
+        output.append(f"m_vf {self.m_vf}")
+        output.append(f"m_bp0 {self.m_bp0}")
+        output.append(f"m_ha0 {self.m_ha0}")
+        output.append(f"m_rc0 {self.m_rc0}")
+        output.append(f"m_sv0 {self.m_sv0}")
+        output.append(f"m_ta0 {self.m_ta0}")
+        output.append(f"m_init {self.m_init}")
+        output.append(f"m_bp1 {self.m_bp1}")
+        output.append(f"m_et {self.m_et}")
+        output.append(f"m_ha1 {self.m_ha1}")
+        output.append(f"m_rc1 {self.m_rc1}")
+        output.append(f"m_sv1 {self.m_sv1}")
+        output.append(f"m_ta1 {self.m_ta1}")
+        output.append(f"m_ddt {self.m_ddt}")
+        output.append(f"m_mdt {self.m_mdt}")
+        output.append(f"m_mdt_2 {self.m_mdt_2}")
+        output.append(f"m_pptrate {self.m_pptrate}")
+        output.append(f"m_ra0 {self.m_ra0}")
+        output.append(f"m_ra1 {self.m_ra1}")
+        output.append(f"m_rdur {self.m_rdur}")
+        output.append(f"m_sf {self.m_sf}")
+        output.append(f"m_hf {self.m_hf}")
+        output.append(f"m_wsa {self.m_wsa}")
+        output.append(f"m_sem {self.m_sem}")
+        output.append(f"m_wfilm {self.m_wfilm}")
+        output.append(f"m_t {len(self.m_t)} {' '.join(map(str, self.m_t))}")
+        output.append(f"m_s {len(self.m_s)} {' '.join(map(str, self.m_s))}")
+        output.append(f"m_d {len(self.m_d)} {' '.join(map(str, self.m_d))}")
+        output.append(f"m_w {len(self.m_w)} {' '.join(map(str, self.m_w))}")
+        output.append(f"m_state {self.m_state}")
+        return '\n'.join(output)
+
+    def from_string(input_str):
+        lines = input_str.strip().split('\n')
+        r = DeadFuelMoisture(0, "")
+        r.m_semTime = datetime.datetime.strptime(lines[0].split()[1], "%Y/%m/%d %H:%M:%S.%f")
+        r.m_density = float(lines[1].split()[1])
+        r.m_dSteps = int(lines[2].split()[1])
+        r.m_hc = float(lines[3].split()[1])
+        r.m_length = float(lines[4].split()[1])
+        r.m_name = lines[5].split()[1]
+        r.m_nodes = int(lines[6].split()[1])
+        r.m_radius = float(lines[7].split()[1])
+        r.m_rai0 = float(lines[8].split()[1])
+        r.m_rai1 = float(lines[9].split()[1])
+        r.m_stca = float(lines[10].split()[1])
+        r.m_stcd = float(lines[11].split()[1])
+        r.m_mSteps = int(lines[12].split()[1])
+        r.m_stv = float(lines[13].split()[1])
+        r.m_wfilmk = float(lines[14].split()[1])
+        r.m_wmx = float(lines[15].split()[1])
+        r.m_dx = float(lines[16].split()[1])
+        r.m_wmax = float(lines[17].split()[1])
+        n = int(lines[18].split()[1])
+        r.m_x = [float(lines[19 + i]) for i in range(n)]
+        n = int(lines[19 + n].split()[1])
+        r.m_v = [float(lines[20 + i]) for i in range(n)]
+        r.m_amlf = float(lines[20 + n].split()[1])
+        r.m_capf = float(lines[21 + n].split()[1])
+        r.m_hwf = float(lines[22 + n].split()[1])
+        r.m_dx_2 = float(lines[23 + n].split()[1])
+        r.m_vf = float(lines[24 + n].split()[1])
+        r.m_bp0 = float(lines[25 + n].split()[1])
+        r.m_ha0 = float(lines[26 + n].split()[1])
+        r.m_rc0 = float(lines[27 + n].split()[1])
+        r.m_sv0 = float(lines[28 + n].split()[1])
+        r.m_ta0 = float(lines[29 + n].split()[1])
+        r.m_init = lines[30 + n].split()[1] == 'True'
+        r.m_bp1 = float(lines[31 + n].split()[1])
+        r.m_et = float(lines[32 + n].split()[1])
+        r.m_ha1 = float(lines[33 + n].split()[1])
+        r.m_rc1 = float(lines[34 + n].split()[1])
+        r.m_sv1 = float(lines[35 + n].split()[1])
+        r.m_ta1 = float(lines[36 + n].split()[1])
+        r.m_ddt = float(lines[37 + n].split()[1])
+        r.m_mdt = float(lines[38 + n].split()[1])
+        r.m_mdt_2 = float(lines[39 + n].split()[1])
+        r.m_pptrate = float(lines[40 + n].split()[1])
+        r.m_ra0 = float(lines[41 + n].split()[1])
+        r.m_ra1 = float(lines[42 + n].split()[1])
+        r.m_rdur = float(lines[43 + n].split()[1])
+        r.m_sf = float(lines[44 + n].split()[1])
+        r.m_hf = float(lines[45 + n].split()[1])
+        r.m_wsa = float(lines[46 + n].split()[1])
+        r.m_sem = float(lines[47 + n].split()[1])
+        r.m_wfilm = float(lines[48 + n].split()[1])
+        n = int(lines[50 + n].split()[1])
+        r.m_t = [float(lines[51 + i + n]) for i in range(n)]
+        n = int(lines[51 + n + n].split()[1])
+        r.m_s = [float(lines[52 + i + n]) for i in range(n)]
+        n = int(lines[52 + n + n].split()[1])
+        r.m_d = [float(lines[53 + i + n]) for i in range(n)]
+        n = int(lines[53 + n + n].split()[1])
+        r.m_w = [float(lines[54 + i + n]) for i in range(n)]
+        r.m_state = int(lines[55 + n + n].split()[1])
+        return r
