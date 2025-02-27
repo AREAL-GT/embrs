@@ -9,7 +9,6 @@ import json
 import pvlib
 from typing import Iterator
 
-from embrs.utilities.wind_forecast import run_windninja
 from embrs.utilities.data_classes import *
 
 # TODO: Document this file
@@ -18,10 +17,6 @@ from embrs.utilities.data_classes import *
 class WeatherStream:
     def __init__(self, params: WeatherParams, geo: GeoInfo):
         self.params = params
-
-        self.lat = geo.center_lat
-        self.lon = geo.center_lon
-        self.north_angle_deg = geo.north_angle_deg
 
         # Setup the Open-Meteo API client with cache and retry on error
         cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
@@ -42,8 +37,8 @@ class WeatherStream:
 
         url = "https://archive-api.open-meteo.com/v1/archive"
         api_input = {
-            "latitude": self.lat,
-            "longitude": self.lon,
+            "latitude": geo.center_lat,
+            "longitude": geo.center_lon,
             "start_date": start_datetime_utc.date().strftime("%Y-%m-%d"),
             "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
             "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance", "rain"],
@@ -87,7 +82,7 @@ class WeatherStream:
         hourly_data["dni"] = hourly_dni
         hourly_data["rain"] = hourly_rain_mm * 0.1 # convert to cm
         
-        solpos = pvlib.solarposition.get_solarposition(self.times, self.lat, self.lon)
+        solpos = pvlib.solarposition.get_solarposition(self.times, geo.center_lat, geo.center_lon)
         
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values

@@ -217,12 +217,12 @@ class BaseFireSim:
         self._initial_ignition = scenario.initial_ign
 
         # Generate a weather stream
-        self._weather_stream = WeatherStream(sim_params.weather_input)
+        self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info)
         self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
         
         # Get wind data
         self._wind_res = sim_params.weather_input.mesh_resolution
-        self.wind_forecast = run_windninja(self._weather_stream)
+        self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
         # Iterate over each layer (time step or vertical level, depending on the dataset structure)

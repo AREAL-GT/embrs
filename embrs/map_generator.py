@@ -41,7 +41,6 @@ def generate_map_from_file(map_params: MapParams):
 
     bounds = geotiff_to_numpy(map_params)
 
-    map_params.geo_info = GeoInfo()
     map_params.geo_info.bounds = bounds
     map_params.geo_info.calc_center_coords()
     map_params.geo_info.calc_time_zone()

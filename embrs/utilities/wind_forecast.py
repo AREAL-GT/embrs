@@ -103,7 +103,7 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_windninja(weather: WeatherStream) -> Tuple[np.ndarray, float]:
+def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization in parallel."""
     
     # Extract data from forecast seed
@@ -115,7 +115,7 @@ def run_windninja(weather: WeatherStream) -> Tuple[np.ndarray, float]:
     start_datetime = weather.params.start_datetime
     mesh_resolution = weather.params.mesh_resolution
     timezone = map.geo_info.timezone
-    north_angle = map.north_angle_deg
+    north_angle = map.geo_info.north_angle_deg
 
     if not type(start_datetime) == datetime:
         # Convert to naive datetime
@@ -170,7 +170,7 @@ def run_windninja(weather: WeatherStream) -> Tuple[np.ndarray, float]:
     # Merge data into a forecast
     forecast = create_forecast_array(num_tasks)
 
-    return forecast, time_step
+    return forecast
 
 def run_point_windninja():
     raise NotImplementedError("Point initialization not yet implemented")
