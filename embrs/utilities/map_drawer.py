@@ -292,6 +292,8 @@ class PolygonDrawer:
             return
 
         if event.button == 3 and self.ax._pan_start is not None:
+            if event.xdata is None or event.ydata is None:
+                return
             dx = event.xdata - self.ax._pan_start[0]
             dy = event.ydata - self.ax._pan_start[1]
             xlim = self.ax.get_xlim()
