@@ -40,6 +40,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     spread_directions = np.deg2rad(cell.directions)
 
     R_h, R_0, I_r, alpha = calc_r_h(cell, wind_speed_ft_min, slope_angle_deg, rel_wind_dir)
+    R_0 = max(R_0, 1e-7)
 
     if R_h_in is not None:
         R_h = R_h_in

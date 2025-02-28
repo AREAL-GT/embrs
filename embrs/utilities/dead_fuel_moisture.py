@@ -51,6 +51,7 @@ class DeadFuelMoisture:
         self.m_allowRainstorm = True
         self.m_pertubateColumn = True
         self.m_rampRai0 = True
+        self.m_rdur = 0.0
         self.initializeStick()
 
     def deriveDiffusivitySteps(self, radius):

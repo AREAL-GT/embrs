@@ -24,10 +24,6 @@ class WeatherStream:
         else:
             raise ValueError("Invalid weather input_type, must be either 'OpenMeteo' or 'File'")
 
-
-        print(f"len of weather stream: {len(self.stream)}")
-
-
     def get_stream_from_openmeteo(self, params: WeatherParams, geo: GeoInfo):
         # Setup the Open-Meteo API client with cache and retry on error
         cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
@@ -236,6 +232,7 @@ class WeatherStream:
         self.input_temp_units = data["temperature_units"]
 
     def generate_stream(self, hourly_data: dict) -> Iterator[WeatherEntry]:
+        cum_rain = 0
         for wind_speed, wind_dir, temp, rel_humidity, cloud_cover, ghi, dhi, dni, rain, solar_zenith, solar_azimuth in zip(
             hourly_data["wind_speed"],
             hourly_data["wind_direction"],
@@ -249,13 +246,14 @@ class WeatherStream:
             hourly_data["solar_zenith"],
             hourly_data["solar_azimuth"]
         ):
+            cum_rain += rain
             yield WeatherEntry(
                 wind_speed=wind_speed,
                 wind_dir_deg=wind_dir,
                 temp=temp,
                 rel_humidity=rel_humidity,
                 cloud_cover=cloud_cover,
-                rain = rain,
+                rain = cum_rain,
                 dni=dni,
                 dhi=dhi,
                 ghi=ghi,

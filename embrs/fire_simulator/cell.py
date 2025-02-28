@@ -256,7 +256,7 @@ class Cell:
                     t_f_celsius, # Intial ambient air temeperature
                     h_f_frac, # Initial ambient air rel. humidity (g/g)
                     solar_radiation, # Initial solar radiation (W/m^2)
-                    curr_weather.rain, # Initial cumulative rainfall (cm)
+                    0, # Initial cumulative rainfall (cm)
                     t_f_celsius, # Initial stick temperature (degrees C)
                     h_f_frac, # Intial stick surface relative humidity (g/g)
                     self.init_mf, # Initial stick fuel moisture fraction (g/g) # TODO: implement how to get this
