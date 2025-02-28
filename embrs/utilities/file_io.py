@@ -688,7 +688,7 @@ class SimFolderSelector(FileSelectBase):
                 map_params = pickle.load(f)
 
             weather_input = WeatherParams(
-                input_type = "OpenMeteo" if self.use_open_meteo.get() else "WeatherFile",
+                input_type = "OpenMeteo" if self.use_open_meteo.get() else "File",
                 file = self.weather_file.get(),
                 mesh_resolution = self.mesh_resolution.get(),
                 start_datetime = self.start_datetime if self.use_open_meteo.get() else None,

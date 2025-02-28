@@ -12,7 +12,7 @@ from typing import Tuple
 from tqdm import tqdm
 import argparse
 import configparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from embrs.fire_simulator.visualizer import Visualizer
 from embrs.fire_simulator.logger import Logger
 from embrs.fire_simulator.fire import FireSim
@@ -235,18 +235,57 @@ def load_sim_params(cfg_path: str) -> SimParams:
         print(f"Warning: Mesh resolution for WindNinja not specified in {cfg_path}, defaulting to 250m.")
 
     start_iso_datetime = config["Weather"].get("start_datetime", None)
-    end_iso_datetime = config["Weather"].get("end_datetime", None)
 
-    if start_iso_datetime is None or end_iso_datetime is None:
-        raise ValueError(f"Error in {cfg_path}: Both 'start_datetime' and 'end_datetime' must be specified in the [Weather] section.")
+    if start_iso_datetime is None:
+        raise ValueError(f"Error in {cfg_path}:'start_datetime' must be specified in the [Weather] section.")
+
+    start_datetime = datetime.fromisoformat(start_iso_datetime)
+
+    weather_file = config["Weather"].get("file", None)
+
+    if weather_input_type == "File":
+        if weather_file is None:
+            raise ValueError(f"Error in {cfg_path}: 'file' must be specified in the [Weather] section when using 'File' input type.")
+        
+        with open(weather_file, "rb") as f:
+            weather = json.load(f)
+
+        # get duration from number of entries
+        weather_time_step_min = weather['time_step_min']
+        weather_time_step_hr = weather_time_step_min / 60
+
+        weather_len = len(weather['weather_entries']["wind_speed"])
+
+        for key in weather['weather_entries']:
+            if len(weather['weather_entries'][key]) != weather_len:
+                raise ValueError(f"Error in {cfg_path}: All weather entries must have the same number of entries.")
+
+        duration_s = weather_time_step_hr * weather_len * 3600
+        end_datetime = start_datetime + timedelta(seconds=duration_s)
+
+    elif weather_input_type == "OpenMeteo":
+        end_iso_datetime = config["Weather"].get("end_datetime", None)
+        if end_iso_datetime is None:
+            duration_s = config["Simulation"].getint("duration_s", None)
+            if duration_s is None:
+                raise ValueError(f"Error in {cfg_path}: When using OpenMeteo 'duration_s' must be specified in the [Simulation] section if no End datetime is provided.")
+            else:
+                end_datetime = start_datetime + timedelta(seconds=duration_s)
+        else:
+            end_datetime = datetime.fromisoformat(end_iso_datetime)
+
+    if start_datetime >= end_datetime:
+        raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
 
     weather_params = WeatherParams(
         input_type=weather_input_type,
         file=config["Weather"].get("file", None),
         mesh_resolution=mesh_resolution,
-        start_datetime=datetime.fromisoformat(start_iso_datetime),
-        end_datetime=datetime.fromisoformat(end_iso_datetime),
+        start_datetime=start_datetime,
+        end_datetime=end_datetime
     )
+
+    print(f"sim duration: {duration_s}")
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
     log_folder = config["Simulation"].get("log_folder", None)
@@ -258,39 +297,6 @@ def load_sim_params(cfg_path: str) -> SimParams:
             write_logs = True
     elif write_logs and log_folder is None:
         raise ValueError(f"Error in {cfg_path}: 'log_folder' must be specified if 'write_logs' is set to True.")
-
-    detect_duration = config["Simulation"].getboolean("detect_duration", None)
-    duration_s = config["Simulation"].getint("duration_s", None)
-
-    if detect_duration is None:
-        if duration_s is None:
-            detect_duration = True
-            print(f"Warning: No 'duration_s' specified in {cfg_path}. Defaulting to the time difference between start and end datetimes.")
-        else:
-            detect_duration = False
-
-    elif detect_duration and duration_s is not None:
-        raise ValueError(f"Error in {cfg_path}: 'detect_duration' cannot be True while 'duration_s' is specified.")
-    
-    elif not detect_duration and duration_s is None:
-        raise ValueError(f"Error in {cfg_path}: either 'detect_duration' must be True or 'duration_s' needs to be specified.")
-
-    if weather_params.start_datetime >= weather_params.end_datetime:
-        raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
-
-    if detect_duration:
-        if weather_input_type == "OpenMeteo":
-            duration = weather_params.end_datetime - weather_params.start_datetime
-            duration_s = duration.total_seconds()
-        elif weather_input_type == "File":
-            with open(weather_params.file, "rb") as f:
-                weather = json.load(f)
-
-            # get duration from number of entries
-            weather_time_step_min = weather['time_step_min']
-            weather_time_step_hr = weather_time_step_min / 60
-            num_entries = len(weather['weather entries'])
-            duration_s = weather_time_step_hr * num_entries * 3600
 
     t_step_s = config["Simulation"].getint("t_step_s", None)
     if t_step_s is None:
