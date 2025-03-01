@@ -15,6 +15,8 @@ import matplotlib.patches as mpatches
 from matplotlib.axes import Axes
 from matplotlib import cm
 import numpy as np
+from datetime import timedelta
+
 
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import FuelConstants as fc
@@ -138,19 +140,28 @@ class Visualizer:
             h_ax.add_collection(fire_coll)
             h_ax.add_collection(burnt_coll)
 
-            # Create time display
-            time_box_x = 0
-            time_box_y = sim.grid_height*1.5*sim.cell_size-(15/600) * height_m
-            time_box_w = (1/6)*width_m
-            time_box_h = (15/600)*height_m
+            datetime_box_x = 0
+            datetime_box_y = sim.grid_height*1.5*sim.cell_size - (15/600) * height_m
+            datetime_box_w = (1/6)*width_m
+            datetime_box_h = (15/600)*height_m
 
-            self.time_box = mpatches.Rectangle((time_box_x, time_box_y), time_box_w, time_box_h,
+            self.datetime_box = mpatches.Rectangle((datetime_box_x, datetime_box_y), datetime_box_w, datetime_box_h,
+                                                facecolor='white', edgecolor='black', linewidth=1,
+                                                zorder=3, alpha=0.75)
+
+            # Create time display
+            elapsed_box_x = 0
+            elapsed_box_y = sim.grid_height*1.5*sim.cell_size-(30/600) * height_m
+            elapsed_box_w = (1/6)*width_m
+            elapsed_box_h = (15/600)*height_m
+
+            self.elapsed_box = mpatches.Rectangle((elapsed_box_x, elapsed_box_y), elapsed_box_w, elapsed_box_h,
                                                 facecolor='white', edgecolor='black', linewidth=1,
                                                 zorder=3, alpha = 0.75)
 
             #  Create compass display
             compass_box_x = 0
-            compass_box_y = sim.grid_height*1.5*sim.cell_size - (650/6000) * height_m
+            compass_box_y = sim.grid_height*1.5*sim.cell_size - (800/6000) * height_m
             compass_box_w = (5/60)*width_m
             compass_box_h = (500/6000) * height_m
 
@@ -163,13 +174,15 @@ class Visualizer:
                                                 edgecolor='k', linewidth= 1, alpha=0.75, zorder= 3)
             
             # Add display items to artists
-            self.artists = [copy.copy(self.time_box),
+            self.artists = [copy.copy(self.elapsed_box),
+                            copy.copy(self.datetime_box),
                             copy.copy(self.compass_box),
                             copy.copy(self.scale_box)]
 
             # Add display items to plot
             h_ax.add_patch(self.scale_box)
-            h_ax.add_patch(self.time_box)
+            h_ax.add_patch(self.elapsed_box)
+            h_ax.add_patch(self.datetime_box)
 
             # Plot roads if they exist
             if sim.roads is not None:
@@ -252,15 +265,22 @@ class Visualizer:
         h_ax.add_artist(self.compass_box)
         h_ax.add_artist(self.compassheader)
 
+        sim_datetime = sim._start_datetime
+        datetime_str = sim_datetime.strftime("%Y-%m-%d %H:%M")
         time_str = util.get_time_str(sim.curr_time_s)
 
-        rx, ry = self.time_box.get_xy()
-        cx = rx + self.time_box.get_width()/2
-        cy = ry + self.time_box.get_height()/2
+        rx, ry = self.datetime_box.get_xy()
+        cx = rx + self.datetime_box.get_width()/2
+        cy = ry + self.datetime_box.get_height()/2
 
-        self.timeheader = h_ax.text(20, cy, 'time:', ha='left', va='center')
+        self.datetime_text = h_ax.text(cx, cy, datetime_str, ha='center', va='center')
 
-        self.simtext = h_ax.text(2*cx - 20, cy, time_str, ha='right', va='center')
+        rx, ry = self.elapsed_box.get_xy()
+        cx = rx + self.elapsed_box.get_width()/2
+        cy = ry + self.elapsed_box.get_height()/2
+
+        self.timeheader = h_ax.text(20, cy, 'elapsed:', ha='left', va='center')
+        self.elapsed_text = h_ax.text(2*cx - 20, cy, time_str, ha='right', va='center')
 
         h_ax.set_aspect('equal')
         h_ax.axis([0, sim.cell_size*sim.shape[1]*np.sqrt(3) - (sim.cell_size*np.sqrt(3)/2),
@@ -310,7 +330,6 @@ class Visualizer:
         :param sim: FireSim instance to display
         :type sim: FireSim
         """
-        self.simtext.set_visible(False)
 
         if self.wind_idx != sim._curr_weather_idx:
             self.wind_grid.remove()
@@ -392,16 +411,15 @@ class Visualizer:
         self.h_ax.add_collection(fire_coll)
         self.h_ax.add_collection(burnt_coll)
 
+        # Set time displays based on sim time
         sim_time_s = sim.time_step*sim.iters
+
+        sim_datetime = sim._start_datetime + timedelta(seconds=sim_time_s)
+        datetime_str = sim_datetime.strftime("%Y-%m-%d %H:%M")
+        self.datetime_text.set_text(datetime_str)
+
         time_str = util.get_time_str(sim_time_s)
-
-        rx, ry = self.time_box.get_xy()
-        cx = rx + self.time_box.get_width()/2
-        cy = ry + self.time_box.get_height()/2
-
-        self.simtext = self.h_ax.text(2*cx - 20, cy, time_str, ha='right', va='center')
-
-
+        self.elapsed_text.set_text(time_str)
 
         # Plot agents at current time if they exist
         if len(sim.agent_list) > 0:

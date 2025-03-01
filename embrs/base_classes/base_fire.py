@@ -217,6 +217,9 @@ class BaseFireSim:
         self._fire_breaks = zip(scenario.fire_breaks, scenario.fuel_vals)
         self._initial_ignition = scenario.initial_ign
 
+        # Grab starting datetime
+        self._start_datetime = sim_params.weather_input.start_datetime
+
         # Generate a weather stream
         self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
         self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
