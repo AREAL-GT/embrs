@@ -45,7 +45,7 @@ class Cell:
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
 
-    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, fuel_type=Anderson13(1)):
+    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_mf = 0.08, fuel_type=Anderson13(1)):
         """Initializes a simulation cell with terrain, fire properties, and fuel characteristics.
 
             The cell is positioned within a **point-up hexagonal grid** and stores relevant 
@@ -141,7 +141,7 @@ class Cell:
 
         self.dfms = [self.dfm1, self.dfm10, self.dfm100]
 
-        self.init_mf = 0.1        # TODO: this needs to be done based on conditioning
+        self.init_mf = init_mf
         
         self.moist_update = -1
 

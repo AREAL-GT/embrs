@@ -124,6 +124,7 @@ class SimParams:
     weather_input: Optional[WeatherParams] = None
     t_step_s: Optional[int] = None
     cell_size: Optional[int] = None
+    init_mf: Optional[float] = None
     duration_s: Optional[float] = None
     visualize: Optional[bool] = None
     num_runs: Optional[int] = None

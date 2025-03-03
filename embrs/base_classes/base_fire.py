@@ -85,6 +85,9 @@ class BaseFireSim:
                 # Set cell fuel type from fuel map
                 fuel_key = self._fuel_map[data_row, data_col]
                 new_cell._set_fuel_type(Anderson13(fuel_key))
+                
+                # Set cell init fuel moisture
+                new_cell.init_mf = self._init_mf
 
                 # Set cell aspect from aspect map
                 new_cell._set_aspect(self._aspect_map[data_row, data_col])
@@ -186,6 +189,7 @@ class BaseFireSim:
         self._cell_size = sim_params.cell_size
         self._sim_duration = sim_params.duration_s
         self._time_step = sim_params.t_step_s
+        self._init_mf = sim_params.init_mf
 
         # Load map params
         map_params = sim_params.map_params

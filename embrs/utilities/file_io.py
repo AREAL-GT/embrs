@@ -282,6 +282,7 @@ class SimFolderSelector(FileSelectBase):
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.weather_file = tk.StringVar()
+        self.init_mf = tk.DoubleVar()
         self.time_step = tk.IntVar()
         self.cell_size = tk.IntVar()
         self.duration = tk.DoubleVar()
@@ -310,6 +311,7 @@ class SimFolderSelector(FileSelectBase):
 
         # Set some initial values
         self.time_step.set(5)
+        self.init_mf.set(8)
         self.cell_size.set(10)
         self.duration.set(1.0)
         self.num_runs.set(1)
@@ -376,6 +378,8 @@ class SimFolderSelector(FileSelectBase):
         self.weather_entry.configure(state='disabled')
 
         self.create_spinbox_with_two_labels(frame, "Wind Mesh Resolution:       ", np.inf, self.mesh_resolution, "meters") # TODO: the max val of this should probably be set based on sim size
+
+        self.create_spinbox_with_two_labels(frame, "Initial Fuel Moisture:    ", 100, self.init_mf, "%")
 
         # Create frame for time step selection
         self.create_spinbox_with_two_labels(frame, "Time step:     ", np.inf, self.time_step, "seconds")
@@ -517,8 +521,8 @@ class SimFolderSelector(FileSelectBase):
             # get wind duration and set max_duration
             weather_time_step_min = weather['time_step_min']
             weather_time_step_hr = weather_time_step_min / 60
-            num_entries = len(weather['weather entries'])
-
+            num_entries = len(weather['weather_entries']["wind_speed"])
+            self.start_datetime = datetime.fromisoformat(weather["start_datetime"])
             weather_duration = weather_time_step_hr * num_entries
             self.end_datetime = self.start_datetime + timedelta(hours=weather_duration)
             self.max_duration = weather_duration
@@ -691,8 +695,8 @@ class SimFolderSelector(FileSelectBase):
                 input_type = "OpenMeteo" if self.use_open_meteo.get() else "File",
                 file = self.weather_file.get(),
                 mesh_resolution = self.mesh_resolution.get(),
-                start_datetime = self.start_datetime if self.use_open_meteo.get() else None,
-                end_datetime = self.end_datetime if self.use_open_meteo.get() else None
+                start_datetime = self.start_datetime,
+                end_datetime = self.end_datetime
              )
 
             sim_params = SimParams(
@@ -700,6 +704,7 @@ class SimFolderSelector(FileSelectBase):
                 log_folder = self.log_folder.get(),
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
+                init_mf = self.init_mf.get()/100,
                 cell_size = self.cell_size.get(),
                 duration_s = duration_s,
                 visualize = self.viz_on.get(),
