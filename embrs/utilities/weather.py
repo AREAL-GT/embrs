@@ -274,7 +274,10 @@ class WeatherStream:
         daily_afternoon_rh = resampled_df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
 
         # Compute daily RH average as per NFDRS convention
-        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
+        daily_avg_rh = pd.DataFrame({
+            "morning": daily_morning_rh,
+            "afternoon": daily_afternoon_rh
+        }).mean(axis=1)
 
         # Compute daily temperature mean (can use max/min if needed)
         daily_avg_temp = resampled_df.resample('D')["temperature"].mean()  # Alternative: (Tmax + Tmin) / 2
