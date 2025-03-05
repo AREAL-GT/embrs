@@ -73,7 +73,7 @@ class Visualizer:
         if artists is None or collections is None:
             print("Initializing visualization... ")
             burnt_patches = []
-            # alpha_arr = [0, 1]
+            alpha_arr = [0, 1]
             break_fuel_arr = [0, 1]
 
             # Add low and high polygons to prevent weird color mapping
@@ -102,9 +102,9 @@ class Visualizer:
                             legend_elements.append(mpatches.Patch(color = color,
                                                 label = curr_cell.fuel_type.name))
 
-                        # if curr_cell.fuel_content < 1 and curr_cell.fuel_type.burnable:
-                        #     fire_breaks.append(polygon)
-                        #     break_fuel_arr.append(curr_cell.fuel_content)
+                        if curr_cell.fuel_content < 1 and curr_cell.fuel_type.burnable:
+                            fire_breaks.append(polygon)
+                            break_fuel_arr.append(curr_cell.fuel_content)
 
                         # else:
                         polygon.set(color = color)
@@ -112,7 +112,7 @@ class Visualizer:
 
                     elif curr_cell.state == CellStates.FIRE:
                         fire_patches.append(polygon)
-                        # alpha_arr.append(curr_cell.fuel_content)
+                        alpha_arr.append(curr_cell.fuel_content)
 
                     else:
                         burnt_patches.append(polygon)
@@ -125,9 +125,9 @@ class Visualizer:
                 breaks_coll.set(array= break_fuel_arr, cmap=mpl.colormaps["gist_gray"])
 
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
-            # if len(alpha_arr) > 0:
-            #     alpha_arr = [float(i)/sum(alpha_arr) for i in alpha_arr]
-            #     fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
+            if len(alpha_arr) > 0:
+                alpha_arr = [float(i)/sum(alpha_arr) for i in alpha_arr]
+                fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
 
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
@@ -353,7 +353,7 @@ class Visualizer:
         fire_patches = []
         tree_patches = []
         burnt_patches = []
-        # alpha_arr = [0, 1]
+        alpha_arr = [0, 1]
 
         # Add low and high polygons to prevent weird color mapping
         r = 1/np.sqrt(3)
@@ -373,7 +373,7 @@ class Visualizer:
             if c.state == CellStates.FUEL:
                 color = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel_type.model_num])))
                 # Scale color based on cell's fuel content
-                color = color # *  c.fuel_content
+                color = color * c.fuel_content
                 polygon.set_facecolor(color)
                 tree_patches.append(polygon)
 
@@ -386,6 +386,7 @@ class Visualizer:
 
             elif c.state == CellStates.FIRE:
                 fire_patches.append(polygon)
+                alpha_arr.append(c.fuel_content)
 
             else:
                 burnt_patches.append(polygon)
@@ -397,13 +398,13 @@ class Visualizer:
         tree_patches = np.array(tree_patches)
         fire_patches = np.array(fire_patches)
         burnt_patches = np.array(burnt_patches)
-        # alpha_arr = np.array(alpha_arr)
+        alpha_arr = np.array(alpha_arr)
 
         tree_coll =  PatchCollection(tree_patches, match_original=True)
 
         fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
-        # if len(alpha_arr) > 0:
-        #     fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
+        if len(alpha_arr) > 0:
+            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 

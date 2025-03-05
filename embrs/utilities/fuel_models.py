@@ -19,7 +19,6 @@ import numpy as np
 import os
 import json
 
-
 class Fuel:
     """Represents a generic fuel type with physical and combustion properties.
 
@@ -49,7 +48,7 @@ class Fuel:
     """
     def __init__(self, name: str, model_num: int, burnable, f_i: np.ndarray, f_ij: np.ndarray, w_0: np.ndarray,
                  s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float,
-                 rho_b: float, rel_packing_ratio: float):
+                 rho_b: float, rel_packing_ratio: float, fc_W: float):
         """Initializes a generic fuel model with its physical and combustion properties.
 
         This constructor defines the primary attributes of a fuel model, including 
@@ -81,36 +80,35 @@ class Fuel:
         self.model_num = model_num
         self.burnable = burnable
 
-        if not self.burnable:
-            return
+        if self.burnable:
+            self.s_T = 0.055
+            self.s_e = 0.010
+            self.rho_p = 32
 
-        self.s_T = 0.055
-        self.s_e = 0.010
-        self.rho_p = 32
+            self.f_i = f_i
+            self.f_ij = f_ij
 
-        self.f_i = f_i
-        self.f_ij = f_ij
+            self.w_0 = w_0 * 0.0459137 # convert to lbs/ft^2
+            self.w_n = w_0 * (1 - self.s_T)
+            self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
+            self.w_n_live = self.w_n[3] + self.w_n[4]
 
-        self.w_0 = w_0 * 0.0459137 # convert to lbs/ft^2
-        self.w_n = w_0 * (1 - self.s_T)
-        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
-        self.w_n_live = self.w_n[3] + self.w_n[4]
+            self.s = s
+            self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
+            self.sigma_live = np.dot(self.f_ij[3:4], self.s[3:4])
 
-        self.s = s
-        self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
-        self.sigma_live = np.dot(self.f_ij[3:4], self.s[3:4])
+            self.sav_ratio = s_total
 
-        self.sav_ratio = s_total
+            self.W = self.calc_W()
 
-        self.W = self.calc_W()
+            self.fuel_depth_ft = fuel_depth
+            self.dead_mx = dead_mx
 
-        self.fuel_depth_ft = fuel_depth
-        self.dead_mx = dead_mx
+            self.heat_content = 8000 # btu/lb
 
-        self.heat_content = 8000 # btu/lb
-
-        self.rel_packing_ratio = rel_packing_ratio
-        self.rho_b = rho_b
+            self.rel_packing_ratio = rel_packing_ratio
+            self.rho_b = rho_b
+            self.fc_W = fc_W
 
 
     def calc_W(self):
@@ -156,9 +154,9 @@ class Anderson13(Fuel):
             raise ValueError(f"{model_number} is not a valid Anderson 13 model number")
         
         burnable = model_number <= 13
+        name = self._fuel_models["names"][model_id]
 
         if not burnable:
-            name = None
             f_i = None
             f_ij = None
             w_0 = None
@@ -168,9 +166,9 @@ class Anderson13(Fuel):
             fuel_bed_depth = None
             rho_b = None
             rel_packing_ratio = None
+            fc_W = None
 
         else:
-            name = self._fuel_models["names"][model_id]
             f_i = np.array(self._fuel_models["f_i"][model_id])
             f_ij = np.array(self._fuel_models["f_ij"][model_id])
             w_0 = np.array(self._fuel_models["w_0"][model_id])
@@ -180,8 +178,9 @@ class Anderson13(Fuel):
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
+            fc_W = self._fuel_models["fuel_consumption_W"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio, fc_W)
 
 class ScottBurgan40(Fuel):
     _fuel_models = None # class-level cache
@@ -203,9 +202,9 @@ class ScottBurgan40(Fuel):
             raise ValueError(f"{model_number} is not a valid ScottBurgan 40 model number")
         
         burnable = model_number >= 101
+        name = self._fuel_models["names"][model_id]
 
-        if not burnable:
-            name = None
+        if not burnable: 
             f_i = None
             f_ij = None
             w_0 = None
@@ -215,9 +214,9 @@ class ScottBurgan40(Fuel):
             fuel_bed_depth = None
             rho_b = None
             rel_packing_ratio = None
+            fc_W = None
 
         else:
-            name = self._fuel_models["names"][model_id]
             f_i = np.array(self._fuel_models["f_i"][model_id])
             f_ij = np.array(self._fuel_models["f_ij"][model_id])
             w_0 = np.array(self._fuel_models["w_0"][model_id])
@@ -227,5 +226,6 @@ class ScottBurgan40(Fuel):
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
+            fc_W = self._fuel_models["fuel_consumption_W"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio, fc_W)

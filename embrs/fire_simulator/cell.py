@@ -121,6 +121,13 @@ class Cell:
 
         # Set Fuel type
         self._fuel_type = fuel_type
+        
+        # Variables to keep track of burning fuel content
+        self._fuel_content = 1
+        self.fuel_at_ignition = None
+        self.W = None
+        self.ignition_clock = 0
+        self.intersected = False
 
         # Set state for non burnable types to BURNT
         if self._fuel_type.burnable:
@@ -420,6 +427,8 @@ class Cell:
             - Updates the `_fuel_type` attribute with the specified fuel model.
         """
         self._fuel_type = fuel_type
+        if self._fuel_type.burnable:
+            self.W = self._fuel_type.fc_W
 
     def _set_state(self, state: CellStates):
         """Sets the state of the cell.
@@ -447,6 +456,8 @@ class Cell:
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
             self.I_ss = np.zeros(len(self.directions))
+
+            self.fuel_at_ignition = self._fuel_content
 
     def __str__(self):
         """Returns a formatted string representation of the cell.

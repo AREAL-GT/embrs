@@ -39,7 +39,6 @@ class FireSim(BaseFireSim):
         logger (Optional[Logger]): A logging utility for storing simulation outputs.
         progress_bar (Optional[tqdm]): A progress bar for tracking simulation steps.
         _updated_cells (dict): Stores cells that have been modified during the current iteration.
-        _curr_updates (list): A list of updates to be logged.
         _soaked (list): Stores cells that have been suppressed or extinguished.
         _burning_cells (list): Contains all currently burning cells.
         _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
@@ -77,7 +76,6 @@ class FireSim(BaseFireSim):
             - **Fire Behavior Tracking:**
                 - `burnout_thresh` (float): Fuel fraction threshold at which a cell is considered fully burnt.
                 - `_updated_cells` (dict): Stores cells modified during the current iteration.
-                - `_curr_updates` (list): Stores updates to be logged.
 
             - **Cell State Management:**
                 - `_soaked` (list): Stores cells affected by suppression efforts.
@@ -106,7 +104,7 @@ class FireSim(BaseFireSim):
         print("Simulation Initializing...")
 
         # Fuel fraction to be considered BURNT
-        self.burnout_thresh = FuelConstants.burnout_thresh
+        self.burnout_thresh = 0.1
 
         # Variable to store logger object
         self.logger = None
@@ -116,7 +114,6 @@ class FireSim(BaseFireSim):
 
         # Containers for keeping track of updates to cells 
         self._updated_cells = {}
-        self._curr_updates = []
 
         # Containers for cells
         self._soaked = []
@@ -193,6 +190,12 @@ class FireSim(BaseFireSim):
             return
 
         for cell, loc in self._burning_cells:
+            
+            # If cell has no burnable neighbors, track its fuel content but skip calculations
+            if not cell.burnable_neighbors:
+                self.capture_cell_changes(cell, loc)
+                continue
+
             # Check if conditions have changed
             if self.weather_changed or not cell.has_steady_state: 
                 # Reset the elapsed time counters
@@ -226,26 +229,75 @@ class FireSim(BaseFireSim):
             # Check where fire spread has reached edge of cell
             intersections = np.where(cell.fire_spread > cell.distances)[0]
 
-            for idx in intersections:
-                # TODO: This will be called unnecessarily a few times since end points and neighbors not matched well
-                ignited_neighbors = self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+            if len(intersections) > 0 and not cell.intersected:
+                # First intersection, start ignition clock
+                cell.intersected = True
 
-                for neighbor in ignited_neighbors:
-                    # Remove neighbor if its already ignited
-                    if neighbor.id in cell.burnable_neighbors:
-                        del cell.burnable_neighbors[neighbor.id]
-                    
-            # TODO: Likely need to check for if a cell has been burning for too long as well
-            # TODO: Do we want to implement mass-loss approach from before?
-            if not cell.burnable_neighbors:
-                self._burning_cells.remove((cell, loc))
-                cell._set_state(CellStates.BURNT)
-                self.updated_cells[cell.id] = cell
+            for idx in intersections:
+                # Check if ignition signal should be sent to each intersecting neighbor
+                self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+
+            # Remove any neighbors which are no longer burnable
+            neighbors_to_rem = []
+            for n_id in cell.burnable_neighbors:
+                neighbor = self._cell_dict[n_id]
+
+                if neighbor.state != CellStates.FUEL:
+                    neighbors_to_rem.append(n_id)
+
+            if neighbors_to_rem:
+                for n_id in neighbors_to_rem:
+                    del cell.burnable_neighbors[n_id]
 
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
 
-        self.log_changes()
+            if cell.intersected:
+                self.capture_cell_changes(cell, loc)
+
+        self.update_fuel_contents()
+        self._iters += 1
+
+    def update_fuel_contents(self):
+        """Update the fuel content of all the burning cells based on the mass-loss algorithm in 
+            `(Coen 2005) <http://dx.doi.org/10.1071/WF03043>`_
+        """
+        fires = self.fully_burning_cells
+        time_step = self.time_step
+
+        ignition_clocks = np.array(self.ignition_clocks)
+        fuels_at_ignition = np.array(self.fuels_at_ignition)
+        w_vals = np.array(self.w_vals)
+
+        ignition_clocks += time_step
+        fuel_contents = fuels_at_ignition * np.minimum(1, np.exp(-ignition_clocks/w_vals))
+
+        updated_cells = self._updated_cells
+
+        for (cell, loc), fuel_content, ignition_clock in zip(fires, fuel_contents, ignition_clocks):
+            cell._fuel_content = fuel_content
+            cell.ignition_clock = ignition_clock
+
+            if fuel_content < self.burnout_thresh:
+                self.set_state_at_cell(cell, CellStates.BURNT)
+                self._burning_cells.remove((cell, loc))
+                # Add cell to update dictionary
+                self._updated_cells[cell.id] = cell
+
+            updated_cells[cell.id] = cell
+
+    def capture_cell_changes(self, cell: Cell, loc: int):
+        """Capture the ignition parameters for burning cell, for vectorized calculation later
+
+        Args:
+            cell (Cell): Cell currently burning to capture.
+            loc (int): Location within Cell from which fire originates
+        """
+        self.fully_burning_cells.append((cell, loc))
+        self.w_vals.append(cell.W)
+        self.fuels_at_ignition.append(cell.fuel_at_ignition)
+        self.ignition_clocks.append(cell.ignition_clock)
+
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
         """Attempts to ignite neighboring cells based on fire spread conditions.
@@ -259,7 +311,7 @@ class FireSim(BaseFireSim):
             r_gamma (float): The rate of spread within the burning cell along the ignition direction.
             end_point (list): A list of tuples representing fire spread endpoints, where each tuple 
                             contains:
-                            - An integer indicating the ignition location alogn the neighboring cell.
+                            - An integer indicating the ignition location along the neighboring cell.
                             - A letter (A-F) indicating which neighbor the fire is spreading to.
 
         Returns:
@@ -275,7 +327,7 @@ class FireSim(BaseFireSim):
                 - Initializes fire spread parameters (`directions`, `distances`, `end_pts`).
                 - Updates wind conditions using `_update_wind()`.
                 - Computes in-cell fire propagation using `calc_propagation_in_cell()`.
-                - Logs the update to `_updated_cells` and `_curr_updates`.
+                - Logs the update to `_updated_cells`
 
         Notes:
             - The ignition threshold (`1e-3`) is a placeholder; consider using mass-loss calculations 
@@ -283,7 +335,6 @@ class FireSim(BaseFireSim):
             - If a neighboring cell is **not** ignitable but exists in `cell.burnable_neighbors`, 
             it is removed from that list.
     """
-        ignited_neighbors = []
 
         # Loop through end points
         for pt in end_point:
@@ -309,16 +360,6 @@ class FireSim(BaseFireSim):
                         neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here 
 
                         self._updated_cells[neighbor.id] = neighbor
-
-                        if neighbor.to_log_format() not in self._curr_updates:
-                            self._curr_updates.append(neighbor.to_log_format())
-
-                        ignited_neighbors.append(neighbor)
-                else:
-                    if neighbor.id in cell.burnable_neighbors:
-                        del cell.burnable_neighbors[neighbor.id]
-
-        return ignited_neighbors
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
         """Calculates the rate of spread (ROS) required for ignition between a burning cell 
@@ -420,37 +461,6 @@ class FireSim(BaseFireSim):
 
         return None
 
-    def log_changes(self):
-        """Logs changes in cell states during the current simulation iteration.
-
-        This method records updates to fire-affected cells, including 
-        soaked cells, and clears the `_soaked` list for the next iteration. If a logger 
-        is available, the updates are added to the logging cache, along with agent updates 
-        if applicable.
-
-        Side Effects:
-            - Updates `_curr_updates` by appending `_soaked` cells.
-            - Clears the `_soaked` list for the next iteration.
-            - Calls `self.logger.add_to_cache()` if logging is enabled.
-            - Calls `self.logger.add_to_agent_cache()` if agents are present.
-            - Increments `_iters`, tracking the number of simulation iterations.
-
-        Notes:
-            - `_curr_updates` stores all cells that changed state in the current iteration.
-            - `_soaked` cells are reset after being logged.
-            - Agent updates are logged only if `agents_added` is `True`.
-        """
-        self._curr_updates.extend(self._soaked)
-        self._soaked = []
-        
-        if self.logger:
-            self.logger.add_to_cache(self._curr_updates.copy(), self.curr_time_s)
-
-            if self.agents_added:
-                self.logger.add_to_agent_cache(self._get_agent_updates(), self.curr_time_s)
-
-        self._iters += 1
-
     def _init_iteration(self) -> bool:
         """Prepares the next iteration of the simulation by resetting and updating relevant data structures.
 
@@ -463,7 +473,6 @@ class FireSim(BaseFireSim):
 
         Side Effects:
             - Initializes the progress bar on the first iteration.
-            - Clears `_curr_updates`, resetting tracked state changes.
             - Updates `_curr_time_s` based on the number of elapsed iterations.
             - Advances the progress bar.
             - Resets temporary state lists (`w_vals`, `fuels_at_ignition`, `ignition_clocks`).
@@ -479,8 +488,6 @@ class FireSim(BaseFireSim):
             self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
                                      desc='Current sim ', position=0, leave=False)
 
-        self._curr_updates.clear()
-
         # Update current time
         self._curr_time_s = self.time_step * self._iters
         self.progress_bar.update()
@@ -488,7 +495,8 @@ class FireSim(BaseFireSim):
         self.w_vals = []
         self.fuels_at_ignition = []
         self.ignition_clocks = []
-        
+        self.fully_burning_cells = []
+
         if self._curr_time_s >= self._sim_duration or (self._iters != 0 and len(self._burning_cells) == 0):
             self.progress_bar.close()
 
@@ -553,15 +561,6 @@ class FireSim(BaseFireSim):
         Dict keys are the ids of the :class:`~fire_simulator.cell.Cell` objects.
         """
         return self._updated_cells
-
-    @property
-    def curr_updates(self) -> list:
-        """List of cells updated during the most recent iteration.
-        
-        Cells are in their log format as generated by 
-        :func:`~fire_simulator.cell.Cell.to_log_format()`
-        """
-        return self._curr_updates
 
     @property
     def agent_list(self) -> list:
