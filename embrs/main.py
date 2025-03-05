@@ -273,6 +273,8 @@ def load_sim_params(cfg_path: str) -> SimParams:
                 end_datetime = start_datetime + timedelta(seconds=duration_s)
         else:
             end_datetime = datetime.fromisoformat(end_iso_datetime)
+            duration_s = (end_datetime - start_datetime).total_seconds()
+
 
     if start_datetime >= end_datetime:
         raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
@@ -284,8 +286,6 @@ def load_sim_params(cfg_path: str) -> SimParams:
         start_datetime=start_datetime,
         end_datetime=end_datetime
     )
-
-    print(f"sim duration: {duration_s}")
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
     log_folder = config["Simulation"].get("log_folder", None)
