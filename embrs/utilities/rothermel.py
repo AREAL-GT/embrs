@@ -72,10 +72,14 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
         Tuple[float, float]: _description_
     """
 
+    # Calculate moisture damping constants
     dead_mf, live_mf = get_characteristic_moistures(fuel, m_f)
+    live_mx = calc_live_mx(fuel, dead_mf)
+    live_moisture_damping = calc_moisture_damping(live_mf, live_mx)
+    dead_moisture_damping = calc_moisture_damping(dead_mf, fuel.dead_mx)
 
     flux_ratio = calc_flux_ratio(fuel)
-    I_r = calc_I_r(fuel, dead_mf, live_mf)
+    I_r = calc_I_r(fuel, dead_moisture_damping, live_moisture_damping)
     heat_sink = calc_heat_sink(fuel, m_f)
 
     R_0 = (I_r * flux_ratio)/heat_sink
@@ -90,7 +94,7 @@ def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
 
     return dead_mf, live_mf
 
-def calc_live_mx(fuel: Fuel):
+def calc_live_mx(fuel: Fuel, m_f: float):
 
     W = fuel.W
 
@@ -100,12 +104,11 @@ def calc_live_mx(fuel: Fuel):
     num = 0
 
     for i in range(3):
-        num += fuel.w_0[i] * np.exp(-138/fuel.s[i])
+        num += m_f * fuel.w_0[i] * np.exp(-138/fuel.s[i])
 
     den = 0
-    for i in range(3,5):
-        if fuel.s[i] != 0:
-            den += fuel.w_0[i] * np.exp(-500/fuel.s[i])
+    for i in range(3):
+        den += fuel.w_0[i] * np.exp(-138/fuel.s[i])
 
     mf_dead = num/den
 
@@ -114,7 +117,7 @@ def calc_live_mx(fuel: Fuel):
     return max(mx, fuel.dead_mx)
 
 
-def calc_I_r(fuel: Fuel, m_f: float, live_mf: float) -> float:
+def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -> float:
     """_summary_
 
     Args:
@@ -124,11 +127,6 @@ def calc_I_r(fuel: Fuel, m_f: float, live_mf: float) -> float:
     Returns:
         float: _description_
     """
-    dead_moist_damping = calc_moisture_damping(m_f, fuel.dead_mx)
-    
-    
-    live_m_x = calc_live_mx(fuel)
-    live_moist_damping = calc_moisture_damping(live_mf, live_m_x)
     
     mineral_damping = calc_mineral_damping()
 
