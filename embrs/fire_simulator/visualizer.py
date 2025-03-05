@@ -152,7 +152,7 @@ class Visualizer:
             # Create time display
             elapsed_box_x = 0
             elapsed_box_y = sim.grid_height*1.5*sim.cell_size-(30/600) * height_m
-            elapsed_box_w = (1/6)*width_m
+            elapsed_box_w = (1/5.5)*width_m
             elapsed_box_h = (15/600)*height_m
 
             self.elapsed_box = mpatches.Rectangle((elapsed_box_x, elapsed_box_y), elapsed_box_w, elapsed_box_h,
