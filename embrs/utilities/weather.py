@@ -131,7 +131,7 @@ class WeatherStream:
 
         gsi = self.calc_GSI(daily_data)
         
-        # TODO use GSI information to determine what to set live fuel moistures to
+        # Use GSI information to determine what to set live fuel moistures to
         self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
 
         # Set units and time step based on OpenMeteo params
@@ -257,6 +257,50 @@ class WeatherStream:
 
         # Update times after filtering
         self.times = resampled_hourly_data["date"]
+
+        # Ensure all resampled data arrays have the same length
+        min_length = min(len(arr) for arr in resampled_hourly_data.values() if isinstance(arr, np.ndarray))
+
+        # Trim all arrays to the minimum length
+        for key in resampled_hourly_data:
+            if isinstance(resampled_hourly_data[key], np.ndarray):
+               resampled_hourly_data[key] = resampled_hourly_data[key][:min_length]
+
+        # Convert resampled data into a DataFrame
+        resampled_df = pd.DataFrame(resampled_hourly_data).set_index("date")
+
+        # Extract morning (08:00) and afternoon (14:00) values
+        daily_morning_rh = resampled_df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
+        daily_afternoon_rh = resampled_df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
+
+        # Compute daily RH average as per NFDRS convention
+        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
+
+        # Compute daily temperature mean (can use max/min if needed)
+        daily_avg_temp = resampled_df.resample('D')["temperature"].mean()  # Alternative: (Tmax + Tmin) / 2
+
+        # Ensure temperature and rel_humidity have the same length
+        min_length = min(len(daily_avg_rh), len(daily_avg_temp))
+
+        # Trim both to the minimum length
+        daily_avg_rh = daily_avg_rh.iloc[:min_length]
+        daily_avg_temp = daily_avg_temp.iloc[:min_length]
+
+        # Ensure date index also matches
+        daily_index = daily_avg_rh.index  # Use RH index (since RH is usually limiting)
+        daily_avg_temp = daily_avg_temp.reindex(daily_index)  # Align temp to RH
+
+        # Create final daily DataFrame
+        daily_data = pd.DataFrame({
+            "date": daily_avg_rh.index,
+            "temperature": daily_avg_temp.values,
+            "rel_humidity": daily_avg_rh.values
+        }).reset_index(drop=True)
+
+        gsi = self.calc_GSI(daily_data)
+
+        # Use GSI information to determine what live fuel moisture is
+        self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
 
         # Generate stream with final data
         self.stream = list(self.generate_stream(resampled_hourly_data))
