@@ -91,10 +91,10 @@ class Fuel:
         self.f_i = f_i
         self.f_ij = f_ij
 
-        self.w_0 = w_0
+        self.w_0 = w_0 * 0.0459137 # convert to lbs/ft^2
         self.w_n = w_0 * (1 - self.s_T)
-        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3]) * 0.0459137 # convert to lbs/ft^2
-        self.w_n_live = self.w_n[3] + self.w_n[4] * 0.0459137 # convert to lbs/ft^2
+        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
+        self.w_n_live = self.w_n[3] + self.w_n[4]
 
         self.s = s
         self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
@@ -183,3 +183,49 @@ class Anderson13(Fuel):
 
         super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
 
+class ScottBurgan40(Fuel):
+    _fuel_models = None # class-level cache
+
+    @classmethod
+    def load_fuel_models(cls):
+        if cls._fuel_models is None:
+            json_path = os.path.join(os.path.dirname(__file__), "ScottBurgan40.json")
+            with open(json_path, "r") as f:
+                cls._fuel_models = json.load(f)
+
+    def __init__(self, model_number: int):
+        self.load_fuel_models()
+
+        model_number = int(model_number)
+
+        model_id = str(model_number)
+        if model_id not in self._fuel_models["names"]:
+            raise ValueError(f"{model_number} is not a valid ScottBurgan 40 model number")
+        
+        burnable = model_number >= 101
+
+        if not burnable:
+            name = None
+            f_i = None
+            f_ij = None
+            w_0 = None
+            s = None
+            s_total = None
+            mx_dead = None
+            fuel_bed_depth = None
+            rho_b = None
+            rel_packing_ratio = None
+
+        else:
+            name = self._fuel_models["names"][model_id]
+            f_i = np.array(self._fuel_models["f_i"][model_id])
+            f_ij = np.array(self._fuel_models["f_ij"][model_id])
+            w_0 = np.array(self._fuel_models["w_0"][model_id])
+            s = np.array(self._fuel_models["s"][model_id])
+            s_total = self._fuel_models["s_total"][model_id]
+            mx_dead = self._fuel_models["mx_dead"][model_id]
+            fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
+            rho_b = self._fuel_models["rho_b"][model_id]
+            rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
+
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
