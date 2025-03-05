@@ -61,7 +61,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
 
     return np.array(r_list), np.array(I_list)
 
-def calc_r_0(fuel: Fuel, m_f: float) -> Tuple[float, float]:
+def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     """_summary_
 
     Args:
@@ -72,15 +72,49 @@ def calc_r_0(fuel: Fuel, m_f: float) -> Tuple[float, float]:
         Tuple[float, float]: _description_
     """
 
+    dead_mf, live_mf = get_characteristic_moistures(fuel, m_f)
+
     flux_ratio = calc_flux_ratio(fuel)
-    I_r = calc_I_r(fuel, m_f)
+    I_r = calc_I_r(fuel, dead_mf, live_mf)
     heat_sink = calc_heat_sink(fuel, m_f)
 
     R_0 = (I_r * flux_ratio)/heat_sink
 
     return R_0, I_r
 
-def calc_I_r(fuel: Fuel, m_f: float) -> float:
+def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
+
+    dead_mf = np.dot(fuel.f_ij[0:3], m_f[0:3])
+
+    live_mf = np.dot(fuel.f_ij[3:5], m_f[3:5])
+
+    return dead_mf, live_mf
+
+def calc_live_mx(fuel: Fuel):
+
+    W = fuel.W
+
+    if W == np.inf:
+        return fuel.dead_mx
+
+    num = 0
+
+    for i in range(3):
+        num += fuel.w_0[i] * np.exp(-138/fuel.s[i])
+
+    den = 0
+    for i in range(3,5):
+        if fuel.s[i] != 0:
+            den += fuel.w_0[i] * np.exp(-500/fuel.s[i])
+
+    mf_dead = num/den
+
+    mx = 2.9 * fuel.W * (1 - mf_dead / fuel.dead_mx) - 0.226
+
+    return max(mx, fuel.dead_mx)
+
+
+def calc_I_r(fuel: Fuel, m_f: float, live_mf: float) -> float:
     """_summary_
 
     Args:
@@ -90,8 +124,12 @@ def calc_I_r(fuel: Fuel, m_f: float) -> float:
     Returns:
         float: _description_
     """
-
-    moist_damping = calc_moisture_damping(m_f, fuel.m_x)
+    dead_moist_damping = calc_moisture_damping(m_f, fuel.dead_mx)
+    
+    
+    live_m_x = calc_live_mx(fuel)
+    live_moist_damping = calc_moisture_damping(live_mf, live_m_x)
+    
     mineral_damping = calc_mineral_damping()
 
     A = 133 * fuel.sav_ratio ** (-0.7913)
@@ -99,7 +137,10 @@ def calc_I_r(fuel: Fuel, m_f: float) -> float:
     max_reaction_vel = (fuel.sav_ratio ** 1.5) * (495 + 0.0594 * fuel.sav_ratio ** 1.5) ** (-1)
     opt_reaction_vel = max_reaction_vel * (fuel.rel_packing_ratio ** A) * np.exp(A*(1-fuel.rel_packing_ratio))
 
-    I_r = opt_reaction_vel * fuel.net_fuel_load * fuel.heat_content * moist_damping * mineral_damping
+    dead_calc = fuel.w_n_dead * fuel.heat_content * dead_moist_damping * mineral_damping
+    live_calc = fuel.w_n_live * fuel.heat_content * live_moist_damping * mineral_damping
+
+    I_r = opt_reaction_vel * (dead_calc + live_calc)
 
     return I_r
 
@@ -114,14 +155,15 @@ def calc_flux_ratio(fuel: Fuel) -> float:
     """
 
     rho_b = fuel.rho_b
+    rho_p = fuel.rho_p
     sav_ratio = fuel.sav_ratio
 
-    packing_ratio = rho_b / 32    
+    packing_ratio = rho_b / rho_p
     flux_ratio = (192 + 0.2595*sav_ratio)**(-1) * np.exp((0.792 + 0.681*sav_ratio**0.5)*(packing_ratio + 0.1))
 
     return flux_ratio
 
-def calc_heat_sink(fuel: Fuel, m_f: float) -> float:
+def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
     """_summary_
 
     Args:
@@ -133,12 +175,29 @@ def calc_heat_sink(fuel: Fuel, m_f: float) -> float:
     """
 
     rho_b = fuel.rho_b
-    sav_ratio = fuel.sav_ratio
 
-    epsilon = np.exp(-138/sav_ratio)
     Q_ig = 250 + 1116 * m_f
 
-    heat_sink = rho_b * epsilon * Q_ig
+
+    # Compute the heat sink term as per the equation
+    heat_sink = 0
+    for i in range(2): # loop through live and dead
+        if i == 0:
+            start = 0
+            end = 3
+        
+        else:
+            start = 3
+            end = 5
+
+        inner_sum = 0
+        for j in range(start, end):
+            if fuel.s[j] != 0:
+                inner_sum += fuel.f_ij[j] * np.exp(-138/fuel.s[j])*Q_ig[j]
+
+        heat_sink += fuel.f_i[i] * inner_sum
+
+    heat_sink *= rho_b
 
     return heat_sink
 
@@ -237,7 +296,7 @@ def calc_moisture_damping(m_f: float, m_x: float) -> float:
 
     moist_damping = 1 - 2.59 * r_m + 5.11 * (r_m)**2 - 3.52 * (r_m)**3
 
-    return moist_damping
+    return max(0, moist_damping)
 
 def calc_mineral_damping(s_e:float = 0.010) -> float:
     """_summary_
@@ -328,7 +387,6 @@ def calc_r_h(cell: Cell, wind_speed: float,
     """
     fuel = cell.fuel_type
     m_f = cell.m_f
-    
     if R_0 is None or I_r is None:
         R_0, I_r = calc_r_0(fuel, m_f)
 

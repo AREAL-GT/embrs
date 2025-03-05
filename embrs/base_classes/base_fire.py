@@ -67,12 +67,15 @@ class BaseFireSim:
         self._grid_width = self._cell_grid.shape[1] - 1
         self._grid_height = self._cell_grid.shape[0] - 1
 
+        live_h_mf = self._weather_stream.live_h_mf
+        live_w_mf = self._weather_stream.live_w_mf
+
         # Populate cell_grid with cells
         id = 0
         for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
             for j in range(self._shape[0]):
                 # Initialize cell object
-                new_cell = Cell(id, i, j, self._cell_size)
+                new_cell = Cell(id, i, j, self._cell_size, live_h_mf= live_h_mf, live_w_mf=live_w_mf)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
                 data_col = int(np.floor(cell_x/self._data_res))

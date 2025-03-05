@@ -15,6 +15,10 @@ References:
 """
 
 # TODO: implement Scott Burgan fuel models
+import numpy as np
+import os
+import json
+
 
 class Fuel:
     """Represents a generic fuel type with physical and combustion properties.
@@ -43,8 +47,9 @@ class Fuel:
         - set_net_fuel_load(): Computes the net fuel load based on the fuel properties.
         - set_fuel_moisture(moisture): Placeholder for updating fuel moisture dynamically.
     """
-    def __init__(self, name: str, model_num: int, fuel_load_params: dict, f_weights: dict, sav_ratio: int, fuel_depth: float,
-                 m_x: float, rel_packing_ratio: float, rho_b: float, burnable: bool):
+    def __init__(self, name: str, model_num: int, burnable, f_i: np.ndarray, f_ij: np.ndarray, w_0: np.ndarray,
+                 s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float,
+                 rho_b: float, rel_packing_ratio: float):
         """Initializes a generic fuel model with its physical and combustion properties.
 
         This constructor defines the primary attributes of a fuel model, including 
@@ -74,215 +79,107 @@ class Fuel:
         
         self.name = name
         self.model_num = model_num
-        self.fuel_load_params = fuel_load_params
-        self.f_weights = f_weights
-        self.sav_ratio = sav_ratio
+        self.burnable = burnable
+
+        if not self.burnable:
+            return
+
+        self.s_T = 0.055
+        self.s_e = 0.010
+        self.rho_p = 32
+
+        self.f_i = f_i
+        self.f_ij = f_ij
+
+        self.w_0 = w_0
+        self.w_n = w_0 * (1 - self.s_T)
+        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3]) * 0.0459137 # convert to lbs/ft^2
+        self.w_n_live = self.w_n[3] + self.w_n[4] * 0.0459137 # convert to lbs/ft^2
+
+        self.s = s
+        self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
+        self.sigma_live = np.dot(self.f_ij[3:4], self.s[3:4])
+
+        self.sav_ratio = s_total
+
+        self.W = self.calc_W()
+
         self.fuel_depth_ft = fuel_depth
-        self.m_x = m_x
+        self.dead_mx = dead_mx
+
         self.heat_content = 8000 # btu/lb
 
         self.rel_packing_ratio = rel_packing_ratio
         self.rho_b = rho_b
 
-        self.s_T = 0.0555 # Total mineral content
-        self.partical_density = 32 # lb/ft^3
+
+    def calc_W(self):
+
+        w = self.w_0
+        s = self.s
+
+        num = 0
+
+        for i in range(3):
+            num += w[i] * np.exp(-138/s[i])
+
+        den = 0
+        for i in range(3, 5):
+            if s[i] != 0:
+                den += w[i] * np.exp(-500/s[i])
+
+        if den == 0:
+            W = np.inf # Live moisture does not apply here
         
-        self.fuel_moisture = 0.01 # TODO: make this function of weather
+        else:
+            W = num/den
 
-        self.burnable = burnable
-
-        self.net_fuel_load = 0
-        if burnable:
-            self.net_fuel_load = self.set_net_fuel_load()
-
-    def set_net_fuel_load(self) -> float:
-        # TODO: Should we change this to just use the g-weights directly?
-        """Computes the net fuel load for the fuel model.
-
-        The net fuel load is calculated using the fuel loading parameters, 
-        surface-area-to-volume ratios, and packing ratio. The formula applies 
-        weighting factors based on fuel class contributions.
-
-        Returns:
-            float: The computed net fuel load (lb/ft²).
-
-        Behavior:
-            - Uses a weighted sum of fuel loads for different fuel classes (1-h, 10-h, etc.).
-            - Normalizes values based on fuel density and mineral content.
-            - Converts final values to lb/ft² for compatibility with fire behavior models.
-
-        Notes:
-            - The computation follows the methodology from the Anderson fuel models.
-            - Some fuel classes may have zero contribution depending on the model.
-        """
-
-        fuel_classes = ["1-h", "10-h", "100-h", "Live H", "Live W"]
-
-        denom = 0
-
-        for fuel_class in fuel_classes:
-            fuel_load, sav_ratio = self.fuel_load_params[fuel_class]
-            class_value = (sav_ratio * fuel_load)/self.partical_density
-            denom += class_value
-        
-        net_fuel_load = 0
-
-        for fuel_class in fuel_classes:
-            fuel_load, sav_ratio = self.fuel_load_params[fuel_class]
-
-            class_term = (sav_ratio * fuel_load)/self.partical_density
-            class_term /= denom
-            class_term *= fuel_load * (1 - self.s_T)
-
-            net_fuel_load += class_term
-
-        net_fuel_load *= 0.0459137 # convert to lbs/ft^2
-
-        return net_fuel_load
-
-    def calc_fuel_moisture(self, dfms):
-        # Calculated weighted sum of fuel moisture for different fuel classes
-        fuel_classes = ["1-h", "10-h", "100-h"]
-
-        m_f = 0
-        for i, dfm in enumerate(dfms):
-            m_f += self.f_weights[fuel_classes[i]] * dfm.meanWtdMoisture()
-
-        return m_f
-
-    def __str__(self):
-        return (f"Fuel Model: {self.name}\n"
-                f"Fuel Load: {self.net_fuel_load}\n"
-                f"SAV Ratio: {self.sav_ratio}\n"
-                f"Fuel Depth: {self.fuel_depth}\n"
-                f"Dead Fuel Extinction Moisture: {self.m_x}\n"
-                f"Heat Content: {self.heat_content}")
-
+        return W
 
 class Anderson13(Fuel):
-    """Represents one of the 13 standard Anderson fire behavior fuel models.
+    _fuel_models = None # class-level cache
 
-    The Anderson 13 models categorize different vegetation types based on 
-    their fire behavior characteristics. This class initializes fuel models 
-    with predefined parameters.
+    @classmethod
+    def load_fuel_models(cls):
+        if cls._fuel_models is None:
+            json_path = os.path.join(os.path.dirname(__file__), "Anderson13.json")
+            with open(json_path, "r") as f:
+                cls._fuel_models = json.load(f)
 
-    Args:
-        model_number (int): The Anderson 13 model ID (1-13 for burnable fuels, 91-99 for non-burnable).
-
-    Raises:
-        ValueError: If an invalid model number is provided.
-
-    Attributes:
-        fuel_models (dict): Dictionary containing the fuel model definitions.
-
-    Notes:
-        - Fuel models 1-13 are burnable.
-        - Models 91-99 represent non-burnable categories (e.g., urban, water, barren).
-        - Uses predefined parameters from Anderson (1982).
-    """
     def __init__(self, model_number: int):
-        """Initializes an Anderson 13 fire behavior fuel model.
+        self.load_fuel_models()
 
-        This constructor selects a predefined Anderson 13 fuel model based on the 
-        input `model_number` and initializes its parameters accordingly.
+        model_number = int(model_number)
 
-        Args:
-            model_number (int): The ID of the Anderson 13 fuel model. Must be:
-                - A **burnable** model (`1-13`).
-                - A **non-burnable** model (`91-99`), representing land types such as urban areas, water, or barren land.
-
-        Raises:
-            ValueError: If the provided `model_number` is not a valid Anderson 13 ID.
-
-        Behavior:
-            - Loads predefined model parameters from the `fuel_models` dictionary.
-            - Determines whether the fuel model is **burnable** (`True` for 1-13, `False` for 91-99).
-            - Calls the parent `Fuel` constructor with the corresponding parameters.
-        """
+        model_id = str(model_number)
+        if model_id not in self._fuel_models["names"]:
+            raise ValueError(f"{model_number} is not a valid Anderson 13 model number")
         
-        # TODO: convert fuel load to lb/ft^2 (multiply by 0.0459137)
-        fuel_models = {
-            1: {"name": "Short Grass",          "fuel_load_params": {"1-h": (0.74, 3500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 1,    "10-h": 0,    "100-h": 0,    "Live": 0,},   "sav_ratio": 3500, "fuel_depth": 1.0,  "m_x": 0.12,  "rho_b": 0.03,  "rel_packing_ratio": 0.25},
-            2: {"name": "Timber Grass",         "fuel_load_params": {"1-h": (2.00, 3000), "10-h": (1.00, 109), "100-h": (0.50, 30), "Live H": (0.50, 1500), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.98, "10-h": 0.02, "100-h": 0,    "Live": 1,},   "sav_ratio": 2784, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.18,  "rel_packing_ratio": 1.14},
-            3: {"name": "Tall Grass",           "fuel_load_params": {"1-h": (3.00, 1500), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 1,    "10-h": 0,    "100-h": 0,    "Live": 0,},   "sav_ratio": 1500, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.06,  "rel_packing_ratio": 0.21},
-            4: {"name": "Chaparral",            "fuel_load_params": {"1-h": (5.00, 2000), "10-h": (4.00, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (5.00, 1500)}, "f_weights": {"1-h": 0.95, "10-h": 0.04, "100-h": 0.01, "Live": 1,},   "sav_ratio": 1739, "fuel_depth": 6.0,  "m_x": 0.20,  "rho_b": 0.12,  "rel_packing_ratio": 0.52},
-            5: {"name": "Brush",                "fuel_load_params": {"1-h": (1.00, 2000), "10-h": (0.50, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "f_weights": {"1-h": 0.97, "10-h": 0.03, "100-h": 0,    "Live": 1,},   "sav_ratio": 1683, "fuel_depth": 2.0,  "m_x": 0.20,  "rho_b": 0.08,  "rel_packing_ratio": 0.33},
-            6: {"name": "Dormant Brush",        "fuel_load_params": {"1-h": (1.50, 1750), "10-h": (2.50, 109), "100-h": (2.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.89, "10-h": 0.09, "100-h": 0.02, "Live": 0,},   "sav_ratio": 1564, "fuel_depth": 2.5,  "m_x": 0.25,  "rho_b": 0.11,  "rel_packing_ratio": 0.43},
-            7: {"name": "Southern Rough",       "fuel_load_params": {"1-h": (1.10, 1750), "10-h": (1.90, 109), "100-h": (1.50, 30), "Live H": (0.00, 0.00), "Live W": (0.37, 1500)}, "f_weights": {"1-h": 0.88, "10-h": 0.10, "100-h": 0.02, "Live": 1,},   "sav_ratio": 1552, "fuel_depth": 2.5,  "m_x": 0.40,  "rho_b": 0.09,  "rel_packing_ratio": 0.34},
-            8: {"name": "Short Needle Litter",  "fuel_load_params": {"1-h": (1.50, 2000), "10-h": (1.00, 109), "100-h": (2.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.94, "10-h": 0.03, "100-h": 0.02, "Live": 0,},   "sav_ratio": 1889, "fuel_depth": 0.2,  "m_x": 0.30,  "rho_b": 1.15,  "rel_packing_ratio": 5.17},
-            9: {"name": "Hardwood Litter",      "fuel_load_params": {"1-h": (2.90, 1500), "10-h": (0.41, 109), "100-h": (0.15, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.99, "10-h": 0.01, "100-h": 0,    "Live": 0,},   "sav_ratio": 2484, "fuel_depth": 0.2,  "m_x": 0.25,  "rho_b": 0.80,  "rel_packing_ratio": 4.50},
-            10:{"name": "Timber Litter",        "fuel_load_params": {"1-h": (3.00, 2000), "10-h": (2.00, 109), "100-h": (5.00, 30), "Live H": (0.00, 0.00), "Live W": (2.00, 1500)}, "f_weights": {"1-h": 0.94, "10-h": 0.03, "100-h": 0.02, "Live": 1,},   "sav_ratio": 1764, "fuel_depth": 1.0,  "m_x": 0.25,  "rho_b": 0.55,  "rel_packing_ratio": 2.35},
-            11:{"name": "Light Logging Slash",  "fuel_load_params": {"1-h": (1.50, 1500), "10-h": (4.50, 109), "100-h": (5.50, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.77, "10-h": 0.17, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1182, "fuel_depth": 1.0,  "m_x": 0.15,  "rho_b": 0.53,  "rel_packing_ratio": 1.62},
-            12:{"name": "Medium Logging Slash", "fuel_load_params": {"1-h": (4.00, 1500), "10-h": (14.0, 109), "100-h": (16.5, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.75, "10-h": 0.19, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1145, "fuel_depth": 2.3,  "m_x": 0.20,  "rho_b": 0.69,  "rel_packing_ratio": 2.06},
-            13:{"name": "Heavy Logging Slash",  "fuel_load_params": {"1-h": (7.00, 1500), "10-h": (23.0, 109), "100-h": (28.0, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.76, "10-h": 0.18, "100-h": 0.06, "Live": 0,},   "sav_ratio": 1159, "fuel_depth": 3.0,  "m_x": 0.25,  "rho_b": 0.89,  "rel_packing_ratio": 2.68},
-            91:{"name": "Urban",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            92:{"name": "Snow/Ice",             "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            93:{"name": "Agriculture",          "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            98:{"name": "Water",                "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-            99:{"name": "Barren",               "fuel_load_params": {"1-h": (0.00, 9999), "10-h": (0.00, 109), "100-h": (0.00, 30), "Live H": (0.00, 0.00), "Live W": (0.00, 0.00)}, "f_weights": {"1-h": 0.00, "10-h": 0.00, "100-h": 0.00, "Live": 0.00}, "sav_ratio": 9999, "fuel_depth": 9999, "m_x": 9999, "rho_b": 9999, "rel_packing_ratio": 9999},
-        }
-
-        if model_number not in fuel_models:
-            raise ValueError(f"{model_number} is not a valid Anderson 13 model number.")
-
-        # Get model parameters based on number input
-        model = fuel_models[model_number]
-
-        # Set burnable variable
         burnable = model_number <= 13
 
-        super().__init__(model["name"], model_number, model["fuel_load_params"], model["f_weights"], model["sav_ratio"], model["fuel_depth"], model["m_x"], model["rel_packing_ratio"], model["rho_b"], burnable)
+        if not burnable:
+            name = None
+            f_i = None
+            f_ij = None
+            w_0 = None
+            s = None
+            s_total = None
+            mx_dead = None
+            fuel_bed_depth = None
+            rho_b = None
+            rel_packing_ratio = None
 
+        else:
+            name = self._fuel_models["names"][model_id]
+            f_i = np.array(self._fuel_models["f_i"][model_id])
+            f_ij = np.array(self._fuel_models["f_ij"][model_id])
+            w_0 = np.array(self._fuel_models["w_0"][model_id])
+            s = np.array(self._fuel_models["s"][model_id])
+            s_total = self._fuel_models["s_total"][model_id]
+            mx_dead = self._fuel_models["mx_dead"][model_id]
+            fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
+            rho_b = self._fuel_models["rho_b"][model_id]
+            rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
 
-# class ScottBurgan40(Fuel):
-#     def __init__(self, model_number):
-        
-#         fuel_models = {
-#             101: {"name": "GR1", "fuel_load": [0.10, 0.00, 0.00, 0.30, 0.00], "sav_ratio": [2200, 2000, 9999], "fuel_depth": 0.4, "m_x": 15, "heat_content": 8000},
-#             102: {"name": "GR2", "fuel_load": [0.10, 0.00, 0.00, 1.00, 0.00], "sav_ratio": [2000, 1800, 9999], "fuel_depth": 1.0, "m_x": 15, "heat_content": 8000},
-#             103: {"name": "GR3", "fuel_load": [0.10, 0.40, 0.00, 1.50, 0.00], "sav_ratio": [1500, 1300, 9999], "fuel_depth": 2.0, "m_x": 30, "heat_content": 8000},
-#             104: {"name": "GR4", "fuel_load": [0.25, 0.00, 0.00, 1.90, 0.00], "sav_ratio": [2000, 1800, 9999], "fuel_depth": 2.0, "m_x": 15, "heat_content": 8000},
-#             105: {"name": "GR5", "fuel_load": [0.40, 0.00, 0.00, 2.50, 0.00], "sav_ratio": [1800, 1600, 9999], "fuel_depth": 1.5, "m_x": 40, "heat_content": 8000},
-#             106: {"name": "GR6", "fuel_load": [0.10, 0.00, 0.00, 3.40, 0.00], "sav_ratio": [2200, 2000, 9999], "fuel_depth": 1.5, "m_x": 40, "heat_content": 9000},
-#             107: {"name": "GR7", "fuel_load": [1.00, 0.00, 0.00, 5.40, 0.00], "sav_ratio": [2000, 1800, 9999], "fuel_depth": 3.0, "m_x": 15, "heat_content": 8000},
-#             108: {"name": "GR8", "fuel_load": [0.50, 1.00, 0.00, 7.30, 0.00], "sav_ratio": [1500, 1300, 9999], "fuel_depth": 4.0, "m_x": 30, "heat_content": 8000},
-#             109: {"name": "GR9", "fuel_load": [1.00, 1.00, 0.00, 9.00, 0.00], "sav_ratio": [1800, 1600, 9999], "fuel_depth": 1.5, "m_x": 40, "heat_content": 8000},
-#             121: {"name": "GS1", "fuel_load": [0.20, 0.00, 0.00, 0.50, 0.65], "sav_ratio": [2000, 1800, 1800], "fuel_depth": 0.9, "m_x": 15, "heat_content": 8000},
-#             122: {"name": "GS2", "fuel_load": [0.50, 0.50, 0.00, 0.60, 1.00], "sav_ratio": [2000, 1800, 1800], "fuel_depth": 1.5, "m_x": 15, "heat_content": 8000},
-#             123: {"name": "GS3", "fuel_load": [0.30, 0.25, 0.00, 1.45, 1.25], "sav_ratio": [1800, 1600, 1600], "fuel_depth": 1.8, "m_x": 40, "heat_content": 8000},
-#             124: {"name": "GS4", "fuel_load": [1.90, 0.30, 0.10, 3.40, 7.10], "sav_ratio": [1800, 1600, 1600], "fuel_depth": 2.1, "m_x": 40, "heat_content": 8000},
-#             141: {"name": "SH1", "fuel_load": [0.25, 0.25, 0.00, 0.15, 1.30], "sav_ratio": [2000, 1800, 1600], "fuel_depth": 1.0, "m_x": 15, "heat_content": 8000},
-#             142:
-#             143:
-#             144:
-#             145:
-#             146:
-#             147:
-#             148:
-#             149:
-#             161:
-#             162:
-#             163:
-#             164:
-#             165:
-#             181:
-#             182:
-#             183:
-#             184:
-#             185:
-#             186:
-#             187:
-#             188:
-#             189:
-#             201:
-#             202:
-#             203:
-#             204
-
-
-
-
-
-#         }
-
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
 

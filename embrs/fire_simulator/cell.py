@@ -45,7 +45,7 @@ class Cell:
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
 
-    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_mf = 0.08, fuel_type=Anderson13(1)):
+    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_dead_mf = 0.08, live_h_mf=0.3, live_w_mf=0.3, fuel_type=Anderson13(1)):
         """Initializes a simulation cell with terrain, fire properties, and fuel characteristics.
 
             The cell is positioned within a **point-up hexagonal grid** and stores relevant 
@@ -141,7 +141,11 @@ class Cell:
 
         self.dfms = [self.dfm1, self.dfm10, self.dfm100]
 
-        self.init_mf = init_mf
+        self.init_dead_mf = init_dead_mf
+        self.init_live_h_mf = live_h_mf
+        self.init_live_w_mf = live_w_mf
+
+        self.m_f = np.array([self.init_dead_mf, self.init_dead_mf, self.init_dead_mf, live_h_mf, live_w_mf])
         
         self.moist_update = -1
 
@@ -259,7 +263,7 @@ class Cell:
                     0, # Initial cumulative rainfall (cm)
                     t_f_celsius, # Initial stick temperature (degrees C)
                     h_f_frac, # Intial stick surface relative humidity (g/g)
-                    self.init_mf, # Initial stick fuel moisture fraction (g/g) # TODO: implement how to get this
+                    self.init_dead_mf, # Initial stick fuel moisture fraction (g/g)
                     bp0) # Initial stick barometric pressure (cal/cm^3)
 
             dfm.update_internal(
@@ -280,7 +284,7 @@ class Cell:
                 self._step_moisture(weather_stream, i)
 
         self.moist_update = idx
-        self.m_f = self._fuel_type.calc_fuel_moisture(self.dfms)
+        self.m_f[0:3] = [dfm.meanWtdMoisture() for dfm in self.dfms]
 
     def _update_weather(self, idx: int, weather_stream: WeatherStream):
         # Update moisture content based on weather stream

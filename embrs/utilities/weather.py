@@ -16,36 +16,37 @@ from embrs.utilities.data_classes import *
 class WeatherStream:
     def __init__(self, params: WeatherParams, geo: GeoInfo, input_type = "OpenMeteo"):
         self.params = params
+        self.geo = geo
 
         if input_type == "OpenMeteo":
-            self.get_stream_from_openmeteo(params, geo)
+            self.get_stream_from_openmeteo()
         elif input_type == "File":
-            self.get_stream_from_file(params, geo)
+            self.get_stream_from_file()
         else:
             raise ValueError("Invalid weather input_type, must be either 'OpenMeteo' or 'File'")
 
-    def get_stream_from_openmeteo(self, params: WeatherParams, geo: GeoInfo):
+    def get_stream_from_openmeteo(self):
         # Setup the Open-Meteo API client with cache and retry on error
         cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
         retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
         openmeteo = openmeteo_requests.Client(session = retry_session)
-        local_tz = pytz.timezone(geo.timezone)
+        local_tz = pytz.timezone(self.geo.timezone)
 
         # Buffer times and format for OpenMeteo
-        start_datetime = params.start_datetime
+        start_datetime = self.params.start_datetime
         start_datetime = local_tz.localize(start_datetime)
         buffered_start = start_datetime - timedelta(days=1)
         start_datetime_utc = buffered_start.astimezone(pytz.utc)
 
-        end_datetime = params.end_datetime
+        end_datetime = self.params.end_datetime
         end_datetime = local_tz.localize(end_datetime)
         buffered_end = end_datetime + timedelta(days=1)
         end_datetime_utc = buffered_end.astimezone(pytz.utc)
 
         url = "https://archive-api.open-meteo.com/v1/archive"
         api_input = {
-            "latitude": geo.center_lat,
-            "longitude": geo.center_lon,
+            "latitude": self.geo.center_lat,
+            "longitude": self.geo.center_lon,
             "start_date": start_datetime_utc.date().strftime("%Y-%m-%d"),
             "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
             "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance", "rain"],
@@ -89,13 +90,49 @@ class WeatherStream:
         hourly_data["dni"] = hourly_dni
         hourly_data["rain"] = hourly_rain_mm * 0.1 # convert to cm
         
-        solpos = pvlib.solarposition.get_solarposition(self.times, geo.center_lat, geo.center_lon)
+        solpos = pvlib.solarposition.get_solarposition(self.times, self.geo.center_lat, self.geo.center_lon)
         
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values
 
+        # Convert hourly data into a DataFrame
+        hourly_df = pd.DataFrame(hourly_data).set_index("date")
+
+        # Extract morning (08:00) and afternoon (14:00) values
+        daily_morning_rh = hourly_df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
+        daily_afternoon_rh = hourly_df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
+
+        # Compute daily RH average as per NFDRS convention
+        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
+
+        # Compute daily temperature mean (can use max/min if needed)
+        daily_avg_temp = hourly_df.resample('D')["temperature"].mean()  # Alternative: (Tmax + Tmin) / 2
+
+        # Ensure temperature and rel_humidity have the same length
+        min_length = min(len(daily_avg_rh), len(daily_avg_temp))
+
+        # Trim both to the minimum length
+        daily_avg_rh = daily_avg_rh.iloc[:min_length]
+        daily_avg_temp = daily_avg_temp.iloc[:min_length]
+
+        # Ensure date index also matches
+        daily_index = daily_avg_rh.index  # Use RH index (since RH is usually limiting)
+        daily_avg_temp = daily_avg_temp.reindex(daily_index)  # Align temp to RH
+
+        # Create final daily DataFrame
+        daily_data = pd.DataFrame({
+            "date": daily_avg_rh.index,
+            "temperature": daily_avg_temp.values,
+            "rel_humidity": daily_avg_rh.values
+        }).reset_index(drop=True)
+
         hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
         self.stream = list(self.generate_stream(hourly_data))
+
+        gsi = self.calc_GSI(daily_data)
+        
+        # TODO use GSI information to determine what to set live fuel moistures to
+        self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
 
         # Set units and time step based on OpenMeteo params
         self.time_step = 60
@@ -104,9 +141,9 @@ class WeatherStream:
         self.input_wind_vel_units = "mps"
         self.input_temp_units = "F"
 
-    def get_stream_from_file(self, params: WeatherParams, geo: GeoInfo):
+    def get_stream_from_file(self):
 
-        file = params.file
+        file = self.params.file
         with open(file) as f:
             data = json.load(f)
 
@@ -117,23 +154,23 @@ class WeatherStream:
         cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
         retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
         openmeteo = openmeteo_requests.Client(session = retry_session)
-        local_tz = pytz.timezone(geo.timezone)
+        local_tz = pytz.timezone(self.geo.timezone)
 
         # Buffer times and format for OpenMeteo
-        start_datetime = params.start_datetime
+        start_datetime = self.params.start_datetime
         start_datetime = local_tz.localize(start_datetime)
         buffered_start = start_datetime - timedelta(days=1)
         start_datetime_utc = buffered_start.astimezone(pytz.utc)
 
-        end_datetime = params.end_datetime
+        end_datetime = self.params.end_datetime
         end_datetime = local_tz.localize(end_datetime)
         buffered_end = end_datetime + timedelta(days=1)
         end_datetime_utc = buffered_end.astimezone(pytz.utc)
 
         url = "https://archive-api.open-meteo.com/v1/archive"
         api_input = {
-            "latitude": geo.center_lat,
-            "longitude": geo.center_lon,
+            "latitude": self.geo.center_lat,
+            "longitude": self.geo.center_lon,
             "start_date": start_datetime_utc.date().strftime("%Y-%m-%d"),
             "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
             "hourly": ["cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
@@ -165,7 +202,7 @@ class WeatherStream:
         hourly_data["dhi"] = hourly_dhi
         hourly_data["dni"] = hourly_dni
         
-        solpos = pvlib.solarposition.get_solarposition(self.times, geo.center_lat, geo.center_lon)
+        solpos = pvlib.solarposition.get_solarposition(self.times, self.geo.center_lat, self.geo.center_lon)
         
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values
@@ -261,14 +298,86 @@ class WeatherStream:
                 solar_azimuth=solar_azimuth
             )
 
+    def set_live_moistures(self, gsi: float):
+        # Set the live moisture for each class based on GSI
+        
+        # Dormant values
+        h_dorm = 0.3
+        w_dorm = 0.5
+        
+        # Max values
+        h_max = 2.5
+        w_max = 2.0
+
+        # Return dormant if gsi < 0.5
+        if gsi < 0.5:
+            return h_dorm, w_dorm
+        
+
+        # Moisture varies linearly with gsi otherwise
+        h_range = h_max - h_dorm
+        w_range = w_max - w_dorm
+
+        intrp_pt = gsi - 0.5
+
+        live_h_mf = intrp_pt * (h_range/0.5) + 0.3
+        live_w_mf = intrp_pt * (w_range/0.5) + 0.5
+
+        return live_h_mf, live_w_mf
+
+    def calc_GSI(self, daily_data) -> float:
+        # Initial GSI
+        gsi = 0
+
+        for day in range(len(daily_data["date"])):
+            # Calculate the length of the day with pv lib
+            date = daily_data["date"][day]
+            times = pd.date_range(date, periods=1, freq='D', tz=self.geo.timezone)
+            pv_loc = pvlib.location.Location(self.geo.center_lat, self.geo.center_lon, tz=self.geo.timezone)
+            solpos = pv_loc.get_sun_rise_set_transit(times) #, self.geo.center_lat, self.geo.center_lon)
+            sunrise = solpos['sunrise'].iloc[0]
+            sunset = solpos['sunset'].iloc[0]
+
+            # Ensure sunset is after sunrise
+            if sunset < sunrise:
+                sunset += pd.Timedelta(days=1)
+
+            day_len = (sunset - sunrise).total_seconds()/3600 
+
+            # Calculate the photo indicator function using day length
+            iPhoto = (day_len - 10)
+            iPhoto = min(max(iPhoto, 0), 1)
+
+            # Get the average temperature and humidities
+            temp = daily_data["temperature"][day]
+            rel_humidity = daily_data["rel_humidity"][day]
+
+            # Calculate the temperature indicator function
+            iTmin = (temp-28)/(41-28)
+            iTmin = min(max(iTmin, 0), 1)
+
+            # Calculate vapour pressure deficit
+            temp_c = (temp - 32) * (5/9)
+            vpd = (1 - rel_humidity / 100) * 0.6108 * np.exp((17.27 * temp_c) / (temp_c + 237.3)) #kPa
+            
+            # Calculate vapour pressure deficit indicator function
+            iVPD = (vpd-4.1)/(0.9-4.1)
+            iVPD = min(max(iVPD, 0), 1)
+
+            # Compute the GSI for the day
+            gsi += iTmin * iPhoto * iVPD
+
+        # Get the average GSI for the full sim
+        gsi /= len(daily_data["date"])
+        
+        return gsi
+
 def filter_hourly_data(hourly_data, start_datetime, end_datetime):
     hourly_data["date"] = pd.to_datetime(hourly_data["date"])
 
     mask = (hourly_data["date"] >= start_datetime) & (hourly_data["date"] <= end_datetime)
     filtered_data = {key: np.array(value)[mask] for key, value in hourly_data.items()}
     return filtered_data
-
-# TODO: need to implement a version of above for file input
 
 def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherEntry):
     ## elev_ref is in meters, temp_air is in Fahrenheit, rh_air is %
