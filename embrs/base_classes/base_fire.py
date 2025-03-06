@@ -75,7 +75,7 @@ class BaseFireSim:
         for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
             for j in range(self._shape[0]):
                 # Initialize cell object
-                new_cell = Cell(id, i, j, self._cell_size, live_h_mf= live_h_mf, live_w_mf=live_w_mf)
+                new_cell = Cell(id, i, j, self._cell_size, live_h_mf= live_h_mf, live_w_mf=live_w_mf, init_dead_mf=self._init_mf)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
                 data_col = int(np.floor(cell_x/self._data_res))
@@ -88,9 +88,6 @@ class BaseFireSim:
                 # Set cell fuel type from fuel map
                 fuel_key = self._fuel_map[data_row, data_col]
                 new_cell._set_fuel_type(Anderson13(fuel_key))
-                
-                # Set cell init fuel moisture
-                new_cell.init_mf = self._init_mf
 
                 # Set cell aspect from aspect map
                 new_cell._set_aspect(self._aspect_map[data_row, data_col])
