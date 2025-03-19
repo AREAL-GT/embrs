@@ -79,6 +79,7 @@ class Fuel:
         self.name = name
         self.model_num = model_num
         self.burnable = burnable
+        self.rel_indices = []
 
         if self.burnable:
             self.s_T = 0.055
@@ -92,6 +93,8 @@ class Fuel:
             self.w_n = w_0 * (1 - self.s_T)
             self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
             self.w_n_live = self.w_n[3] + self.w_n[4]
+
+            self.w_n_dead_nominal = self.w_n_dead
 
             self.s = s
             self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
@@ -108,8 +111,18 @@ class Fuel:
 
             self.rel_packing_ratio = rel_packing_ratio
             self.rho_b = rho_b
-            self.fc_W = fc_W
 
+            for i in range(5):
+                if self.w_0[i] > 0:
+                    self.rel_indices.append(i)
+
+            self.num_classes = len(self.rel_indices)
+
+
+    def set_new_fuel_loading(self, new_w_n):
+        self.w_n = new_w_n
+        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
+        self.w_n_live = self.w_n[3] + self.w_n[4]
 
     def calc_W(self):
 

@@ -96,13 +96,13 @@ class Visualizer:
                                      numVertices=6, radius=sim.cell_size, orientation=0)
 
                     if curr_cell.state == CellStates.FUEL:
-                        color = fc.fuel_color_mapping[curr_cell.fuel_type.model_num]
+                        color = fc.fuel_color_mapping[curr_cell.fuel.model_num]
                         if color not in added_colors:
                             added_colors.append(color)
                             legend_elements.append(mpatches.Patch(color = color,
-                                                label = curr_cell.fuel_type.name))
+                                                label = curr_cell.fuel.name))
 
-                        if curr_cell.fuel_content < 1 and curr_cell.fuel_type.burnable:
+                        if curr_cell.fuel_content < 1 and curr_cell.fuel.burnable:
                             fire_breaks.append(polygon)
                             break_fuel_arr.append(curr_cell.fuel_content)
 
@@ -371,16 +371,16 @@ class Visualizer:
                                               radius=sim.cell_size, orientation=0)
 
             if c.state == CellStates.FUEL:
-                color = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel_type.model_num])))
+                color = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel.model_num])))
                 # Scale color based on cell's fuel content
                 color = color * c.fuel_content
                 polygon.set_facecolor(color)
                 tree_patches.append(polygon)
 
-                if c.m_f > 0.08: # fuel moisture not nominal
+                if c.fmois > 0.08: # fuel moisture not nominal
                     soak_xs.append(c.x_pos)
                     soak_ys.append(c.y_pos)
-                    c_val = c.m_f/fc.dead_fuel_moisture_ext_table[c.fuel_type.model_num] # TODO: Use FuelModel value
+                    c_val = c.fmois/fc.dead_fuel_moisture_ext_table[c.fuel.model_num] # TODO: Use FuelModel value
                     c_val = np.min([1, c_val])
                     c_vals.append(c_val)
 
@@ -404,7 +404,7 @@ class Visualizer:
 
         fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
         if len(alpha_arr) > 0:
-            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
+            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["Wistia"])
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 

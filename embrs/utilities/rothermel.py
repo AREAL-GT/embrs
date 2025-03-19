@@ -42,10 +42,12 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     R_h, R_0, I_r, alpha = calc_r_h(cell, wind_speed_ft_min, slope_angle_deg, rel_wind_dir)
     R_0 = max(R_0, 1e-7)
 
+    cell.reaction_intensity = I_r
+
     if R_h_in is not None:
         R_h = R_h_in
 
-    e = calc_eccentricity(cell.fuel_type, R_h, R_0)
+    e = calc_eccentricity(cell.fuel, R_h, R_0)
 
     r_list = []
     I_list = []
@@ -72,6 +74,8 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
         Tuple[float, float]: _description_
     """
 
+    m_f = get_working_m_f(fuel, m_f)
+
     # Calculate moisture damping constants
     dead_mf, live_mf = get_characteristic_moistures(fuel, m_f)
     live_mx = calc_live_mx(fuel, dead_mf)
@@ -85,6 +89,22 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     R_0 = (I_r * flux_ratio)/heat_sink
 
     return R_0, I_r
+
+def get_working_m_f(fuel: Fuel, m_f: np.ndarray):
+    indices = fuel.rel_indices
+
+    m_f_temp = []
+
+    j = 0
+    for i in range(5):
+        if i in indices:
+            m_f_temp.append(m_f[j])
+            j += 1
+        else:
+            m_f_temp.append(0)
+
+    return np.array(m_f_temp)
+
 
 def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
 
@@ -127,7 +147,7 @@ def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -
     Returns:
         float: _description_
     """
-    
+
     mineral_damping = calc_mineral_damping()
 
     A = 133 * fuel.sav_ratio ** (-0.7913)
@@ -214,7 +234,7 @@ def calc_r_and_i_along_dir(cell: Cell, decomp_dir: float, R_h: float, I_r: float
         Tuple[float, float]: _description_
     """
 
-    fuel = cell.fuel_type
+    fuel = cell.fuel
     slope_dir = np.deg2rad(cell.aspect)
 
     gamma = abs((alpha + slope_dir) - decomp_dir) % (2*np.pi)
@@ -383,8 +403,8 @@ def calc_r_h(cell: Cell, wind_speed: float,
     Returns:
         Tuple[float, float, float, float]: _description_
     """
-    fuel = cell.fuel_type
-    m_f = cell.m_f
+    fuel = cell.fuel
+    m_f = cell.fmois
     if R_0 is None or I_r is None:
         R_0, I_r = calc_r_0(fuel, m_f)
 

@@ -22,6 +22,7 @@ from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.rothermel import *
+from embrs.utilities.burnup import Burnup
 
 from typing import Tuple
 
@@ -174,11 +175,16 @@ class FireSim(BaseFireSim):
             for cell, loc in self._new_ignitions:
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
+
+                calc_propagation_in_cell(cell)
+                
                 self._updated_cells[cell.id] = cell
         
         # Update wind if necessary
         self.weather_changed = self._update_weather()
         
+        self.compute_burn_histories(self._new_ignitions)
+
         # Add any new ignitions to the current set of burning cells
         self._burning_cells.extend(self._new_ignitions)
         # Reset new ignitions
@@ -191,10 +197,32 @@ class FireSim(BaseFireSim):
 
         for cell, loc in self._burning_cells:
             
-            # If cell has no burnable neighbors, track its fuel content but skip calculations
-            if not cell.burnable_neighbors:
-                self.capture_cell_changes(cell, loc)
-                continue
+            if cell.intersected:
+                cell.burn_idx += 1
+
+                if cell.burn_idx == len(cell.burn_history):
+
+                    # Set static fuel load to new value
+                    cell.fuel.set_new_fuel_loading(cell.dynamic_fuel_load)
+
+                    # Check if there is enough fuel remaining to set back to fuel
+                    if cell.fuel.w_n_dead < self.burnout_thresh:
+                        # if not set to burnt
+                        self.set_state_at_cell(cell, CellStates.BURNT)
+                    
+                    else:
+                        self.set_state_at_cell(cell, CellStates.FUEL)
+                                        
+                    # remove from burning cells
+                    self._burning_cells.remove((cell, loc))
+                    
+                else:
+                    cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
+                    curr_w_n_dead = np.dot(cell.fuel.f_ij[0:3], cell.dynamic_fuel_load[0:3])
+                    cell._fuel_content = curr_w_n_dead / cell.fuel.w_n_dead_nominal
+
+                # Add cell to update dictionary
+                self._updated_cells[cell.id] = cell
 
             # Check if conditions have changed
             if self.weather_changed or not cell.has_steady_state: 
@@ -229,7 +257,7 @@ class FireSim(BaseFireSim):
             # Check where fire spread has reached edge of cell
             intersections = np.where(cell.fire_spread > cell.distances)[0]
 
-            if len(intersections) > 0 and not cell.intersected:
+            if len(intersections) >= int(np.ceil(len(cell.distances)/2)) and not cell.intersected:
                 # First intersection, start ignition clock
                 cell.intersected = True
 
@@ -252,52 +280,72 @@ class FireSim(BaseFireSim):
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
 
-            if cell.intersected:
-                self.capture_cell_changes(cell, loc)
-
-        self.update_fuel_contents()
         self._iters += 1
 
-    def update_fuel_contents(self):
-        """Update the fuel content of all the burning cells based on the mass-loss algorithm in 
-            `(Coen 2005) <http://dx.doi.org/10.1071/WF03043>`_
-        """
-        fires = self.fully_burning_cells
-        time_step = self.time_step
+    def compute_burn_histories(self, new_ignitions):
+        
+        # TODO: This assumes weather will be static across burn history
+        curr_weather = self._weather_stream.stream[self._curr_weather_idx]
+    
+        wind_speed = curr_weather.wind_speed
+        t_amb = (curr_weather.temp - 32) * (5/9)
+        r_0 = 1.8
+        dr = 0.4
 
-        ignition_clocks = np.array(self.ignition_clocks)
-        fuels_at_ignition = np.array(self.fuels_at_ignition)
-        w_vals = np.array(self.w_vals)
+        dt = self._time_step
 
-        ignition_clocks += time_step
-        fuel_contents = fuels_at_ignition * np.minimum(1, np.exp(-ignition_clocks/w_vals))
+        for cell, _ in new_ignitions:
+            # Reset cell burn history
+            cell.burn_history = []
 
-        updated_cells = self._updated_cells
+            # TODO: implement duff loading in cells
+            wdf = 0.74 #cell.wdf
 
-        for (cell, loc), fuel_content, ignition_clock in zip(fires, fuel_contents, ignition_clocks):
-            cell._fuel_content = fuel_content
-            cell.ignition_clock = ignition_clock
+            f_i = cell.reaction_intensity * 0.0031524811 # kW/m2 # TODO: double check this conversion
 
-            if fuel_content < self.burnout_thresh:
-                self.set_state_at_cell(cell, CellStates.BURNT)
-                self._burning_cells.remove((cell, loc))
-                # Add cell to update dictionary
-                self._updated_cells[cell.id] = cell
+            u = 20#wind_speed * cell.wind_adj_factor # TODO: test if adjusting wind to fuel bed level works better, may just need to set to 0 like in FARSITE
+            depth = cell.fuel.fuel_depth_ft * 0.3048
 
-            updated_cells[cell.id] = cell
+            if 2 in cell.fuel.rel_indices:
+                mx = cell.fmois[2]
+            elif 1 in cell.fuel.rel_indices:
+                mx = cell.fmois[1]
+            else:
+                mx = cell.fmois[0]
 
-    def capture_cell_changes(self, cell: Cell, loc: int):
-        """Capture the ignition parameters for burning cell, for vectorized calculation later
+            dfm = -0.347 + 6.42 * mx
+            dfm = max(dfm, 0.10)
 
-        Args:
-            cell (Cell): Cell currently burning to capture.
-            loc (int): Location within Cell from which fire originates
-        """
-        self.fully_burning_cells.append((cell, loc))
-        self.w_vals.append(cell.W)
-        self.fuels_at_ignition.append(cell.fuel_at_ignition)
-        self.ignition_clocks.append(cell.ignition_clock)
+            burn_mgr = Burnup(cell)
+            burn_mgr.set_fire_data(5000, f_i, cell.t_r, u, depth, t_amb, r_0, dr, dt, wdf, dfm)
 
+            if burn_mgr.start_loop():
+                cont = True
+                i = 0
+                while cont:
+                    cont = burn_mgr.burn_loop()
+                    remaining_fracs = burn_mgr.get_updated_fuel_loading()
+                    
+                    entry = [0] * len(cell.fuel.w_0)
+                    j = 0
+                    for i in range(len(cell.fuel.w_0)):
+                        if i in cell.fuel.rel_indices:
+                            entry[i] = remaining_fracs[j] * cell.fuel.w_n[i]
+                            j += 1
+
+                    cell.burn_history.append(entry)
+
+            else:
+                remaining_fracs = burn_mgr.get_updated_fuel_loading()
+
+                entry = [0] * len(cell.fuel.w_0)
+                j = 0
+                for i in range(len(cell.fuel.w_0)):
+                    if i in cell.fuel.rel_indices:
+                        entry[i] = remaining_fracs[j] * cell.fuel.w_n[i]
+                        j += 1
+
+                cell.burn_history.append(entry)
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
         """Attempts to ignite neighboring cells based on fire spread conditions.
@@ -347,7 +395,7 @@ class FireSim(BaseFireSim):
 
             if neighbor:
                 # Check that neighbor state is burnable
-                if neighbor.state == CellStates.FUEL and neighbor.fuel_type.burnable:
+                if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
                     neighbor._update_weather(self._curr_weather_idx, self._weather_stream)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma)
@@ -358,7 +406,7 @@ class FireSim(BaseFireSim):
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
                         neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here 
-
+                        
                         self._updated_cells[neighbor.id] = neighbor
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
@@ -395,11 +443,15 @@ class FireSim(BaseFireSim):
             - The accuracy of this calculation depends on correct fuel moisture modeling.
             - Currently, fuel moisture content updates are not implemented.
         """
+
+        m_f = get_working_m_f(cell.fuel, cell.fmois)
+        neighbor_m_f = get_working_m_f(neighbor.fuel, neighbor.fmois)
+
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_gamma * calc_heat_sink(cell.fuel_type, cell.m_f) # TODO: make sure this computation is valid (I think it is)
+        heat_source = r_gamma * calc_heat_sink(cell.fuel, m_f) # TODO: make sure this computation is valid (I think it is)
 
         # Get the heat sink using the neighbors fuel and moisture content
-        heat_sink = calc_heat_sink(neighbor.fuel_type, neighbor.m_f) # TODO: need to implement updating fuel moisture in each cell
+        heat_sink = calc_heat_sink(neighbor.fuel, neighbor_m_f)
         
         # Calculate a ignition rate of spread
         r_ign = heat_source / heat_sink
@@ -475,7 +527,6 @@ class FireSim(BaseFireSim):
             - Initializes the progress bar on the first iteration.
             - Updates `_curr_time_s` based on the number of elapsed iterations.
             - Advances the progress bar.
-            - Resets temporary state lists (`w_vals`, `fuels_at_ignition`, `ignition_clocks`).
             - Closes the progress bar if the simulation reaches its duration or if no burning 
             cells remain.
 
