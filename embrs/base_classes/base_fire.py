@@ -75,40 +75,41 @@ class BaseFireSim:
         for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
             for j in range(self._shape[0]):
                 # Initialize cell object
-                new_cell = Cell(id, i, j, self._cell_size, live_h_mf= live_h_mf, live_w_mf=live_w_mf, init_dead_mf=self._init_mf)
+                new_cell = Cell(id, i, j, self._cell_size)
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
+                # Get row and col of data arrays corresponding to cell
                 data_col = int(np.floor(cell_x/self._data_res))
                 data_row = int(np.floor(cell_y/self._data_res))
-
-                # Set cell elevation from elevation map
-                new_cell._set_elev(self._elevation_map[data_row, data_col])
-                self.coarse_elevation[j, i] = new_cell.z
-
-                # Set cell fuel type from fuel map
+                
+                # Get fuel type
                 fuel_key = self._fuel_map[data_row, data_col]
-                new_cell._set_fuel_type(Anderson13(fuel_key))
+                fuel = Anderson13(fuel_key)
 
-                # Set cell aspect from aspect map
-                new_cell._set_aspect(self._aspect_map[data_row, data_col])
+                # Get cell elevation from elevation map
+                elev = self._elevation_map[data_row, data_col]
+                self.coarse_elevation[j, i] = elev
 
-                # Set cell slope from slope map
-                new_cell._set_slope(self._slope_map[data_row, data_col])
+                # Get cell aspect from aspect map
+                asp = self._aspect_map[data_row, data_col]
 
-                # Set canopy cover from canopy cover map
-                new_cell._set_canopy_cover(self._cc_map[data_row, data_col])
+                # Get cell slope from slope map
+                slp = self._slope_map[data_row, data_col]
 
-                # Set canopy height from canopy height map
-                new_cell._set_canopy_height(self._ch_map[data_row, data_col])
+                # Get canopy cover from canopy cover map
+                cc = self._cc_map[data_row, data_col]
 
-                # Set canopy base height from cbh map
-                new_cell._set_canopy_base_height(self._cbh_map[data_row, data_col])
+                # Get canopy height from canopy height map
+                ch = self._ch_map[data_row, data_col]
 
-                # Set canopy bulk density from cbd map
-                new_cell._set_canopy_bulk_density(self._cbd_map[data_row, data_col])
+                # Get canopy base height from cbh map
+                cbh = self._cbh_map[data_row, data_col]
 
-                # Set WAF for the cell
-                new_cell._set_wind_adj_factor()
+                # Get canopy bulk density from cbd map
+                cbd = self._cbd_map[data_row, data_col]
+
+                # Get data for cell
+                new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, self._init_mf, live_h_mf, live_w_mf)
 
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))
@@ -380,7 +381,7 @@ class BaseFireSim:
                             if state == CellStates.BURNT:
                                 cell._set_state(state)
                             
-                            elif state == CellStates.FIRE and cell._fuel_type.burnable:
+                            elif state == CellStates.FIRE and cell._fuel.burnable:
                                 self.starting_ignitions.append((cell, 0))
 
     @property

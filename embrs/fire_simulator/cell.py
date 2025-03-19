@@ -45,7 +45,7 @@ class Cell:
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
 
-    def __init__(self, id: int, col: int, row: int, cell_size: float, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_dead_mf = 0.08, live_h_mf=0.3, live_w_mf=0.3, fuel_type=Anderson13(1)):
+    def __init__(self, id: int, col: int, row: int, cell_size: float): #, fuel_type: Fuel, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_dead_mf = 0.08, live_h_mf=0.3, live_w_mf=0.3):
         """Initializes a simulation cell with terrain, fire properties, and fuel characteristics.
 
             The cell is positioned within a **point-up hexagonal grid** and stores relevant 
@@ -68,7 +68,7 @@ class Cell:
                 - `_cell_size`: Edge length of the hexagonal cell.
                 - `_cell_area`: Computed area of the hexagonal cell.
                 - `_x_pos`, `_y_pos`: Computed global coordinates.
-                - `_fuel_type`: Assigned fuel model.
+                - `_fuel`: Assigned fuel model.
                 - `_state`: Set to `CellStates.FUEL` if burnable, otherwise `CellStates.BURNT`.
                 - `_neighbors`, `_burnable_neighbors`: Dictionaries for tracking adjacency.
                 - `polygon`: Shapely polygon representation of the hexagonal cell.
@@ -86,6 +86,22 @@ class Cell:
         self._col = col
         self._row = row
 
+        # x_pos, y_pos are the global position of cell in m
+        if row % 2 == 0:
+            self._x_pos = col * cell_size * np.sqrt(3)
+        else:
+            self._x_pos = (col + 0.5) * cell_size * np.sqrt(3)
+
+        self._y_pos = row * cell_size * 1.5
+
+        self._cell_size = cell_size # defined as the edge length of hexagon
+        self._cell_area = self.calc_cell_area()
+
+
+    def _set_cell_data(self, fuel_type: Fuel, z: float, aspect: float, slope_deg: float, canopy_cover: float, canopy_height: float, init_dead_mf = 0.08, live_h_mf = 0.3, live_w_mf = 0.3):
+        # Set Fuel type
+        self._fuel = fuel_type
+        
         # z is the elevation of cell in m
         self._z = z
 
@@ -104,33 +120,35 @@ class Cell:
         self.canopy_base_height = 0
 
         self.canopy_bulk_density = 0
-        
+
         # Wind adjustment factor based on sheltering condition
-        self.wind_adj_factor = 1
+        self._set_wind_adj_factor()
 
-        self._cell_size = cell_size # defined as the edge length of hexagon
-        self._cell_area = self.calc_cell_area()
-
-        # x_pos, y_pos are the global position of cell in m
-        if row % 2 == 0:
-            self._x_pos = col * cell_size * np.sqrt(3)
-        else:
-            self._x_pos = (col + 0.5) * cell_size * np.sqrt(3)
-
-        self._y_pos = row * cell_size * 1.5
-
-        # Set Fuel type
-        self._fuel_type = fuel_type
-        
         # Variables to keep track of burning fuel content
         self._fuel_content = 1
-        self.fuel_at_ignition = None
-        self.W = None
-        self.ignition_clock = 0
         self.intersected = False
 
+        self.init_dead_mf = init_dead_mf
+        self.init_live_h_mf = live_h_mf
+        self.init_live_w_mf = live_w_mf
+
+        self.reaction_intensity = 0
+
+        if self.fuel.burnable:
+            self.t_r = (384 / self.fuel.sav_ratio) * 60 # seconds
+            self.set_arrays()
+
+        else:
+            self.t_r = 0
+
+        # Fuel loading for each class over time starting from end of flame residence time
+        self.burn_history = []
+
+        self.dynamic_fuel_load = []
+        self.burn_idx = -1
+
         # Set state for non burnable types to BURNT
-        if self._fuel_type.burnable:
+        if self._fuel.burnable:
             self._state = CellStates.FUEL
         
         else:
@@ -140,20 +158,6 @@ class Cell:
         self._neighbors = {}
         self._burnable_neighbors = {}
 
-        # dead fuel moisture for each time-lag class
-        # TODO: need to apply conditioning for this
-        self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
-        self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
-        self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
-
-        self.dfms = [self.dfm1, self.dfm10, self.dfm100]
-
-        self.init_dead_mf = init_dead_mf
-        self.init_live_h_mf = live_h_mf
-        self.init_live_w_mf = live_w_mf
-
-        self.m_f = np.array([self.init_dead_mf, self.init_dead_mf, self.init_dead_mf, live_h_mf, live_w_mf])
-        
         self.moist_update = -1
 
         # Get shapely polygon representation of cell
@@ -182,6 +186,35 @@ class Cell:
 
         # Constant defining fire acceleration characteristics
         self.a_a = 0.115 # TODO: find fuel type dependent values for this
+
+    def set_arrays(self):
+        
+        indices = self._fuel.rel_indices
+
+        self.wdry = self._fuel.w_0[indices]
+        self.sigma = self._fuel.s[indices]
+
+        self.dfms = []
+        fmois = []
+
+        if 0 in indices:
+            self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
+            self.dfms.append(self.dfm1)
+            fmois.append(self.init_dead_mf)
+        if 1 in indices:
+            self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
+            self.dfms.append(self.dfm10)
+            fmois.append(self.init_dead_mf)
+        if 2 in indices:
+            self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
+            self.dfms.append(self.dfm100)
+            fmois.append(self.init_dead_mf)
+        if 3 in indices:
+            fmois.append(self.init_live_h_mf)
+        if 4 in indices:
+            fmois.append(self.init_live_w_mf)
+
+        self.fmois = np.array(fmois)
 
     def set_real_time_vals(self):
         """Updates real-time fire spread parameters using fire acceleration.
@@ -291,7 +324,7 @@ class Cell:
                 self._step_moisture(weather_stream, i)
 
         self.moist_update = idx
-        self.m_f[0:3] = [dfm.meanWtdMoisture() for dfm in self.dfms]
+        self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
 
     def _update_weather(self, idx: int, weather_stream: WeatherStream):
         # Update moisture content based on weather stream
@@ -382,7 +415,7 @@ class Cell:
             wind_adj_factor (float): The calculated wind adjustment factor.
         """
         
-        if not self.fuel_type.burnable:
+        if not self.fuel.burnable:
             self.wind_adj_factor = 1
 
         else:
@@ -391,7 +424,7 @@ class Cell:
 
             if f <= 0.05:
                 # Use un-sheltered WAF equation
-                H = self.fuel_type.fuel_depth_ft
+                H = self.fuel.fuel_depth_ft
                 self.wind_adj_factor = 1.83 / np.log((20 + 0.36*H)/(0.13*H))
 
             else:
@@ -424,11 +457,9 @@ class Cell:
                                     or Scott Burgan standard fire behavior fuel models.
 
         Side Effects:
-            - Updates the `_fuel_type` attribute with the specified fuel model.
+            - Updates the `_fuel` attribute with the specified fuel model.
         """
-        self._fuel_type = fuel_type
-        if self._fuel_type.burnable:
-            self.W = self._fuel_type.fc_W
+        self._fuel = fuel_type
 
     def _set_state(self, state: CellStates):
         """Sets the state of the cell.
@@ -468,7 +499,7 @@ class Cell:
             str: A formatted string representing the cell.
         """
         return (f"(id: {self.id}, {self.x_pos}, {self.y_pos}, {self.z}, "
-                f"type: {self.fuel_type.name}, "
+                f"type: {self.fuel.name}, "
                 f"state: {self.state}")
 
     def calc_cell_area(self):
@@ -616,12 +647,12 @@ class Cell:
         return self._z
 
     @property
-    def fuel_type(self) -> Fuel:
+    def fuel(self) -> Fuel:
         """Type of fuel present at the cell.
         
         Can be any of the 13 Anderson FBFMs
         """
-        return self._fuel_type
+        return self._fuel
 
     @property
     def fuel_content(self) -> float:
