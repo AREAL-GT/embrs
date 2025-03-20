@@ -702,7 +702,7 @@ class Burnup():
 
             if tf < self.ti:
                 # set to amount consumed in flaming front
-                consumed = (self.fistart * self.ti) / 18600
+                consumed = (self.fistart * self.ti) / 18608
                 rem = self.wdry[m - 1] - consumed
                 rem = max(rem, 0.0)
                 fuel_loadings.append(rem / self.wdry[m - 1])

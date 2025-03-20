@@ -11,6 +11,7 @@ from typing import Tuple
 from shapely.geometry import Point
 import numpy as np
 from tqdm import tqdm
+import pickle
 
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
@@ -70,6 +71,10 @@ class BaseFireSim:
         live_h_mf = self._weather_stream.live_h_mf
         live_w_mf = self._weather_stream.live_w_mf
 
+        # Load Duff loading lookup table from LANDFIRE FCCS
+        with open("embrs/utilities/duff_loading.pkl", "rb") as file:
+            duff_lookup = pickle.load(file)
+
         # Populate cell_grid with cells
         id = 0
         for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
@@ -108,8 +113,14 @@ class BaseFireSim:
                 # Get canopy bulk density from cbd map
                 cbd = self._cbd_map[data_row, data_col]
 
+                # Get duff fuel loading from fccs map
+                fccs_id = int(self._fccs_map[data_row, data_col])
+                if duff_lookup.get(fccs_id) is not None:
+                    wdf = duff_lookup[fccs_id] # tons/acre
+                    wdf *= 0.24711 # convert to kg/m2
+
                 # Get data for cell
-                new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, self._init_mf, live_h_mf, live_w_mf)
+                new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, wdf, self._init_mf, live_h_mf, live_w_mf)
 
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))
@@ -213,6 +224,7 @@ class BaseFireSim:
         self._ch_map = np.flipud(lcp_data.canopy_height_map)
         self._cbh_map = np.flipud(lcp_data.canopy_base_height_map)
         self._cbd_map = np.flipud(lcp_data.canopy_bulk_density_map)
+        self._fccs_map = np.flipud(lcp_data.fccs_map)
 
         # Get resolution for data products
         self._data_res = lcp_data.resolution

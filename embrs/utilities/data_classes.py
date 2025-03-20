@@ -57,6 +57,7 @@ class LandscapeData:
     canopy_height_map: np.ndarray
     canopy_base_height_map: np.ndarray
     canopy_bulk_density_map: np.ndarray
+    fccs_map: np.ndarray
     rows: int
     cols: int
     resolution: int
@@ -69,6 +70,7 @@ class LandscapeData:
 class MapParams:
     folder: Optional[str] = None
     lcp_filepath: Optional[str] = None
+    fccs_filepath: Optional[str] = None
     cropped_lcp_path: Optional[str] = None
     import_roads: Optional[bool] = None
     lcp_data: Optional[LandscapeData] = None

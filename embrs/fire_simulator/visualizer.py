@@ -377,12 +377,13 @@ class Visualizer:
                 polygon.set_facecolor(color)
                 tree_patches.append(polygon)
 
-                if c.fmois > 0.08: # fuel moisture not nominal
-                    soak_xs.append(c.x_pos)
-                    soak_ys.append(c.y_pos)
-                    c_val = c.fmois/fc.dead_fuel_moisture_ext_table[c.fuel.model_num] # TODO: Use FuelModel value
-                    c_val = np.min([1, c_val])
-                    c_vals.append(c_val)
+                # TODO: fix this to look at 1 hr moisture or some composite measure
+                # if c.fmois > 0.08: # fuel moisture not nominal
+                #     soak_xs.append(c.x_pos)
+                #     soak_ys.append(c.y_pos)
+                #     c_val = c.fmois/fc.dead_fuel_moisture_ext_table[c.fuel.model_num] # TODO: Use FuelModel value
+                #     c_val = np.min([1, c_val])
+                #     c_vals.append(c_val)
 
             elif c.state == CellStates.FIRE:
                 fire_patches.append(polygon)

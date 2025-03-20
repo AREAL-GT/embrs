@@ -202,7 +202,11 @@ def crop_map_data(map_params: MapParams) -> float:
     crop_done = False
 
     lcp_path = map_params.lcp_filepath
-    output_path = os.path.join(map_params.folder, "cropped_lcp.tif")
+    lcp_output_path = os.path.join(map_params.folder, "cropped_lcp.tif")
+    fccs_path = map_params.fccs_filepath
+
+    # Add the FCCS layer to the landscape file
+    merge_tiffs(lcp_path, fccs_path, lcp_output_path)
 
     while not crop_done:
 
@@ -213,11 +217,42 @@ def crop_map_data(map_params: MapParams) -> float:
 
         bounds = crop_tool.get_coords()
         angle = find_warping_angle(crop_tool.fuel_data)
-        crop_done = crop_and_save_tiff(lcp_path, output_path, bounds)
+        crop_done = crop_and_save_tiff(lcp_output_path, lcp_output_path, bounds)
 
-    map_params.cropped_lcp_path = output_path
+    map_params.cropped_lcp_path = lcp_output_path
     map_params.geo_info = GeoInfo()
     map_params.geo_info.north_angle_deg = np.rad2deg(angle)
+
+def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str) -> None:
+    # Open the LCP file and read its data and metadata
+    with rasterio.open(lcp_path) as lcp_src:
+        lcp_data = lcp_src.read()  # shape: (bands, height, width)
+        meta = lcp_src.meta.copy()
+
+    # Open the FCCS file and read its data (assuming a single band)
+    with rasterio.open(fccs_path) as fccs_src:
+        fccs_data = fccs_src.read(1)  # shape: (height, width)
+
+    # Ensure the spatial dimensions match
+    if lcp_data.shape[1:] != fccs_data.shape:
+        raise ValueError("The dimensions of LCP and FCCS images do not match.")
+
+    # Expand FCCS data to add a new band
+    fccs_data = fccs_data[np.newaxis, :, :]
+
+    # Identify the actual number of non-empty bands in LCP
+    valid_bands = [i for i in range(lcp_data.shape[0]) if not np.all(lcp_data[i] == 0)]
+    actual_band_count = len(valid_bands)
+
+    # Concatenate LCP bands with the new FCCS band along the band axis
+    merged_data = np.concatenate([lcp_data, fccs_data], axis=0)
+
+    # Update metadata: new count is actual bands (excluding empty ones) plus FCCS band
+    meta.update(count=merged_data.shape[0])
+
+    # Write the combined data to a new TIFF file
+    with rasterio.open(output_path, "w", **meta) as dst:
+        dst.write(merged_data)
 
 def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
     """_summary_
@@ -472,15 +507,13 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         resampled_bands = []
 
         for i in range(array.shape[0]):  # Iterate through all bands
-            if i + 1 == 4: # Check if processing fuel
+            if i == 3 or i == 8: # Check if processing fuel
                 # Use nearest-neighbor resampling for categorical data
                 resampling_method = Resampling.nearest
             else:
                 # Use bilinear resampling for continuous data
                 resampling_method = Resampling.bilinear
-            
             resampled_band, transform = resample_raster(array[i], src.crs, new_transform, 1, resampling_method)
-            
             resampled_bands.append(resampled_band)
 
         resampled_array = np.stack(resampled_bands, axis=0)
@@ -497,6 +530,7 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         canopy_height_map=resampled_array[5]/10, # Adjust for how LANDFIRE handles canopy height
         canopy_base_height_map=resampled_array[6]/10, # Adjust for how LANDFIRE handles canopy base height
         canopy_bulk_density_map=resampled_array[7]/100, # Adjust for how LANDFIRE handles canopy bulk density
+        fccs_map=resampled_array[8],
         rows=rows,
         cols=cols,
         resolution=1,

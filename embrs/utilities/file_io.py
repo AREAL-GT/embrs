@@ -210,6 +210,7 @@ class MapGenFileSelector(FileSelectBase):
         # Define variables
         self.output_map_folder = tk.StringVar()
         self.lcp_filename = tk.StringVar()
+        self.fccs_filename = tk.StringVar()
         self.import_roads = tk.BooleanVar()
         self.import_roads.set(False)
 
@@ -221,6 +222,11 @@ class MapGenFileSelector(FileSelectBase):
 
         _, _, self.lcp_button, self.lcp_frame = self.create_file_selector(frame, "Landscape File:     ",
                                                 self.lcp_filename,
+                                                [("Tagged Image File Format","*.tif"),
+                                                ("Tagged Image File Format","*.tiff")])
+        
+        _, _, self.fccs_button, self.fccs_frame = self.create_file_selector(frame, "FCCS File:         ",
+                                                self.fccs_filename,
                                                 [("Tagged Image File Format","*.tif"),
                                                 ("Tagged Image File Format","*.tiff")])
         
@@ -246,7 +252,7 @@ class MapGenFileSelector(FileSelectBase):
         the submit button based on if all necessary input has been provided.
         """
         # Check that all fields are filled before enabling submit button
-        if self.lcp_filename.get() and self.output_map_folder.get():
+        if self.lcp_filename.get() and self.output_map_folder.get() and self.fccs_filename.get():
             self.submit_button.config(state='normal')
 
         else:
@@ -260,6 +266,7 @@ class MapGenFileSelector(FileSelectBase):
 
         map_params.folder = self.output_map_folder.get()
         map_params.lcp_filepath = self.lcp_filename.get()
+        map_params.fccs_filepath = self.fccs_filename.get()
         map_params.import_roads = self.import_roads.get()
 
         self.result = map_params

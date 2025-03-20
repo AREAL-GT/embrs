@@ -98,7 +98,7 @@ class Cell:
         self._cell_area = self.calc_cell_area()
 
 
-    def _set_cell_data(self, fuel_type: Fuel, z: float, aspect: float, slope_deg: float, canopy_cover: float, canopy_height: float, init_dead_mf = 0.08, live_h_mf = 0.3, live_w_mf = 0.3):
+    def _set_cell_data(self, fuel_type: Fuel, z: float, aspect: float, slope_deg: float, canopy_cover: float, canopy_height: float, wdf: float, init_dead_mf = 0.08, live_h_mf = 0.3, live_w_mf = 0.3):
         # Set Fuel type
         self._fuel = fuel_type
         
@@ -120,6 +120,9 @@ class Cell:
         self.canopy_base_height = 0
 
         self.canopy_bulk_density = 0
+
+        # Duff loading (kg/m2)
+        self.wdf = wdf
 
         # Wind adjustment factor based on sheltering condition
         self._set_wind_adj_factor()

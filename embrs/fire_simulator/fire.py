@@ -217,7 +217,7 @@ class FireSim(BaseFireSim):
                     self._burning_cells.remove((cell, loc))
                     
                 else:
-                    cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
+                    cell.dynamic_fuel_load = cell.burn_history[-1]
                     curr_w_n_dead = np.dot(cell.fuel.f_ij[0:3], cell.dynamic_fuel_load[0:3])
                     cell._fuel_content = curr_w_n_dead / cell.fuel.w_n_dead_nominal
 
