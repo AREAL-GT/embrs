@@ -298,12 +298,12 @@ class FireSim(BaseFireSim):
             # Reset cell burn history
             cell.burn_history = []
 
-            # TODO: implement duff loading in cells
-            wdf = 0.74 #cell.wdf
+            # Get cell duff loading
+            wdf = cell.wdf
 
             f_i = cell.reaction_intensity * 0.0031524811 # kW/m2 # TODO: double check this conversion
 
-            u = 20#wind_speed * cell.wind_adj_factor # TODO: test if adjusting wind to fuel bed level works better, may just need to set to 0 like in FARSITE
+            u = 0#wind_speed * cell.wind_adj_factor # TODO: test if adjusting wind to fuel bed level works better, may just need to set to 0 like in FARSITE
             depth = cell.fuel.fuel_depth_ft * 0.3048
 
             if 2 in cell.fuel.rel_indices:

@@ -117,7 +117,7 @@ class BaseFireSim:
                 fccs_id = int(self._fccs_map[data_row, data_col])
                 if duff_lookup.get(fccs_id) is not None:
                     wdf = duff_lookup[fccs_id] # tons/acre
-                    wdf *= 0.24711 # convert to kg/m2
+                    wdf /= 4.46 # convert to kg/m2
 
                 # Get data for cell
                 new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, wdf, self._init_mf, live_h_mf, live_w_mf)

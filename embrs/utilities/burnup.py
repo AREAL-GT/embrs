@@ -54,7 +54,7 @@ class Burnup():
 
         self.number = cell._fuel.num_classes # Number of fuel size categories
 
-        self.wdry = cell.wdry * 0.247105 # Dry loading (kg/m2)
+        self.wdry = cell.wdry / 4.46 # Dry loading (kg/m2)
         self.fmois = cell.fmois # fuel moisture (fraction)
         self.sigma = cell.sigma * 3.2808 # SAV (1/m)
         self.ash = [0.05] * self.number # ash content (fraction)
