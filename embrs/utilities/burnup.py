@@ -55,15 +55,16 @@ class Burnup():
         self.number = cell._fuel.num_classes # Number of fuel size categories
 
         self.wdry = cell.wdry / 4.46 # Dry loading (kg/m2)
-        self.fmois = cell.fmois # fuel moisture (fraction)
-        self.sigma = cell.sigma * 3.2808 # SAV (1/m)
+        fmois = cell.fmois[0]
+        self.fmois = [fmois - 0.02, fmois, fmois + 0.02] # fuel moisture (fraction)
+        self.sigma = cell.sigma # * 3.2808 # SAV (1/m)
         self.ash = [0.05] * self.number # ash content (fraction)
         self.htval = [18608000] * self.number # heat content(J/kg)
         self.dendry = [512.591] * self.number # dry mass density (kg/m3)
         self.cheat = [2750] * self.number # heat capacity (J/kg/K)
         self.condry = [0.133] * self.number # thermal conductivity (W/m/K)
-        self.tpig = [327] * self.number # ignition tempurature (C)
-        self.tchar = [377] * self.number # char end pyrolisis temperature (C)
+        self.tpig = [327 + 273] * self.number # ignition tempurature (C)
+        self.tchar = [377 + 273] * self.number # char end pyrolisis temperature (C)
 
 
     def set_fire_data(self, NumIter, Fi, Ti, U, D, Tamb, R0, Dr, Dt, Wdf, Dfm):
@@ -157,7 +158,8 @@ class Burnup():
                 self.diam[kj] = diak
                 self.xmat[kj] = self.elam[k - 1][j - 1]
                 self.wo[kj] = wtk * self.xmat[kj]
-
+        
+        x = 0
     # Equivalent to cpp
     def overlaps(self):
         self.elam = np.zeros((MAXNO, MAXNO))
@@ -306,6 +308,7 @@ class Burnup():
                 if (dt > trt):
                     self.flit[k - 1] += self.xmat[kl]
 
+            x = 0
         nlit = 0
         trt = rindef
 
@@ -576,7 +579,7 @@ class Burnup():
 
                     tf = self.TempF(gi, r)
                     ts = self.tamb
-                    diam = self.diam[kl]
+                    dia = self.diam[kl]
                     self.heat_exchange(dia, tf, ts, c)
 
                     dtemp = max(0.0, tf - ts)
