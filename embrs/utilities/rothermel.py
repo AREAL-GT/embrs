@@ -1,4 +1,5 @@
 from embrs.utilities.fuel_models import Fuel
+from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
 import numpy as np
 from typing import Tuple
@@ -55,8 +56,8 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         # rate of spread along gamma in ft/min, fireline intensity along gamma in Btu/ft/min
         r_gamma, I_gamma = calc_r_and_i_along_dir(cell, decomp_dir, R_h, I_r, alpha, e)
 
-        r_gamma /= 196.85 # convert to m/s
-        I_gamma *= 0.05767 # convert to kW/m # TODO: double check this conversion
+        r_gamma = ft_min_to_m_s(r_gamma) # convert to m/s
+        I_gamma = BTU_ft_min_to_kW_m(I_gamma) # convert to kW/m
 
         r_list.append(r_gamma)
         I_list.append(I_gamma)

@@ -150,9 +150,3 @@ class WindNinjaTask:
     wind_height_units: str
     input_speed_units: str
     temperature_units: str
-
-@dataclass
-class BurnStruct:
-    time: Optional[float] = None
-    wdf: Optional[float] = None
-    ff: Optional[float] = None

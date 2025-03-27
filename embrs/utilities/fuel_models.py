@@ -90,7 +90,7 @@ class Fuel:
             self.f_ij = f_ij
 
             self.w_0 = w_0 * 0.0459137 # convert to lbs/ft^2
-            self.w_n = w_0 * (1 - self.s_T)
+            self.w_n = self.w_0 * (1 - self.s_T)
             self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
             self.w_n_live = self.w_n[3] + self.w_n[4]
 
@@ -112,7 +112,8 @@ class Fuel:
             self.rel_packing_ratio = rel_packing_ratio
             self.rho_b = rho_b
 
-            for i in range(5):
+            # TODO: this means live fuels not included in Burnup. Is that what we want?
+            for i in range(3):
                 if self.w_0[i] > 0:
                     self.rel_indices.append(i)
 

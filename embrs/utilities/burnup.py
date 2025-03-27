@@ -1,5 +1,5 @@
 import numpy as np
-from embrs.utilities.data_classes import BurnStruct
+from embrs.utilities.unit_conversions import *
 
 MAXNO = 20
 MAXKL = int((MAXNO * ( MAXNO + 1 ) / 2 + MAXNO ))
@@ -12,6 +12,9 @@ FintSwitch = 15.0
 
 class Burnup():
     def __init__(self, cell):
+        self.gd_Fudge1 = 0.0
+        self.gd_Fudge2 = 0.0
+
         self.now = 0
         self.tis = 0
 
@@ -54,83 +57,39 @@ class Burnup():
 
         self.number = cell._fuel.num_classes # Number of fuel size categories
 
-        self.wdry = cell.wdry / 4.46 # Dry loading (kg/m2)
-        fmois = cell.fmois[0]
-        self.fmois = [fmois - 0.02, fmois, fmois + 0.02] # fuel moisture (fraction)
-        self.sigma = cell.sigma # * 3.2808 # SAV (1/m)
+        self.wdry = Lbsft2_to_KiSq(cell.wdry) # Dry loading (kg/m2)
+        self.fmois = cell.fmois[0:self.number] # fuel moisture (fraction)
+        self.sigma = cell.sigma * 3.2808 # SAV (1/m)
         self.ash = [0.05] * self.number # ash content (fraction)
-        self.htval = [18608000] * self.number # heat content(J/kg)
+        self.htval = [18600000] * self.number # heat content(J/kg)
         self.dendry = [512.591] * self.number # dry mass density (kg/m3)
         self.cheat = [2750] * self.number # heat capacity (J/kg/K)
         self.condry = [0.133] * self.number # thermal conductivity (W/m/K)
         self.tpig = [327 + 273] * self.number # ignition tempurature (C)
         self.tchar = [377 + 273] * self.number # char end pyrolisis temperature (C)
 
-
-    def set_fire_data(self, NumIter, Fi, Ti, U, D, Tamb, R0, Dr, Dt, Wdf, Dfm):
-        self.ntimes = NumIter
-        self.fistart = Fi # igniting fire intensity (kW/m2)
-        self.ti = Ti  # igniting surface fire res. time (s)
-        self.u = U # windspeed at top of fuelbed (m/s)
-        self.d = D # depth of fuel bed (m)
-        self.tamb = Tamb + 273 # ambient temperature (C)
-        self.r0 = R0 
-        self.dr = Dr
-        self.dt = Dt 
-        self.wdf = Wdf # duff dry weight loading (kg/m2)
-        self.dfm = Dfm # duff moisture (fraction)
-
-        self.bs = np.empty(self.ntimes, dtype=object)
-        for i in range(self.ntimes):
-            self.bs[i] = BurnStruct()
-
-    # Equivalent to cpp
-    def start_loop(self):
         self.fi_min = 0.1
 
-        self.fi = self.fistart
+    def set_fire_data(self, NumIter, Fi, Ti, U, D, Tamb, Dt, Wdf, Dfm):
+        self.ntimes = NumIter
+        fi_kwm2 = BTU_ft2_min_to_kW_m2(Fi) # convert intensity to kW/m2
+        self.fistart = fi_kwm2 # igniting fire intensity (kW/m2)
+        self.fi = fi_kwm2
+        self.ti = Ti  # igniting surface fire res. time (s)
+        self.u = U # windspeed at top of fuelbed (m/s)
+        self.d = ft_to_m(D) # depth of fuel bed (m)
+        TambC = F_to_C(Tamb) # ambient temperature (C)
+        self.tamb = TambC + 273 # ambient temperature (K)
+        self.r0 = 1.83
+        self.dr = 0.4
+        self.dt = Dt 
+        wdf = TPA_to_KiSq(Wdf) # duff dry weight loading (kg/m2)
+        self.wdf = wdf
+        self.dfm = Dfm # duff moisture (fraction)
 
-        if self.ntimes == 0 or self.number == 0:
-            return False
-        
-        done = False
-        self.tis = self.ti
-
-        while not done:
-            done = True
-
-            self.arrays()
-            self.now = 1
-            self.duff_burn()
-
-            if self.start(self.tis, self.now):
-                if self.tis < self.tdf:
-                    self.fid = self.dfi
-                else:
-                    self.fid = 0
-                
-                if not self.set_burn_struct(0.0, self.now):
-                    self.tis /= 2.0
-                    done = False
-                else:
-                    done = True
-                    self.fi = self.fire_intensity()
-                    self.set_burn_struct(self.tis, self.now)
-                    self.nruns = 0
-
-                    if self.fi <= self.fi_min:
-                        return False
-            else:
-                return False
-
-        return True
-
-    # Equivalent to cpp
     def arrays(self):
         indices = list(range(self.number))
-
         indices.sort(key=lambda i: (1.0 / self.sigma[i], self.fmois[i], self.dendry[i]))
-
         self.key = indices
 
         self.wdry   = [self.wdry[i] for i in self.key]
@@ -158,9 +117,7 @@ class Burnup():
                 self.diam[kj] = diak
                 self.xmat[kj] = self.elam[k - 1][j - 1]
                 self.wo[kj] = wtk * self.xmat[kj]
-        
-        x = 0
-    # Equivalent to cpp
+
     def overlaps(self):
         self.elam = np.zeros((MAXNO, MAXNO))
         self.alone = np.zeros(MAXNO)
@@ -216,11 +173,9 @@ class Burnup():
                 
                 self.alone[k-1] = 1.0 - frac
 
-    # Equivalent to cpp
     def loc(self, k, l):
         return int(k * (k + 1) / 2 + l - 1)
     
-    # Equivalent to cpp
     def duff_burn(self):
         if self.wdf <= 0.0 or self.dfm >= 1.96:
             return
@@ -231,9 +186,7 @@ class Burnup():
 
         self.Smoldering[MAXNO] += ((ff * self.wdf) / (self.tdf))
 
-    # Equivalent to cpp
     def start(self, dt, now):
-        
         rindef = 1e30
 
         for k in range(1, self.number + 1):
@@ -257,14 +210,12 @@ class Burnup():
                 self.tcum[kl] = 0.0
                 self.qcum[kl] = 0.0
 
-
         r = self.r0 + 0.25 * self.dr
         tf = self.TempF(self.fi, r)
         ts = self.tamb
 
         if (tf <= (tpdry + 10.0)):
             return False
-        
 
         thd = (tpdry - ts) / (tf - ts)
         tx = 0.5 * (ts + tpdry)
@@ -278,7 +229,6 @@ class Burnup():
                 self.heat_exchange(dia, tf, tx, conwet)
                 dryt = self.dry_time(self.en, thd)
                 cpwet = self.cheat[k - 1] + self.fmois[k - 1] * ch2o
-                
                 fac = ((0.5 * dia) ** 2) / conwet
                 fac = fac * self.dendry[k - 1] * cpwet
                 dryt = fac * dryt
@@ -308,7 +258,6 @@ class Burnup():
                 if (dt > trt):
                     self.flit[k - 1] += self.xmat[kl]
 
-            x = 0
         nlit = 0
         trt = rindef
 
@@ -322,7 +271,6 @@ class Burnup():
 
         if nlit == 0:
             return False
-        
 
         for k in range(1, self.number + 1):
             for l in range(k + 1):
@@ -331,7 +279,6 @@ class Burnup():
                     self.tdry[kl] -= trt
                 if (self.tign[kl] < rindef):
                     self.tign[kl] -= trt
-
 
         for k in range(1, self.number + 1):
             if self.flit[k - 1] == 0.0:
@@ -358,9 +305,16 @@ class Burnup():
                     wnext = self.wo[kl] * (dnext / dia) ** 2
                     self.wodot[kl] = (self.wo[kl] - wnext) / ddt
                     self.diam[kl] = dnext
+                    self.wo[kl] = wnext
+
                     df = 0.0
                     if (dnext <= 0.0):
                         df = self.xmat[kl]
+                        if (kl == 0):
+                            self.gd_Fudge1 = self.wodot[kl]
+                        else:
+                            self.gd_Fudge2 = self.wodot[kl]
+                        
                         self.wodot[kl] = 0.0
                         self.ddot[kl] = 0.0
                     self.flit[k-1] -= df
@@ -369,13 +323,11 @@ class Burnup():
         self.nruns = 0
         return True
 
-    # equivalent to cpp
     def TIgnite(self, tpdr, tpig, tpfi, cond, chtd, fmof, dend, hbar):
         pinv = 2.125534
         hvap = 2.177e6
         cpm = 4186.0
         conc = 4.27e-4
-
 
         def ff(x, tpfi, tpig):
             a03 = -1.3371565
@@ -385,7 +337,6 @@ class Burnup():
             b03 = a03 * (tpfi - tpig) / (tpfi - self.tamb)
 
             return b03 + x * (a13 + x * (a23 + x))
-
 
         xlo = 0.0
         xhi = 1.0
@@ -412,11 +363,8 @@ class Burnup():
 
         return tmig
 
-    # equivalent to cpp
     def dry_time(self, enu, theta):
-        
         p = 0.47047
-
         xl = 0.0
         xh = 1.0
 
@@ -439,7 +387,6 @@ class Burnup():
 
         return tau
     
-    # equivalent to cpp
     def heat_exchange(self, dia, tf, ts, cond):
         g = 9.8
         vis = 7.5e-5
@@ -463,12 +410,10 @@ class Burnup():
         self.hb = self.hfm + hrad
         self.en = self.hb * dia / cond
 
-    # equivalent to cpp
     def step(self, dt, tin, fid):
         rindef = 1e30
 
         self.nruns += 1
-
         now = self.nruns
         tnow = tin
         tnext = tnow + dt
@@ -507,7 +452,7 @@ class Burnup():
                         r = self.r0 + 0.5 * (1.0 + self.flit[k - 1]) * self.dr
                         gi = self.fi + self.flit[k - 1] * self.fint[k - 1]
                     else:
-                        r = self.r0 + 0.5 * (1.0 * self.flit[l - 1]) * self.dr
+                        r = self.r0 + 0.5 * (1.0 + self.flit[l - 1]) * self.dr
                         gi = self.fi + self.fint[k - 1] + self.flit[l - 1] * self.fint[l - 1]
                     tf = self.TempF(gi, r)
                     dia = self.diam[kl]
@@ -542,7 +487,7 @@ class Burnup():
                             deltim = tnext - tspan - tlit
                         if (tspan + deltim) >= tavg:
                             deltim = tavg - tspan
-                        qdsum += self.qdot[kl][index] * deltim
+                        qdsum += (self.qdot[kl][index] * deltim)
                         tspan += deltim
                         if tspan >= tavg:
                             break
@@ -616,7 +561,6 @@ class Burnup():
                             self.wodot[kl] = (self.wo[kl] - wnext) / ddt
                         else:
                             self.wodot[kl] = 0.0
-                        
                         self.diam[kl] = dnext
                         self.wo[kl] = wnext
 
@@ -662,7 +606,6 @@ class Burnup():
                         delt = tnext - self.tdry[kl]
                         self.qcum[kl] = dqdt * delt
                         self.tcum[kl] = (tf - ts) * delt
-                        tbar = 0.5 * (tpdry + self.tpig[k - 1])
 
                         if tf <= self.tpig[k - 1] + 10:
                             continue
@@ -686,10 +629,23 @@ class Burnup():
                     self.flit[k - 1] += self.xmat[kl]
                 if tnext > self.tout[kl]:
                     self.fout[k - 1] += self.xmat[kl]
-                
+
+    def get_flaming_front_consumption(self):
+        fuel_loadings = []
+
+        for m in range(1, self.number + 1):
+            consumed = (self.fistart * self.ti) / 18608
+            rem = self.wdry[m - 1] - consumed
+            rem = max(rem, 0.0)
+            rem = KiSq_to_Lbsft2(rem)
+            fuel_loadings.append(rem)
+
+        inverse_key = np.argsort(self.key)
+        fuel_loadings = np.array(fuel_loadings)[inverse_key]
+
+        return fuel_loadings
 
     def get_updated_fuel_loading(self):
-
         fuel_loadings = []
 
         for m in range(1, self.number + 1):
@@ -708,21 +664,28 @@ class Burnup():
                 consumed = (self.fistart * self.ti) / 18608
                 rem = self.wdry[m - 1] - consumed
                 rem = max(rem, 0.0)
-                fuel_loadings.append(rem / self.wdry[m - 1])
+                rem = KiSq_to_Lbsft2(rem)
+                fuel_loadings.append(rem)
             else:
-                fuel_loadings.append(rem / self.wdry[m - 1])
+                rem = KiSq_to_Lbsft2(rem)
+                fuel_loadings.append(rem)
 
         inverse_key = np.argsort(self.key)
-
         fuel_loadings = np.array(fuel_loadings)[inverse_key]
 
         return fuel_loadings
 
-    # Equivalent to cpp
     def fire_intensity(self):
         sum = 0
         noduffsum = 0
         wnoduffsum = 0
+
+        if (self.gd_Fudge1 != 0.0):
+            self.wodot[0] = self.gd_Fudge1
+            self.gd_Fudge1 = 0.0
+        if (self.gd_Fudge2 != 0.0):
+            self.wodot[1] = self.gd_Fudge2
+            self.gd_Fudge2 = 0.0
 
         for k in range(1, self.number + 1):
             wdotk = 0
@@ -751,7 +714,7 @@ class Burnup():
             else:
                 test = 0.0
 
-            if test > FintSwitch / ark - FintSwitch:
+            if test > (FintSwitch / ark - FintSwitch):
                 self.Flaming[k - 1] += wnoduff
             else:
                 self.Smoldering[k - 1] += wnoduff
@@ -762,87 +725,12 @@ class Burnup():
 
         return sum
 
-    # Equivalent to cpp
-    def set_burn_struct(self, time, now):
-        
-        wt = [0.0, 0.0]
-
-        if now == 1:
-            wd = 0.0
-            for m in range(1, self.number + 1):
-                wdm = 0.0
-                for n in range(m + 1):
-                    mn = self.loc(m, n)
-                    wdm = wdm + self.wo[mn]
-                wd += wdm
-            self.wd0 = wd
-
-        wd = 0.0
-        for m in range(1, self.number+1):
-            wdm = 0.0
-            for n in range(m + 1):
-                mn = self.loc(m, n)
-                wdm += self.wo[mn]
-            
-            wd += wdm
-        if self.wd0 < 1e-9: # Fuel is nearly exhausted
-            return False
-        
-        wdf = wd / self.wd0
-
-        for i in range(MAXNO):
-            wt[0] += self.Flaming[i]
-            wt[1] += self.Smoldering[i]
-            self.Flaming[i] = self.Smoldering[i] = 0.0
-
-        wt[1] += self.Smoldering[MAXNO]
-
-        if now > self.ntimes:
-            return False
-        
-        self.bs[now - 1].time = time
-        self.bs[now - 1].wdf = wdf
-
-        if (wt[0] + wt[1] > 0.0):
-            self.bs[now - 1].ff = wt[0] / (wt[0] + wt[1])
-        else:
-            self.bs[now - 1].ff = 0.0
-
-        return True
-    
-    # Equivalent to cpp
-    def burn_loop(self):
-        self.step(self.dt, self.tis, self.fid)
-        
-        self.now += 1
-        self.tis += self.dt
-
-        if (self.tis < self.tdf):
-            self.fid = self.dfi
-        else:
-            self.fid = 0
-
-        fi = self.fire_intensity()
-
-        if (fi <= self.fi_min):
-            while (self.tis < self.tdf and self.now < self.ntimes):
-                fi = self.fid
-                self.now += 1
-                self.set_burn_struct(self.tis, self.now)
-                self.tis += self.dt
-
-            return False
-        
-        return self.set_burn_struct(self.tis, self.now)
-
-    # Equivalent to cpp
     def TempF(self, q, r):
         test = 1e3
         err = 1e-4
         aa = 20.0
 
         term = r / (aa * q)
-
         rlast = r
 
         while test >= err:
@@ -856,5 +744,3 @@ class Burnup():
             rlast = rnext
 
         return tempf
-
-

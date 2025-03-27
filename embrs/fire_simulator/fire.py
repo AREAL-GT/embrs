@@ -23,6 +23,7 @@ from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.rothermel import *
 from embrs.utilities.burnup import Burnup
+from embrs.utilities.unit_conversions import *
 
 from typing import Tuple
 
@@ -196,7 +197,6 @@ class FireSim(BaseFireSim):
             return
 
         for cell, loc in self._burning_cells:
-            
             if cell.intersected:
                 cell.burn_idx += 1
 
@@ -216,14 +216,24 @@ class FireSim(BaseFireSim):
                     # remove from burning cells
                     self._burning_cells.remove((cell, loc))
                     
-                else:
-                    cell.dynamic_fuel_load = cell.burn_history[-1]
-                    curr_w_n_dead = np.dot(cell.fuel.f_ij[0:3], cell.dynamic_fuel_load[0:3])
-                    cell._fuel_content = curr_w_n_dead / cell.fuel.w_n_dead_nominal
+                    cell.burn_idx = -1
 
+                else:
+                    # TODO: Find a way to display flaming fuel burning better
+                    # TODO: Can avoid calculating some of these variables every time
+                    cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
+                    initial = np.sum(cell.fuel.w_n[0:3])
+                    current = np.sum(cell.dynamic_fuel_load[0:3])
+                    final = np.sum(cell.burn_history[-1][0:3])
+
+                    consumed_so_far = (initial - current)
+                    total_to_be_consumed = (initial - final)
+
+                    cell._fuel_content = 1 - ((consumed_so_far / total_to_be_consumed))
+                
                 # Add cell to update dictionary
                 self._updated_cells[cell.id] = cell
-
+            
             # Check if conditions have changed
             if self.weather_changed or not cell.has_steady_state: 
                 # Reset the elapsed time counters
@@ -282,15 +292,26 @@ class FireSim(BaseFireSim):
 
         self._iters += 1
 
+    def generate_burn_history_entry(self, cell, fuel_loads):
+        # TODO: this assumes that any live fuel will be totally consumed
+        # TODO: verify this assumption
+
+        entry = [0] * len(cell.fuel.w_0)
+        j = 0
+        for i in range(len(cell.fuel.w_0)):
+            if i in cell.fuel.rel_indices:
+                entry[i] = fuel_loads[j]
+                j += 1
+
+        return entry
+
     def compute_burn_histories(self, new_ignitions):
-        
         # TODO: This assumes weather will be static across burn history
         curr_weather = self._weather_stream.stream[self._curr_weather_idx]
-    
+
         wind_speed = curr_weather.wind_speed
-        t_amb = (curr_weather.temp - 32) * (5/9)
-        r_0 = 1.8
-        dr = 0.4
+    
+        t_ambF = curr_weather.temp
 
         dt = self._time_step
 
@@ -298,14 +319,18 @@ class FireSim(BaseFireSim):
             # Reset cell burn history
             cell.burn_history = []
 
-            # Get cell duff loading
+            # Get cell duff loading (tons/acre)
             wdf = cell.wdf
 
-            f_i = cell.reaction_intensity * 0.0031524811 # kW/m2 # TODO: double check this conversion
+            f_i = cell.reaction_intensity  # BTU/ft2 - min
 
-            u = 0#wind_speed * cell.wind_adj_factor # TODO: test if adjusting wind to fuel bed level works better, may just need to set to 0 like in FARSITE
-            depth = cell.fuel.fuel_depth_ft * 0.3048
+            # TODO: should we add wind speed to the burnup model?
+            u = 0   #wind_speed * cell.wind_adj_factor
+            
+            # Get fuel bed depth
+            depth = cell.fuel.fuel_depth_ft
 
+            # Calculate duff moisture content
             if 2 in cell.fuel.rel_indices:
                 mx = cell.fmois[2]
             elif 1 in cell.fuel.rel_indices:
@@ -317,35 +342,53 @@ class FireSim(BaseFireSim):
             dfm = max(dfm, 0.10)
 
             burn_mgr = Burnup(cell)
-            burn_mgr.set_fire_data(5000, f_i, cell.t_r, u, depth, t_amb, r_0, dr, dt, wdf, dfm)
+            burn_mgr.set_fire_data(3000, f_i, cell.t_r, u, depth, t_ambF, dt, wdf, dfm)
 
-            if burn_mgr.start_loop():
-                cont = True
-                i = 0
-                while cont:
-                    cont = burn_mgr.burn_loop()
-                    remaining_fracs = burn_mgr.get_updated_fuel_loading()
-                    
-                    entry = [0] * len(cell.fuel.w_0)
-                    j = 0
-                    for i in range(len(cell.fuel.w_0)):
-                        if i in cell.fuel.rel_indices:
-                            entry[i] = remaining_fracs[j] * cell.fuel.w_n[i]
-                            j += 1
+            burn_mgr.arrays()
+            now = 1
+            d_time = burn_mgr.ti
+            burn_mgr.duff_burn()
 
-                    cell.burn_history.append(entry)
+            if not (burn_mgr.start(d_time, now)):
+                # Burnup does not predict ignition
+                # Set to amount consumed in flaming front
+                # This is how farsite does it
+                fuel_loads = burn_mgr.get_flaming_front_consumption()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
+                cell.burn_history = [entry]
 
-            else:
-                remaining_fracs = burn_mgr.get_updated_fuel_loading()
+                continue
 
-                entry = [0] * len(cell.fuel.w_0)
-                j = 0
-                for i in range(len(cell.fuel.w_0)):
-                    if i in cell.fuel.rel_indices:
-                        entry[i] = remaining_fracs[j] * cell.fuel.w_n[i]
-                        j += 1
+            burn_mgr.fi = burn_mgr.fire_intensity()
 
+            if d_time > burn_mgr.tdf:
+                burn_mgr.dfi = 0
+
+            while now <= burn_mgr.ntimes:
+                burn_mgr.step(burn_mgr.dt, d_time, burn_mgr.dfi)
+                now += 1
+
+                d_time += burn_mgr.dt
+                if d_time > burn_mgr.tdf:
+                    burn_mgr.dfi = 0
+
+                burn_mgr.fi = burn_mgr.fire_intensity()
+                
+                if burn_mgr.fi <= burn_mgr.fi_min:
+                    break
+
+                fuel_loads = burn_mgr.get_updated_fuel_loading()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
                 cell.burn_history.append(entry)
+
+            if len(cell.burn_history) == 0:
+                # Intensity was not high enough to ignite
+                # Set to amount consumed in flaming front
+                # This is how farsite does it
+                fuel_loads = burn_mgr.get_flaming_front_consumption()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
+                cell.burn_history = [entry]
+
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
         """Attempts to ignite neighboring cells based on fire spread conditions.

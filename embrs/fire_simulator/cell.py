@@ -121,7 +121,7 @@ class Cell:
 
         self.canopy_bulk_density = 0
 
-        # Duff loading (kg/m2)
+        # Duff loading (tons/acre)
         self.wdf = wdf
 
         # Wind adjustment factor based on sheltering condition
@@ -194,7 +194,7 @@ class Cell:
         
         indices = self._fuel.rel_indices
 
-        self.wdry = self._fuel.w_0[indices]
+        self.wdry = self._fuel.w_n[indices]
         self.sigma = self._fuel.s[indices]
 
         self.dfms = []

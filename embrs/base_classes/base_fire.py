@@ -12,6 +12,7 @@ from shapely.geometry import Point
 import numpy as np
 from tqdm import tqdm
 import pickle
+import os
 
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
@@ -72,7 +73,8 @@ class BaseFireSim:
         live_w_mf = self._weather_stream.live_w_mf
 
         # Load Duff loading lookup table from LANDFIRE FCCS
-        with open("embrs/utilities/duff_loading.pkl", "rb") as file:
+        # TODO: make this path relative so it can be used on any machine
+        with open(f"/Users/rui/Documents/Research/Code/embrs/embrs/utilities/duff_loading.pkl", "rb") as file:
             duff_lookup = pickle.load(file)
 
         # Populate cell_grid with cells
@@ -117,7 +119,6 @@ class BaseFireSim:
                 fccs_id = int(self._fccs_map[data_row, data_col])
                 if duff_lookup.get(fccs_id) is not None:
                     wdf = duff_lookup[fccs_id] # tons/acre
-                    wdf /= 4.46 # convert to kg/m2
 
                 # Get data for cell
                 new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, wdf, self._init_mf, live_h_mf, live_w_mf)

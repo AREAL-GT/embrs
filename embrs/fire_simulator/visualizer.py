@@ -127,7 +127,7 @@ class Visualizer:
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
             if len(alpha_arr) > 0:
                 alpha_arr = [float(i)/sum(alpha_arr) for i in alpha_arr]
-                fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["gist_heat"])
+                fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["hot"])
 
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
@@ -405,7 +405,7 @@ class Visualizer:
 
         fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
         if len(alpha_arr) > 0:
-            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["Wistia"])
+            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["hot"])
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
