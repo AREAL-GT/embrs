@@ -177,6 +177,7 @@ class FireSim(BaseFireSim):
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
+                # TODO: should this be setting real time values too?
                 calc_propagation_in_cell(cell)
                 
                 self._updated_cells[cell.id] = cell
@@ -197,7 +198,7 @@ class FireSim(BaseFireSim):
             return
 
         for cell, loc in self._burning_cells:
-            if cell.intersected:
+            if cell.fully_burning:
                 cell.burn_idx += 1
 
                 if cell.burn_idx == len(cell.burn_history):
@@ -261,15 +262,17 @@ class FireSim(BaseFireSim):
 
             # Update extent of fire spread along each direction
             cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
-            
+            # cell.fire_spread = cell.fire_spread.clip(max=cell.distances) # TODO: is there a way to prevent distances that are done from being computed?
+
+            intersections = np.where(cell.fire_spread > cell.distances)[0]
+
             # TODO: Check if fireline intensity along any direction is high to initiate crown fire
 
             # Check where fire spread has reached edge of cell
-            intersections = np.where(cell.fire_spread > cell.distances)[0]
 
-            if len(intersections) >= int(np.ceil(len(cell.distances)/2)) and not cell.intersected:
+            if len(intersections) >= int(len(cell.distances)) and not cell.fully_burning:
                 # First intersection, start ignition clock
-                cell.intersected = True
+                cell.fully_burning = True
 
             for idx in intersections:
                 # Check if ignition signal should be sent to each intersecting neighbor

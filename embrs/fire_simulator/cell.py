@@ -129,7 +129,7 @@ class Cell:
 
         # Variables to keep track of burning fuel content
         self._fuel_content = 1
-        self.intersected = False
+        self.fully_burning = False
 
         self.init_dead_mf = init_dead_mf
         self.init_live_h_mf = live_h_mf
@@ -138,7 +138,7 @@ class Cell:
         self.reaction_intensity = 0
 
         if self.fuel.burnable:
-            self.t_r = (384 / self.fuel.sav_ratio) * 60 # seconds
+            self.t_r = (384 / self.fuel.sav_ratio) * 60 # flame residence in seconds
             self.set_arrays()
 
         else:
