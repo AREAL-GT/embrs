@@ -199,6 +199,7 @@ class FireSim(BaseFireSim):
 
         for cell, loc in self._burning_cells:
             if cell.fully_burning:
+                # TODO: make these cells a different color to represent smoldering
                 cell.burn_idx += 1
 
                 if cell.burn_idx == len(cell.burn_history):
@@ -231,10 +232,12 @@ class FireSim(BaseFireSim):
                     total_to_be_consumed = (initial - final)
 
                     cell._fuel_content = 1 - ((consumed_so_far / total_to_be_consumed))
-                
                 # Add cell to update dictionary
                 self._updated_cells[cell.id] = cell
-            
+
+                # No need to compute spread for these cells
+                continue
+
             # Check if conditions have changed
             if self.weather_changed or not cell.has_steady_state: 
                 # Reset the elapsed time counters
@@ -262,16 +265,15 @@ class FireSim(BaseFireSim):
 
             # Update extent of fire spread along each direction
             cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
-            # cell.fire_spread = cell.fire_spread.clip(max=cell.distances) # TODO: is there a way to prevent distances that are done from being computed?
+            # TODO: is there a way to prevent distances that are done from being computed?
 
             intersections = np.where(cell.fire_spread > cell.distances)[0]
 
             # TODO: Check if fireline intensity along any direction is high to initiate crown fire
 
             # Check where fire spread has reached edge of cell
-
             if len(intersections) >= int(len(cell.distances)) and not cell.fully_burning:
-                # First intersection, start ignition clock
+                # Set cell to fully burning when all edges reached
                 cell.fully_burning = True
 
             for idx in intersections:
@@ -289,6 +291,10 @@ class FireSim(BaseFireSim):
             if neighbors_to_rem:
                 for n_id in neighbors_to_rem:
                     del cell.burnable_neighbors[n_id]
+
+            if len(cell.burnable_neighbors) == 0:
+                # Set cell to fully burning when no burnable neighbors remain
+                cell.fully_burning = True
 
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
@@ -445,9 +451,11 @@ class FireSim(BaseFireSim):
                     # Make ignition calculation
                     neighbor._update_weather(self._curr_weather_idx, self._weather_stream)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma)
-                    
+                    r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois)
+
                     # Check that ignition ros meets threshold
                     if r_ign > 1e-3: # TODO: Think about using mass-loss calculation to do this or set R_min another way
+                        r_ign = max(r_ign, r_0 + 0.1) # TODO: I think r_0 is our threshold
                         self._new_ignitions.append((neighbor, n_loc))
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
@@ -589,10 +597,6 @@ class FireSim(BaseFireSim):
         self._curr_time_s = self.time_step * self._iters
         self.progress_bar.update()
 
-        self.w_vals = []
-        self.fuels_at_ignition = []
-        self.ignition_clocks = []
-        self.fully_burning_cells = []
 
         if self._curr_time_s >= self._sim_duration or (self._iters != 0 and len(self._burning_cells) == 0):
             self.progress_bar.close()
