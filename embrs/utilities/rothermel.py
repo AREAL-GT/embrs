@@ -362,7 +362,7 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
     phi_e = calc_effective_wind_factor(R_h, R_0)
 
 
-    u_e = (((phi_e * fuel.rel_packing_ratio**E)/C) ** (1/B))
+    u_e = ((phi_e * fuel.rel_packing_ratio**E)/C) ** (-B)
 
     return u_e
 
