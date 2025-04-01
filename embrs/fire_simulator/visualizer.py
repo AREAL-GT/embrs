@@ -127,7 +127,7 @@ class Visualizer:
 
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
             if len(alpha_arr) > 0:
-                norm = mcolors.LogNorm(vmin=max(alpha_arr.min(), 1e-3), vmax=alpha_arr.max())
+                norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
                 fire_coll.set_array(alpha_arr)
                 fire_coll.set_cmap(mpl.colormaps["inferno"])
                 fire_coll.set_norm(norm)
