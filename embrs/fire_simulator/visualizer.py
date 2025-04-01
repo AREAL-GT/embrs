@@ -110,7 +110,7 @@ class Visualizer:
                         polygon.set(color = color)
                         tree_patches.append(polygon)
 
-                    elif curr_cell.state == CellStates.FIRE:
+                    elif curr_cell.state == CellStates.FIRE and not curr_cell.fully_burning:
                         fire_patches.append(polygon)
                         max_intensity = np.max(curr_cell.I_ss)
                         alpha_arr.append(max_intensity)
@@ -129,7 +129,7 @@ class Visualizer:
             if len(alpha_arr) > 0:
                 norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
                 fire_coll.set_array(alpha_arr)
-                fire_coll.set_cmap(mpl.colormaps["inferno"])
+                fire_coll.set_cmap(mpl.colormaps["gist_heat"])
                 fire_coll.set_norm(norm)
 
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
@@ -374,10 +374,11 @@ class Visualizer:
                                               radius=sim.cell_size, orientation=0)
 
             if c.state == CellStates.FUEL:
-                color = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel.model_num])))
-                # Scale color based on cell's fuel content
-                color = color * c.fuel_content
-                polygon.set_facecolor(color)
+                rgba = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel.model_num])))
+                k = c.fuel.w_n_dead / c.fuel.w_n_dead_nominal
+                rgba[:3] *= k  # Only darken the RGB, leave alpha untouched
+
+                polygon.set_facecolor(rgba)
                 tree_patches.append(polygon)
 
                 # TODO: fix this to look at 1 hr moisture or some composite measure
@@ -388,7 +389,7 @@ class Visualizer:
                 #     c_val = np.min([1, c_val])
                 #     c_vals.append(c_val)
 
-            elif c.state == CellStates.FIRE:
+            elif c.state == CellStates.FIRE and not c.fully_burning:
                 fire_patches.append(polygon)
                 max_intensity = np.max(c.I_ss)
                 alpha_arr.append(max_intensity)
@@ -411,7 +412,7 @@ class Visualizer:
         if len(alpha_arr) > 0:
             norm = mcolors.LogNorm(vmin=max(alpha_arr.min(), 1e-3), vmax=alpha_arr.max())
             fire_coll.set_array(alpha_arr)
-            fire_coll.set_cmap(mpl.colormaps["inferno"])
+            fire_coll.set_cmap(mpl.colormaps["gist_heat"])
             fire_coll.set_norm(norm)
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')

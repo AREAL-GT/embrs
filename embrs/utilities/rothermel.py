@@ -19,7 +19,10 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
 
-    wind_speed_ft_min = 196.85 * wind_speed_m_s * cell.wind_adj_factor
+
+    wind_speed_ft_min = m_s_to_ft_min(wind_speed_m_s)
+
+    wind_speed_ft_min *= cell.wind_adj_factor
 
     slope_angle_deg = cell.slope_deg
     slope_dir_deg = cell.aspect
@@ -39,9 +42,15 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
 
     rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
     spread_directions = np.deg2rad(cell.directions)
+    slope_angle = np.deg2rad(slope_angle_deg)
 
-    R_h, R_0, I_r, alpha = calc_r_h(cell, wind_speed_ft_min, slope_angle_deg, rel_wind_dir)
-    R_0 = max(R_0, 1e-7)
+    R_h, R_0, I_r, alpha = calc_r_h(cell, wind_speed_ft_min, slope_angle, rel_wind_dir)
+
+    if R_h < R_0 or R_0 == 0:
+        I_list = [0] * len(spread_directions)
+        r_list = [0] * len(spread_directions)
+
+        return np.array(r_list), np.array(I_list)
 
     cell.reaction_intensity = I_r
 
@@ -408,6 +417,10 @@ def calc_r_h(cell: Cell, wind_speed: float,
     m_f = cell.fmois
     if R_0 is None or I_r is None:
         R_0, I_r = calc_r_0(fuel, m_f)
+    
+    if R_0 == 0:
+        # No spread in this cell
+        return 0, 0, 0, 0
 
     phi_w = calc_wind_factor(fuel, wind_speed)
     phi_s = calc_slope_factor(fuel, slope_angle)

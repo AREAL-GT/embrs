@@ -56,6 +56,19 @@ def ft_min_to_m_s(f_ft_min: float) -> float:
 
     return f
 
+def m_s_to_ft_min(m_s: float) -> float:
+    """_summary_
+
+    Args:
+        m_s (float): _description_
+
+    Returns:
+        float: _description_
+    """
+    g = 1 / ft_min_to_m_s(1)
+    f = m_s * g
+    return f
+
 def Lbsft2_to_KiSq(f_libsft2: float) -> float:
     """Converts from lbs/ft^2 to kW/m^2
 

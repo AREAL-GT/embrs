@@ -106,7 +106,7 @@ class FireSim(BaseFireSim):
         print("Simulation Initializing...")
 
         # Fuel fraction to be considered BURNT
-        self.burnout_thresh = 0.1
+        self.burnout_thresh = 0.01
 
         # Variable to store logger object
         self.logger = None
@@ -199,7 +199,7 @@ class FireSim(BaseFireSim):
 
         for cell, loc in self._burning_cells:
             if cell.fully_burning:
-                # TODO: make these cells a different color to represent smoldering
+                # TODO: Need to figure out how we want to visualize this state
                 cell.burn_idx += 1
 
                 if cell.burn_idx == len(cell.burn_history):
@@ -221,17 +221,9 @@ class FireSim(BaseFireSim):
                     cell.burn_idx = -1
 
                 else:
-                    # TODO: Find a way to display flaming fuel burning better
-                    # TODO: Can avoid calculating some of these variables every time
+                    # TODO: If a fire intesects a cell in this state we need to set fuel load to this value for burn
                     cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
-                    initial = np.sum(cell.fuel.w_n[0:3])
-                    current = np.sum(cell.dynamic_fuel_load[0:3])
-                    final = np.sum(cell.burn_history[-1][0:3])
-
-                    consumed_so_far = (initial - current)
-                    total_to_be_consumed = (initial - final)
-
-                    cell._fuel_content = 1 - ((consumed_so_far / total_to_be_consumed))
+                    
                 # Add cell to update dictionary
                 self._updated_cells[cell.id] = cell
 
@@ -262,6 +254,8 @@ class FireSim(BaseFireSim):
 
             # Set real time ROS and fireline intensity (vals stored in cell.r_t, cell.I_t)
             cell.set_real_time_vals()
+            if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
+                cell.fully_burning = True
 
             # Update extent of fire spread along each direction
             cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
@@ -272,11 +266,13 @@ class FireSim(BaseFireSim):
             # TODO: Check if fireline intensity along any direction is high to initiate crown fire
 
             # Check where fire spread has reached edge of cell
-            if len(intersections) >= int(len(cell.distances)) and not cell.fully_burning:
+            if len(intersections) >= int(len(cell.distances)):
                 # Set cell to fully burning when all edges reached
                 cell.fully_burning = True
 
             for idx in intersections:
+                neighbor = self.get_neighbor_from_end_point(cell, cell.end_pts[idx][0])
+
                 # Check if ignition signal should be sent to each intersecting neighbor
                 self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
 
@@ -298,6 +294,8 @@ class FireSim(BaseFireSim):
 
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
+
+            self.updated_cells[cell.id] = cell
 
         self._iters += 1
 
@@ -398,7 +396,6 @@ class FireSim(BaseFireSim):
                 entry = self.generate_burn_history_entry(cell, fuel_loads)
                 cell.burn_history = [entry]
 
-
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
         """Attempts to ignite neighboring cells based on fire spread conditions.
 
@@ -454,7 +451,7 @@ class FireSim(BaseFireSim):
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois)
 
                     # Check that ignition ros meets threshold
-                    if r_ign > 1e-3: # TODO: Think about using mass-loss calculation to do this or set R_min another way
+                    if r_0 > 0 and r_ign > 1e-3: # TODO: Think about using mass-loss calculation to do this or set R_min another way
                         r_ign = max(r_ign, r_0 + 0.1) # TODO: I think r_0 is our threshold
                         self._new_ignitions.append((neighbor, n_loc))
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
