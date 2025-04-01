@@ -112,7 +112,8 @@ class Visualizer:
 
                     elif curr_cell.state == CellStates.FIRE:
                         fire_patches.append(polygon)
-                        alpha_arr.append(curr_cell.fuel_content)
+                        max_intensity = np.max(curr_cell.I_ss)
+                        alpha_arr.append(max_intensity)
 
                     else:
                         burnt_patches.append(polygon)
@@ -126,8 +127,10 @@ class Visualizer:
 
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
             if len(alpha_arr) > 0:
-                alpha_arr = [float(i)/sum(alpha_arr) for i in alpha_arr]
-                fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["hot"])
+                norm = mcolors.LogNorm(vmin=max(alpha_arr.min(), 1e-3), vmax=alpha_arr.max())
+                fire_coll.set_array(alpha_arr)
+                fire_coll.set_cmap(mpl.colormaps["inferno"])
+                fire_coll.set_norm(norm)
 
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
@@ -387,7 +390,8 @@ class Visualizer:
 
             elif c.state == CellStates.FIRE:
                 fire_patches.append(polygon)
-                alpha_arr.append(c.fuel_content)
+                max_intensity = np.max(c.I_ss)
+                alpha_arr.append(max_intensity)
 
             else:
                 burnt_patches.append(polygon)
@@ -405,7 +409,10 @@ class Visualizer:
 
         fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
         if len(alpha_arr) > 0:
-            fire_coll.set(array=alpha_arr, cmap=mpl.colormaps["hot"])
+            norm = mcolors.LogNorm(vmin=max(alpha_arr.min(), 1e-3), vmax=alpha_arr.max())
+            fire_coll.set_array(alpha_arr)
+            fire_coll.set_cmap(mpl.colormaps["inferno"])
+            fire_coll.set_norm(norm)
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
