@@ -138,12 +138,7 @@ class Cell:
         self.reaction_intensity = 0
 
         if self.fuel.burnable:
-            self.t_r = (384 / self.fuel.sav_ratio) * 60 # flame residence in seconds
             self.set_arrays()
-
-        else:
-            self.t_r = 0
-
         # Fuel loading for each class over time starting from end of flame residence time
         self.burn_history = []
 

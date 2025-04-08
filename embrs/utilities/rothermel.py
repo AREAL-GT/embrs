@@ -66,7 +66,6 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         r_gamma, I_gamma = calc_r_and_i_along_dir(cell, decomp_dir, R_h, I_r, alpha, e)
 
         r_gamma = ft_min_to_m_s(r_gamma) # convert to m/s
-        I_gamma = BTU_ft_min_to_kW_m(I_gamma) # convert to kW/m
 
         r_list.append(r_gamma)
         I_list.append(I_gamma)

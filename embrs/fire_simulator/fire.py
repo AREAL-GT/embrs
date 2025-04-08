@@ -177,9 +177,12 @@ class FireSim(BaseFireSim):
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
-                # TODO: should this be setting real time values too?
-                calc_propagation_in_cell(cell)
-                
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                cell.r_ss = r_list
+                cell.I_ss = I_list
+                cell.has_steady_state = True
+                cell.set_real_time_vals()
+
                 self._updated_cells[cell.id] = cell
         
         # Update wind if necessary
@@ -245,7 +248,7 @@ class FireSim(BaseFireSim):
                     cell.r_prev_list = np.zeros(len(cell.directions))
 
                 # Get steady state ROS (m/s) and I(kW/m), along each of cell's directions
-                r_list, I_list = calc_propagation_in_cell(cell) 
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
 
                 # Store steady-state values
                 cell.r_ss = r_list
@@ -329,7 +332,7 @@ class FireSim(BaseFireSim):
             # Get cell duff loading (tons/acre)
             wdf = cell.wdf
 
-            f_i = cell.reaction_intensity  # BTU/ft2 - min
+            I_r = cell.reaction_intensity  # BTU/ft2/min
 
             # TODO: should we add wind speed to the burnup model?
             u = 0   #wind_speed * cell.wind_adj_factor
@@ -348,8 +351,18 @@ class FireSim(BaseFireSim):
             dfm = -0.347 + 6.42 * mx
             dfm = max(dfm, 0.10)
 
+            # Calculate Residence time using FARSITE equation
+            fli = np.max(cell.I_ss) # BTU/ft/min
+            ros = m_s_to_ft_min(np.max(cell.r_ss)) #ft/min
+            
+            t_r = (fli*60) / (ros * I_r) # residence time in seconds
+            
+            # Clip to allowable values in FOFEM
+            t_r = np.min([t_r, 120])
+            t_r = np.max([t_r, 10])
+
             burn_mgr = Burnup(cell)
-            burn_mgr.set_fire_data(3000, f_i, cell.t_r, u, depth, t_ambF, dt, wdf, dfm)
+            burn_mgr.set_fire_data(3000, I_r, t_r, u, depth, t_ambF, dt, wdf, dfm)
 
             burn_mgr.arrays()
             now = 1
@@ -447,16 +460,15 @@ class FireSim(BaseFireSim):
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
                     neighbor._update_weather(self._curr_weather_idx, self._weather_stream)
-                    r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma)
-                    r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois)
+                    r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
+                    r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 
-                    # Check that ignition ros meets threshold
-                    if r_0 > 0 and r_ign > 1e-3: # TODO: Think about using mass-loss calculation to do this or set R_min another way
-                        r_ign = max(r_ign, r_0 + 0.1) # TODO: I think r_0 is our threshold
+                    # Check that ignition ros is greater than no wind no slope ros
+                    if 0 < r_0 < r_ign:
                         self._new_ignitions.append((neighbor, n_loc))
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
-                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # TODO: does it make sense to use r_ign for r_h here 
+                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
                         
                         self._updated_cells[neighbor.id] = neighbor
 
@@ -498,8 +510,11 @@ class FireSim(BaseFireSim):
         m_f = get_working_m_f(cell.fuel, cell.fmois)
         neighbor_m_f = get_working_m_f(neighbor.fuel, neighbor.fmois)
 
+        # Get the rate of spread in ft/s
+        r_ft_s = m_s_to_ft_min(r_gamma)
+
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_gamma * calc_heat_sink(cell.fuel, m_f) # TODO: make sure this computation is valid (I think it is)
+        heat_source = r_ft_s * calc_heat_sink(cell.fuel, m_f) # TODO: make sure this computation is valid (I think it is)
 
         # Get the heat sink using the neighbors fuel and moisture content
         heat_sink = calc_heat_sink(neighbor.fuel, neighbor_m_f)
