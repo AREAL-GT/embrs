@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pyproj import Transformer
 from timezonefinder import TimezoneFinder
 
+from embrs.utilities.fuel_models import Fuel
+
 # TODO: Add comments/docstrings for dataclasses
 
 @dataclass
@@ -150,3 +152,18 @@ class WindNinjaTask:
     wind_height_units: str
     input_speed_units: str
     temperature_units: str
+
+@dataclass
+class CellData:
+    fuel_type: Optional[Fuel] = None
+    elevation: Optional[float] = None
+    aspect: Optional[float] = None
+    slope_deg: Optional[float] = None
+    canopy_cover:Optional[float] = None
+    canopy_height: Optional[float] = None
+    canopy_base_height: Optional[float] = None
+    canopy_bulk_density: Optional[float] = None
+    wdf: Optional[float] = None
+    init_dead_mf: Optional[float] = 0.08
+    live_h_mf: Optional[float] = 0.3
+    live_w_mf: Optional[float] = 0.3

@@ -271,7 +271,7 @@ def update_moisture(cell, curr_weather, ref_elev):
     bp0 = 0.0218
     update_interval_hr = 1
 
-    elev_diff = ref_elev - cell.z 
+    elev_diff = ref_elev - cell.elevation_m 
     elev_diff *= 3.2808 # convert to ft
 
     t_f_celsius, h_f_frac = site_specific(elev_diff, curr_weather.temp, curr_weather.rel_humidity)

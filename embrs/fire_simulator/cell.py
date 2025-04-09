@@ -14,6 +14,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from embrs.utilities.fire_util import CellStates
+from embrs.utilities.data_classes import CellData
 from embrs.utilities.fuel_models import Fuel, Anderson13
 from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
 from embrs.utilities.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
@@ -45,41 +46,15 @@ class Cell:
         curr_wind (tuple): Current wind conditions (speed, direction).
     """
 
-    def __init__(self, id: int, col: int, row: int, cell_size: float): #, fuel_type: Fuel, z = 0.0, aspect = 0.0, slope_deg = 0.0, canopy_cover = 0.0, canopy_height = 0.0, init_dead_mf = 0.08, live_h_mf=0.3, live_w_mf=0.3):
-        """Initializes a simulation cell with terrain, fire properties, and fuel characteristics.
+    def __init__(self, id: int, col: int, row: int, cell_size: float):
+        """_summary_
 
-            The cell is positioned within a **point-up hexagonal grid** and stores relevant 
-            environmental data for fire propagation modeling.
-
-            Args:
-                id (int): Unique identifier for the cell.
-                col (int): Column index within the simulation grid.
-                row (int): Row index within the simulation grid.
-                cell_size (float): Edge length of the hexagonal cell (meters).
-                z (float, optional): Elevation of the cell (meters). Defaults to 0.0.
-                aspect (float, optional): Upslope direction in degrees (0° = North). Defaults to 0.0.
-                slope_deg (float, optional): Terrain slope angle in degrees. Defaults to 0.0.
-                fuel_type (Fuel, optional): Fuel classification based on the 13 Anderson FBFMs. Defaults to `Fuel(1)`.
-
-            Attributes Initialized:
-                - `_col`, `_row`: Stores the grid position.
-                - `_z`: Elevation of the cell.
-                - `aspect`, `slope_deg`: Terrain properties.
-                - `_cell_size`: Edge length of the hexagonal cell.
-                - `_cell_area`: Computed area of the hexagonal cell.
-                - `_x_pos`, `_y_pos`: Computed global coordinates.
-                - `_fuel`: Assigned fuel model.
-                - `_state`: Set to `CellStates.FUEL` if burnable, otherwise `CellStates.BURNT`.
-                - `_neighbors`, `_burnable_neighbors`: Dictionaries for tracking adjacency.
-                - `polygon`: Shapely polygon representation of the hexagonal cell.
-                - `distances`, `directions`, `end_pts`: Fire spread direction variables.
-                - `r_t`, `fire_spread`, `r_prev_list`, `t_elapsed_min`: Fire dynamics variables.
-                - `r_ss`, `I_ss`: Steady-state rate of spread and fireline intensity.
-                - `has_steady_state`: Tracks whether steady-state ROS has been reached.
-                - `wind_forecast`, `curr_wind`: Wind condition storage.
-                - `a_a`: Fire acceleration constant (default `0.115`).
-
-            """
+        Args:
+            id (int): _description_
+            col (int): _description_
+            row (int): _description_
+            cell_size (float): _description_
+        """
         self.id = id
 
         # Set cell indices
@@ -98,31 +73,31 @@ class Cell:
         self._cell_area = self.calc_cell_area()
 
 
-    def _set_cell_data(self, fuel_type: Fuel, z: float, aspect: float, slope_deg: float, canopy_cover: float, canopy_height: float, wdf: float, init_dead_mf = 0.08, live_h_mf = 0.3, live_w_mf = 0.3):
+    def _set_cell_data(self, cell_data: CellData):
         # Set Fuel type
-        self._fuel = fuel_type
+        self._fuel = cell_data.fuel_type
         
         # z is the elevation of cell in m
-        self._z = z
+        self._elevation_m = cell_data.elevation
 
         # Upslope direction in degrees - 0 degrees = North
-        self.aspect = aspect
+        self.aspect = cell_data.aspect
 
         # Slope angle in degrees
-        self.slope_deg = slope_deg
+        self.slope_deg = cell_data.slope_deg
 
         # Canopy cover as a percentage
-        self.canopy_cover = canopy_cover
+        self.canopy_cover = cell_data.canopy_cover
 
         # Canopy height as 10 * m
-        self.canopy_height = canopy_height
+        self.canopy_height = cell_data.canopy_height
 
-        self.canopy_base_height = 0
+        self.canopy_base_height = cell_data.canopy_base_height
 
-        self.canopy_bulk_density = 0
+        self.canopy_bulk_density = cell_data.canopy_bulk_density
 
         # Duff loading (tons/acre)
-        self.wdf = wdf
+        self.wdf = cell_data.wdf
 
         # Wind adjustment factor based on sheltering condition
         self._set_wind_adj_factor()
@@ -131,14 +106,15 @@ class Cell:
         self._fuel_content = 1
         self.fully_burning = False
 
-        self.init_dead_mf = init_dead_mf
-        self.init_live_h_mf = live_h_mf
-        self.init_live_w_mf = live_w_mf
+        self.init_dead_mf = cell_data.init_dead_mf
+        self.init_live_h_mf = cell_data.live_h_mf
+        self.init_live_w_mf = cell_data.live_w_mf
 
         self.reaction_intensity = 0
 
         if self.fuel.burnable:
             self.set_arrays()
+
         # Fuel loading for each class over time starting from end of flame residence time
         self.burn_history = []
 
@@ -338,9 +314,9 @@ class Cell:
             elevation (float): Elevation of the terrain at the cell location, in meters.
 
         Side Effects:
-            - Updates the `_z` attribute with the new elevation value.
+            - Updates the `elevation_m` attribute with the new elevation value.
         """
-        self._z = elevation
+        self.elevation_m = elevation
 
     def _set_slope(self, slope: float):
         """Sets the slope of the cell.
@@ -496,7 +472,7 @@ class Cell:
         Returns:
             str: A formatted string representing the cell.
         """
-        return (f"(id: {self.id}, {self.x_pos}, {self.y_pos}, {self.z}, "
+        return (f"(id: {self.id}, {self.x_pos}, {self.y_pos}, {self.elevation_m}, "
                 f"type: {self.fuel.name}, "
                 f"state: {self.state}")
 
@@ -639,10 +615,10 @@ class Cell:
         return self._y_pos
 
     @property
-    def z(self) -> float:
+    def elevation_m(self) -> float:
         """Elevation of the cell measured in meters
         """
-        return self._z
+        return self._elevation_m
 
     @property
     def fuel(self) -> Fuel:

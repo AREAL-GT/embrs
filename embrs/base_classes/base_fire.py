@@ -17,7 +17,7 @@ import os
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import HexGridMath as hex
-from embrs.utilities.data_classes import SimParams
+from embrs.utilities.data_classes import SimParams, CellData
 from embrs.fire_simulator.cell import Cell
 from embrs.utilities.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
@@ -83,6 +83,15 @@ class BaseFireSim:
             for j in range(self._shape[0]):
                 # Initialize cell object
                 new_cell = Cell(id, i, j, self._cell_size)
+
+                # Initialize cell data class
+                cell_data = CellData()
+
+                # Set initial moisture values
+                cell_data.init_dead_mf = self._init_mf
+                cell_data.live_h_mf = live_h_mf
+                cell_data.live_w_mf = live_w_mf
+
                 cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
                 # Get row and col of data arrays corresponding to cell
@@ -92,36 +101,38 @@ class BaseFireSim:
                 # Get fuel type
                 fuel_key = self._fuel_map[data_row, data_col]
                 fuel = Anderson13(fuel_key)
+                cell_data.fuel_type = fuel
 
                 # Get cell elevation from elevation map
-                elev = self._elevation_map[data_row, data_col]
-                self.coarse_elevation[j, i] = elev
+                cell_data.elevation = self._elevation_map[data_row, data_col]
+                self.coarse_elevation[j, i] = cell_data.elevation
 
                 # Get cell aspect from aspect map
-                asp = self._aspect_map[data_row, data_col]
+                cell_data.aspect = self._aspect_map[data_row, data_col]
 
                 # Get cell slope from slope map
-                slp = self._slope_map[data_row, data_col]
+                cell_data.slope_deg = self._slope_map[data_row, data_col]
 
                 # Get canopy cover from canopy cover map
-                cc = self._cc_map[data_row, data_col]
+                cell_data.canopy_cover = self._cc_map[data_row, data_col]
 
                 # Get canopy height from canopy height map
-                ch = self._ch_map[data_row, data_col]
+                cell_data.canopy_height = self._ch_map[data_row, data_col]
 
                 # Get canopy base height from cbh map
-                cbh = self._cbh_map[data_row, data_col]
+                cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
 
                 # Get canopy bulk density from cbd map
-                cbd = self._cbd_map[data_row, data_col]
+                cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
 
                 # Get duff fuel loading from fccs map
                 fccs_id = int(self._fccs_map[data_row, data_col])
                 if duff_lookup.get(fccs_id) is not None:
-                    wdf = duff_lookup[fccs_id] # tons/acre
+                    cell_data.wdf = duff_lookup[fccs_id] # tons/acre
+                # TODO: probably need an else for this
 
                 # Get data for cell
-                new_cell._set_cell_data(fuel, elev, asp, slp, cc, ch, wdf, self._init_mf, live_h_mf, live_w_mf)
+                new_cell._set_cell_data(cell_data)
 
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))

@@ -428,7 +428,7 @@ def filter_hourly_data(hourly_data, start_datetime, end_datetime):
 
 def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherEntry):
     ## elev_ref is in meters, temp_air is in Fahrenheit, rh_air is %
-    elev_diff = elev_ref - cell.z 
+    elev_diff = elev_ref - cell.elevation_m 
     elev_diff *= 3.2808 # convert to ft
 
     dewptref = -398.0-7469.0 / (np.log(curr_weather.rel_humidity/100.0)-7469.0/(curr_weather.temp+398.0))
