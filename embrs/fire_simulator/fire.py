@@ -185,6 +185,13 @@ class FireSim(BaseFireSim):
 
                 self._updated_cells[cell.id] = cell
         
+        for cell, loc in self._new_ignitions:
+            r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+            cell.r_ss = r_list
+            cell.I_ss = I_list
+            cell.has_steady_state = True
+            cell.set_real_time_vals()
+
         # Update wind if necessary
         self.weather_changed = self._update_weather()
         
