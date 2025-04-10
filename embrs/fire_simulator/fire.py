@@ -22,6 +22,7 @@ from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.rothermel import *
+from embrs.utilities.van_wagner_crown import calc_R10
 from embrs.utilities.burnup import Burnup
 from embrs.utilities.unit_conversions import *
 
@@ -122,6 +123,14 @@ class FireSim(BaseFireSim):
         self._burning_cells = []
         self._new_ignitions = []
 
+        # Crown fire containers
+        self._active_crowns = []
+        self._new_active_crown_ignitions = []
+        self._passive_crowns = []
+
+        # Foliar moisture as a percentage of dry weight
+        self.foliar_moisture_content = 100 # TODO: Set this somewhere in base_fire and sim initilization process
+
         # Variables to keep track of agents in sim
         self._agent_list = []
         self._agents_added = False
@@ -170,73 +179,15 @@ class FireSim(BaseFireSim):
             - Fire can only ignite neighboring cells that are still in a **burnable** state.
             - A mass-loss approach for fuel consumption is **not yet implemented**.
         """
-        if self._iters == 0:
-            self.weather_changed = True
-            self._new_ignitions = self.starting_ignitions
-            for cell, loc in self._new_ignitions:
-                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
-                cell._set_state(CellStates.FIRE)
-
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-                cell.r_ss = r_list
-                cell.I_ss = I_list
-                cell.has_steady_state = True
-                cell.set_real_time_vals()
-
-                self._updated_cells[cell.id] = cell
-        
-        for cell, loc in self._new_ignitions:
-            r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-            cell.r_ss = r_list
-            cell.I_ss = I_list
-            cell.has_steady_state = True
-            cell.set_real_time_vals()
-
-        # Update wind if necessary
-        self.weather_changed = self._update_weather()
-        
-        self.compute_burn_histories(self._new_ignitions)
-
-        # Add any new ignitions to the current set of burning cells
-        self._burning_cells.extend(self._new_ignitions)
-        # Reset new ignitions
-        self._new_ignitions = []
-
         # Set-up iteration
         if self._init_iteration():
             self._finished = True
             return
-
+        
+        # Loop over surface fires
         for cell, loc in self._burning_cells:
             if cell.fully_burning:
-                # TODO: Need to figure out how we want to visualize this state
-                cell.burn_idx += 1
-
-                if cell.burn_idx == len(cell.burn_history):
-
-                    # Set static fuel load to new value
-                    cell.fuel.set_new_fuel_loading(cell.dynamic_fuel_load)
-
-                    # Check if there is enough fuel remaining to set back to fuel
-                    if cell.fuel.w_n_dead < self.burnout_thresh:
-                        # if not set to burnt
-                        self.set_state_at_cell(cell, CellStates.BURNT)
-                    
-                    else:
-                        self.set_state_at_cell(cell, CellStates.FUEL)
-                                        
-                    # remove from burning cells
-                    self._burning_cells.remove((cell, loc))
-                    
-                    cell.burn_idx = -1
-
-                else:
-                    # TODO: If a fire intesects a cell in this state we need to set fuel load to this value for burn
-                    cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
-                    
-                # Add cell to update dictionary
-                self._updated_cells[cell.id] = cell
-
+                self.update_fuel_in_burning_cell(cell, loc)
                 # No need to compute spread for these cells
                 continue
 
@@ -254,58 +205,34 @@ class FireSim(BaseFireSim):
                 else:
                     cell.r_prev_list = np.zeros(len(cell.directions))
 
-                # Get steady state ROS (m/s) and I(kW/m), along each of cell's directions
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-
-                # Store steady-state values
-                cell.r_ss = r_list
-                cell.I_ss = I_list
-                cell.has_steady_state = True
+                self.update_surface_steady_state(cell)
 
             # Set real time ROS and fireline intensity (vals stored in cell.r_t, cell.I_t)
             cell.set_real_time_vals()
-            if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
-                cell.fully_burning = True
 
-            # Update extent of fire spread along each direction
-            cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
-            # TODO: is there a way to prevent distances that are done from being computed?
+            # Update extent of surface fire along each direction and check for ignition
+            self.propagate_surface_fire(cell)
 
-            intersections = np.where(cell.fire_spread > cell.distances)[0]
+            # Remove any neighbors that are no longer burnable
+            self.remove_surface_neighbors(cell)
 
-            # TODO: Check if fireline intensity along any direction is high to initiate crown fire
-
-            # Check where fire spread has reached edge of cell
-            if len(intersections) >= int(len(cell.distances)):
-                # Set cell to fully burning when all edges reached
-                cell.fully_burning = True
-
-            for idx in intersections:
-                neighbor = self.get_neighbor_from_end_point(cell, cell.end_pts[idx][0])
-
-                # Check if ignition signal should be sent to each intersecting neighbor
-                self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
-
-            # Remove any neighbors which are no longer burnable
-            neighbors_to_rem = []
-            for n_id in cell.burnable_neighbors:
-                neighbor = self._cell_dict[n_id]
-
-                if neighbor.state != CellStates.FUEL:
-                    neighbors_to_rem.append(n_id)
-
-            if neighbors_to_rem:
-                for n_id in neighbors_to_rem:
-                    del cell.burnable_neighbors[n_id]
-
-            if len(cell.burnable_neighbors) == 0:
-                # Set cell to fully burning when no burnable neighbors remain
-                cell.fully_burning = True
+            # Check for crown fire ignition within cell
+            self.check_for_crown_fire(cell)
 
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
 
             self.updated_cells[cell.id] = cell
+
+
+        # TODO: should there be a separate state for crown fires?
+        # TODO: Need to set up active crown spread directions (get ign_parameters etc.)
+        self._active_crowns.extend(self._new_active_crown_ignitions)
+
+        for active_crown in self._active_crowns:
+            # TODO: implement spread of active crown fire
+            pass
+
 
         self._iters += 1
 
@@ -587,35 +514,51 @@ class FireSim(BaseFireSim):
         return None
 
     def _init_iteration(self) -> bool:
-        """Prepares the next iteration of the simulation by resetting and updating relevant data structures.
-
-        This method resets temporary state variables, updates the simulation clock, and 
-        manages the progress bar. It also checks termination conditions, determining whether 
-        the simulation should stop.
+        """_summary_
 
         Returns:
-            bool: `True` if the simulation should be terminated, `False` otherwise.
-
-        Side Effects:
-            - Initializes the progress bar on the first iteration.
-            - Updates `_curr_time_s` based on the number of elapsed iterations.
-            - Advances the progress bar.
-            - Closes the progress bar if the simulation reaches its duration or if no burning 
-            cells remain.
-
-        Termination Conditions:
-            - The current simulation time (`_curr_time_s`) exceeds or equals `_sim_duration`.
-            - The simulation has run at least one iteration (`_iters != 0`) and there are no 
-            active burning cells (`len(_burning_cells) == 0`).
+            bool: _description_
         """
         if self._iters == 0:
             self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
                                      desc='Current sim ', position=0, leave=False)
 
+            self.weather_changed = True
+            self._new_ignitions = self.starting_ignitions
+            for cell, loc in self._new_ignitions:
+                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
+                cell._set_state(CellStates.FIRE)
+
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                cell.r_ss = r_list
+                cell.I_ss = I_list
+                cell.has_steady_state = True
+                cell.set_real_time_vals()
+
+                self._updated_cells[cell.id] = cell
+        
+        else:
+            for cell, loc in self._new_ignitions:
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                cell.r_ss = r_list
+                cell.I_ss = I_list
+                cell.has_steady_state = True
+                cell.set_real_time_vals()
+
         # Update current time
         self._curr_time_s = self.time_step * self._iters
         self.progress_bar.update()
 
+        # Update wind if necessary
+        self.weather_changed = self._update_weather()
+        
+        # Compute the fuel consumption over time for each new ignition
+        self.compute_burn_histories(self._new_ignitions)
+
+        # Add any new ignitions to the current set of burning cells
+        self._burning_cells.extend(self._new_ignitions)
+        # Reset new ignitions
+        self._new_ignitions = []
 
         if self._curr_time_s >= self._sim_duration or (self._iters != 0 and len(self._burning_cells) == 0):
             self.progress_bar.close()
@@ -623,6 +566,136 @@ class FireSim(BaseFireSim):
             return True
 
         return False
+    
+
+    def propagate_surface_fire(self, cell: Cell):
+        
+        if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
+            cell.fully_burning = True
+
+        # Update extent of fire spread along each direction
+        cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
+
+        # TODO: is there a way to prevent distances that are done from being computed?
+        intersections = np.where(cell.fire_spread > cell.distances)[0]
+
+        # TODO: Check if fireline intensity along any direction is high to initiate crown fire
+
+        # Check where fire spread has reached edge of cell
+        if len(intersections) >= int(len(cell.distances)):
+            # Set cell to fully burning when all edges reached
+            cell.fully_burning = True
+
+        for idx in intersections:
+            # Check if ignition signal should be sent to each intersecting neighbor
+            self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+
+
+    def remove_surface_neighbors(self, cell: Cell):
+        # Remove any neighbors which are no longer burnable
+            neighbors_to_rem = []
+            for n_id in cell.burnable_neighbors:
+                neighbor = self._cell_dict[n_id]
+
+                if neighbor.state != CellStates.FUEL:
+                    neighbors_to_rem.append(n_id)
+
+            if neighbors_to_rem:
+                for n_id in neighbors_to_rem:
+                    del cell.burnable_neighbors[n_id]
+
+            if len(cell.burnable_neighbors) == 0:
+                # Set cell to fully burning when no burnable neighbors remain
+                cell.fully_burning = True        
+
+    def check_for_crown_fire(self, cell: Cell):
+        # TODO: Check all calculations (units etc.)
+        # TODO: Get it in a case where both passive and active crown fires initiated
+
+        # Return if crown fire not possible 
+        # TODO: checking for active crowns this way may not be correct
+        if not cell.has_canopy or cell in self._active_crowns:
+            return
+        
+        # Calculate crown fire intensity threshold
+        I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.foliar_moisture_content))**(3/2) # kW/m
+
+        # TODO: should rewrite the Rothermel functions so that we can get fireline intensity more directly
+        # Calculate the maximum fireline intensity in the cell (along the heading direction)
+        R, _, I_r, _ = calc_r_h(cell)
+        t_r = 384 / cell.fuel.sav_ratio
+        H_a = I_r * t_r
+        I_t = H_a * R
+
+        I_t = BTU_ft_min_to_kW_m(I_t) # kW/m
+
+        # Check if fireline intensity is high enough to initiate crown fire
+        if I_t >= I_o:
+            # Surface fire will initiate a crown fire
+
+            # Check if crown should be passive or active
+
+            rac = 3.0 / cell.canopy_bulk_density
+
+            R_0 = I_o - (R/I_t)
+
+            a_c = -np.log(0.1) / (0.9 * (rac - R_0))
+
+            cfb = 1 - np.exp(-a_c * (R - R_0))
+
+            R_10 = calc_R10(cell)
+
+            R_cmax = 3.34 * R_10
+
+            r_actual = R + cfb * (R_cmax - R)
+
+            # TODO: should use the same checks farsite has for values of R_cmax etc.
+            if r_actual >= rac:
+                # Active crown fire
+                self._new_active_crown_ignitions.append(cell)
+            else:
+                # Passive crown fire
+                self._passive_crowns.append(cell)
+
+    def update_surface_steady_state(self, cell: Cell):
+        """_summary_
+
+        Args:
+            cell (Cell): _description_
+        """
+        r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+        cell.r_ss = r_list
+        cell.I_ss = I_list
+        cell.has_steady_state = True
+
+    def update_fuel_in_burning_cell(self, cell: Cell, loc: int):
+        # TODO: Need to figure out how we want to visualize this state
+        cell.burn_idx += 1
+
+        if cell.burn_idx == len(cell.burn_history):
+
+            # Set static fuel load to new value
+            cell.fuel.set_new_fuel_loading(cell.dynamic_fuel_load)
+
+            # Check if there is enough fuel remaining to set back to fuel
+            if cell.fuel.w_n_dead < self.burnout_thresh:
+                # if not set to burnt
+                self.set_state_at_cell(cell, CellStates.BURNT)
+            
+            else:
+                self.set_state_at_cell(cell, CellStates.FUEL)
+                                
+            # remove from burning cells
+            self._burning_cells.remove((cell, loc))
+            
+            cell.burn_idx = -1
+
+        else:
+            # TODO: If a fire intesects a cell in this state we need to set fuel load to this value for burn
+            cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
+            
+        # Add cell to update dictionary
+        self._updated_cells[cell.id] = cell
     
     def _update_weather(self) -> bool:
         """Updates the current wind conditions based on the forecast.

@@ -17,35 +17,8 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         Tuple[np.ndarray, np.ndarray]: _description_
     """
     
-    wind_speed_m_s, wind_dir_deg = cell.curr_wind
-
-
-    wind_speed_ft_min = m_s_to_ft_min(wind_speed_m_s)
-
-    wind_speed_ft_min *= cell.wind_adj_factor
-
-    slope_angle_deg = cell.slope_deg
-    slope_dir_deg = cell.aspect
-
-    if slope_angle_deg == 0:
-        rel_wind_dir_deg = 0
-        cell.aspect = wind_dir_deg
-
-    elif wind_speed_m_s == 0:
-        rel_wind_dir_deg = 0
-        wind_dir_deg = cell.aspect
-
-    else:
-        rel_wind_dir_deg = wind_dir_deg - slope_dir_deg
-        if rel_wind_dir_deg < 0:
-            rel_wind_dir_deg += 360
-
-    rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
+    R_h, R_0, I_r, alpha = calc_r_h(cell) #, wind_speed_ft_min, slope_angle, rel_wind_dir)
     spread_directions = np.deg2rad(cell.directions)
-    slope_angle = np.deg2rad(slope_angle_deg)
-
-    R_h, R_0, I_r, alpha = calc_r_h(cell, wind_speed_ft_min, slope_angle, rel_wind_dir)
-
     if R_h < R_0 or R_0 == 0:
         I_list = [0] * len(spread_directions)
         r_list = [0] * len(spread_directions)
@@ -71,6 +44,65 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         I_list.append(I_gamma)
 
     return np.array(r_list), np.array(I_list)
+
+
+def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
+    wind_speed_m_s, wind_dir_deg = cell.curr_wind
+
+
+    wind_speed_ft_min = m_s_to_ft_min(wind_speed_m_s)
+
+    wind_speed_ft_min *= cell.wind_adj_factor
+
+    slope_angle_deg = cell.slope_deg
+    slope_dir_deg = cell.aspect
+
+    if slope_angle_deg == 0:
+        rel_wind_dir_deg = 0
+        cell.aspect = wind_dir_deg
+
+    elif wind_speed_m_s == 0:
+        rel_wind_dir_deg = 0
+        wind_dir_deg = cell.aspect
+
+    else:
+        rel_wind_dir_deg = wind_dir_deg - slope_dir_deg
+        if rel_wind_dir_deg < 0:
+            rel_wind_dir_deg += 360
+
+    rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
+    # spread_directions = np.deg2rad(cell.directions)
+    slope_angle = np.deg2rad(slope_angle_deg)
+
+
+    fuel = cell.fuel
+    m_f = cell.fmois
+
+    if R_0 is None or I_r is None:
+        R_0, I_r = calc_r_0(fuel, m_f)
+
+    if R_0 == 0:
+        # No spread in this cell
+        return 0, 0, 0, 0
+    
+    phi_w = calc_wind_factor(fuel, wind_speed_ft_min)
+    phi_s = calc_slope_factor(fuel, slope_angle)
+    
+    t = 60
+    d_w = R_0 * phi_w * t
+    d_s = R_0 * phi_s * t
+    
+    x = d_s + d_w * np.cos(rel_wind_dir)
+    y = d_w * np.sin(rel_wind_dir)
+    
+    D_h = np.sqrt(x**2 + y**2)
+    
+    R_h = R_0 + (D_h / t)
+    alpha = np.arcsin(y/D_h)
+
+    return R_h, R_0, I_r, alpha
+
+
 
 def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     """_summary_
@@ -161,7 +193,7 @@ def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -
 
     A = 133 * fuel.sav_ratio ** (-0.7913)
 
-    max_reaction_vel = (fuel.sav_ratio ** 1.5) * (495 + 0.0594 * fuel.sav_ratio ** 1.5) ** (-1)
+    max_reaction_vel = (fuel.sav_ratio ** 1.5) / (495 + 0.0594 * fuel.sav_ratio ** 1.5)
     opt_reaction_vel = max_reaction_vel * (fuel.rel_packing_ratio ** A) * np.exp(A*(1-fuel.rel_packing_ratio))
 
     dead_calc = fuel.w_n_dead * fuel.heat_content * dead_moist_damping * mineral_damping
@@ -394,49 +426,3 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
     e = ((z**2 - 1)**0.5)/z
 
     return e
-
-def calc_r_h(cell: Cell, wind_speed: float, 
-             slope_angle: float, omega: float,
-             R_0: float = None, I_r: float = None)-> Tuple[float, float, float, float]:
-    
-    """_summary_
-
-    Args:
-        cell (Cell): _description_
-        wind_speed (float): _description_
-        slope_angle (float): _description_
-        omega (float): _description_
-        R_0 (float, optional): _description_. Defaults to None.
-        I_r (float, optional): _description_. Defaults to None.
-
-    Returns:
-        Tuple[float, float, float, float]: _description_
-    """
-    fuel = cell.fuel
-    m_f = cell.fmois
-    if R_0 is None or I_r is None:
-        R_0, I_r = calc_r_0(fuel, m_f)
-    
-    if R_0 == 0:
-        # No spread in this cell
-        return 0, 0, 0, 0
-
-    phi_w = calc_wind_factor(fuel, wind_speed)
-    phi_s = calc_slope_factor(fuel, slope_angle)
-
-    t = 60
-
-    d_w = R_0 * phi_w * t
-    d_s = R_0 * phi_s * t
-
-    x = d_s + d_w * np.cos(omega)
-    y = d_w * np.sin(omega)
-
-    D_h = np.sqrt(x**2 + y**2)
-
-    R_h = R_0 + (D_h / t)
-
-    alpha = np.arcsin(y/D_h)
-
-    return R_h, R_0, I_r, alpha
-

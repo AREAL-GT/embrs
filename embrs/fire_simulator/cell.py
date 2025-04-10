@@ -72,8 +72,13 @@ class Cell:
         self._cell_size = cell_size # defined as the edge length of hexagon
         self._cell_area = self.calc_cell_area()
 
-
     def _set_cell_data(self, cell_data: CellData):
+        """_summary_
+
+        Args:
+            cell_data (CellData): _description_
+        """
+
         # Set Fuel type
         self._fuel = cell_data.fuel_type
         
@@ -89,12 +94,17 @@ class Cell:
         # Canopy cover as a percentage
         self.canopy_cover = cell_data.canopy_cover
 
-        # Canopy height as 10 * m
+        # Canopy height in meters
         self.canopy_height = cell_data.canopy_height
 
+        # Canopy base height in meters
         self.canopy_base_height = cell_data.canopy_base_height
-
+        
+        # Canopy bulk density in kg/m^3
         self.canopy_bulk_density = cell_data.canopy_bulk_density
+
+        # TODO: See if we can just check one of these values instead of all 3
+        self.has_canopy = self.canopy_height > 0 or self.canopy_cover > 0 or self.canopy_bulk_density > 0
 
         # Duff loading (tons/acre)
         self.wdf = cell_data.wdf
@@ -162,7 +172,8 @@ class Cell:
         self.a_a = 0.115 # TODO: find fuel type dependent values for this
 
     def set_arrays(self):
-        
+        """_summary_
+        """
         indices = self._fuel.rel_indices
 
         self.wdry = self._fuel.w_n[indices]

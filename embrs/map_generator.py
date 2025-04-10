@@ -240,10 +240,6 @@ def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str) -> None:
     # Expand FCCS data to add a new band
     fccs_data = fccs_data[np.newaxis, :, :]
 
-    # Identify the actual number of non-empty bands in LCP
-    valid_bands = [i for i in range(lcp_data.shape[0]) if not np.all(lcp_data[i] == 0)]
-    actual_band_count = len(valid_bands)
-
     # Concatenate LCP bands with the new FCCS band along the band axis
     merged_data = np.concatenate([lcp_data, fccs_data], axis=0)
 
@@ -507,7 +503,7 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         resampled_bands = []
 
         for i in range(array.shape[0]):  # Iterate through all bands
-            if i == 3 or i == 8: # Check if processing fuel
+            if i >= 3: # Check if processing categorical data
                 # Use nearest-neighbor resampling for categorical data
                 resampling_method = Resampling.nearest
             else:
@@ -519,7 +515,6 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         resampled_array = np.stack(resampled_bands, axis=0)
 
     rows, cols = resampled_array.shape[1:]
-
 
     map_params.lcp_data = LandscapeData(
         elevation_map=resampled_array[0],
