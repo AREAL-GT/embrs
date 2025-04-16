@@ -8,6 +8,7 @@ import pytz
 import json
 import pvlib
 from typing import Iterator
+from astropy.time import Time
 
 from embrs.utilities.data_classes import *
 
@@ -133,6 +134,9 @@ class WeatherStream:
         
         # Use GSI information to determine what to set live fuel moistures to
         self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+
+        # Calculate foliar moisture content
+        self.fmc = self.calc_fmc()
 
         # Set units and time step based on OpenMeteo params
         self.time_step = 60
@@ -305,6 +309,9 @@ class WeatherStream:
         # Use GSI information to determine what live fuel moisture is
         self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
 
+        # Calculate foliar moisture content
+        self.fmc = self.calc_fmc()
+
         # Generate stream with final data
         self.stream = list(self.generate_stream(resampled_hourly_data))
 
@@ -419,6 +426,35 @@ class WeatherStream:
         
         return gsi
 
+    def calc_fmc(self):
+        # Calcualte the foliar moisture content
+        # Based on Forestry Canada Fire Danger Group 1992
+        lat = self.geo.center_lat
+        lon = -self.geo.center_lon
+
+        # Convert start date to julian date
+        date = self.params.start_datetime
+        d_j = date.timetuple().tm_yday
+
+
+        latn = 43 + 33.7 * np.exp(-0.0351 * (150 - lon))
+
+        d_0 = 151 * (lat / latn) + 0.0172 * self.ref_elev
+
+        nd = min(abs(d_j - d_0), 365 - abs(d_j - d_0))
+
+
+        if nd < 30:
+            fmc = 85 + 0.0189 * nd**2
+
+        elif 30 <= nd < 50:
+            fmc = 32.9 + 3.17 * nd - 0.0288 * nd**2
+
+        else:
+            fmc = 120
+
+        return fmc
+
 def filter_hourly_data(hourly_data, start_datetime, end_datetime):
     hourly_data["date"] = pd.to_datetime(hourly_data["date"])
 
@@ -467,3 +503,23 @@ def calc_local_solar_radiation(cell, curr_weather: WeatherEntry):
     I = total_irradiance['poa_global'] * canopy_transmittance
 
     return I
+
+def datetime_to_julian_date(dt):
+    year = dt.year
+    month = dt.month
+    day = dt.day
+    hour = dt.hour + dt.minute / 60 + dt.second / 3600
+
+    if month <= 2:
+        year -= 1
+        month += 12
+
+    A = np.floor(year / 100)
+    B = 2 - A + np.floor(A / 4)
+
+    jd_day = np.floor(365.25 * (year + 4716)) + \
+            np.floor(30.6001 * (month + 1)) + \
+            day + B - 1524.5
+
+    jd = jd_day + hour / 24
+    return jd

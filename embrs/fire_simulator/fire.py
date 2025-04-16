@@ -128,10 +128,6 @@ class FireSim(BaseFireSim):
         self._new_active_crown_ignitions = []
         self._passive_crowns = []
 
-        # Foliar moisture as a percentage of dry weight
-        self.foliar_moisture_content = 100 # TODO: Set this somewhere in base_fire and sim initilization process
-        # TODO: Set this using equations in https://www.frames.gov/documents/catalog/forestry_canada_fire_danger_group_1992.pdf on page 20
-
         # Variables to keep track of agents in sim
         self._agent_list = []
         self._agents_added = False
@@ -609,7 +605,7 @@ class FireSim(BaseFireSim):
             return
         
         # Calculate crown fire intensity threshold
-        I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.foliar_moisture_content))**(3/2) # kW/m
+        I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.fmc))**(3/2) # kW/m
         
 
         # TODO: Need to consider edge case of backing fire (if R_h is pointed directly towards cell that ignited

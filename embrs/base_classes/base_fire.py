@@ -72,6 +72,8 @@ class BaseFireSim:
         live_h_mf = self._weather_stream.live_h_mf
         live_w_mf = self._weather_stream.live_w_mf
 
+        self.fmc = self._weather_stream.fmc
+
         # Load Duff loading lookup table from LANDFIRE FCCS
         # TODO: make this path relative so it can be used on any machine
         with open(f"/Users/rui/Documents/Research/Code/embrs/embrs/utilities/duff_loading.pkl", "rb") as file:
