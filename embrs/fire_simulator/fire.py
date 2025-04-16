@@ -616,8 +616,8 @@ class FireSim(BaseFireSim):
         # current cell) 
 
         # Get the max rate of spread and fireline intensity within the cell
-        R_m_s = cell.r_h_ss
-        R = ft_min_to_m_s(R_m_s) * 60 # R in m/min
+        R_m_s = cell.r_h_ss # m/s
+        R = R_m_s * 60 # R in m/min
         I_btu_ft_min = cell.I_h_ss
         I_t = BTU_ft_min_to_kW_m(I_btu_ft_min) # I in kw/m
 
@@ -625,7 +625,7 @@ class FireSim(BaseFireSim):
         if I_t >= I_o:
             # Surface fire will initiate a crown fire
 
-            R = ft_min_to_m_s(R) * 60 # R in m/min
+            # R = ft_min_to_m_s(R) * 60 # R in m/min
 
             # Check if crown should be passive or active
 
@@ -669,7 +669,10 @@ class FireSim(BaseFireSim):
                 # Passive crown fire
                 cell._crown_status = CrownStatus.PASSIVE
 
-            cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_actual)
+
+            r_h_in = r_actual / 60 # m/s
+            r_h_in = m_s_to_ft_min(r_h_in) # ft/min
+            cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_h_in)
 
         else:
             cell._crown_status = CrownStatus.NONE
