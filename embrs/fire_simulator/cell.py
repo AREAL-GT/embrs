@@ -13,7 +13,7 @@ Classes:
 import numpy as np
 from shapely.geometry import Polygon
 
-from embrs.utilities.fire_util import CellStates
+from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.data_classes import CellData
 from embrs.utilities.fuel_models import Fuel, Anderson13
 from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
@@ -138,6 +138,9 @@ class Cell:
         else:
             self._state = CellStates.BURNT
 
+        # Crown fire attribute
+        self._crown_status = CrownStatus.NONE
+
         # Dictionaries to store neighbors
         self._neighbors = {}
         self._burnable_neighbors = {}
@@ -151,6 +154,12 @@ class Cell:
         self.distances = None
         self.directions = None
         self.end_pts = None
+
+        # Heading rate of spread and fireline intensity
+        self.r_h_ss = None
+        self.r_h_t = None
+        self.I_h_ss = None
+        self.I_h_t = None
 
         # Variables that keep track of elliptical spread within cell
         self.r_t = None
@@ -229,14 +238,21 @@ class Cell:
 
         # TODO: validate that this works correctly
 
-        if np.max(self.r_ss) < np.max(self.r_prev_list):
+        if self.r_h_ss < self.r_h_prev:
             # Allow for instant deceleration as in FARSITE
             self.r_t = self.r_ss
             self.I_t = self.I_ss
 
+            self.r_h_t = self.r_h_ss
+            self.I_h_t = self.I_h_ss
+
         else:
             self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
+
+
+            self.r_h_t = self.r_h_ss - (self.r_h_ss - self.r_h_prev) * np.exp(-self.a_a * self.t_elapsed_min)
+            self.I_h_t = (self.r_h_t / (self.r_h_ss + 1e-7)) * self.I_h_ss
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
         """Stores the local forecasted wind speed and direction for the cell.
@@ -472,6 +488,10 @@ class Cell:
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
             self.I_ss = np.zeros(len(self.directions))
+
+            self.r_h_ss = 0
+            self.I_h_ss = 0
+            self.r_h_prev = 0
 
             self.fuel_at_ignition = self._fuel_content
 

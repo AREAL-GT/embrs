@@ -17,7 +17,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         Tuple[np.ndarray, np.ndarray]: _description_
     """
     
-    R_h, R_0, I_r, alpha = calc_r_h(cell) #, wind_speed_ft_min, slope_angle, rel_wind_dir)
+    R_h, R_0, I_r, alpha = calc_r_h(cell)
     spread_directions = np.deg2rad(cell.directions)
     if R_h < R_0 or R_0 == 0:
         I_list = [0] * len(spread_directions)
@@ -29,6 +29,10 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
 
     if R_h_in is not None:
         R_h = R_h_in
+
+    t_r = 384 / cell.fuel.sav_ratio # Residence time
+    H_a = I_r * t_r
+    I_h = H_a * R_h
 
     e = calc_eccentricity(cell.fuel, R_h, R_0)
 
@@ -43,8 +47,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         r_list.append(r_gamma)
         I_list.append(I_gamma)
 
-    return np.array(r_list), np.array(I_list)
-
+    return np.array(r_list), np.array(I_list), ft_min_to_m_s(R_h), I_h
 
 def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
@@ -71,7 +74,6 @@ def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, 
             rel_wind_dir_deg += 360
 
     rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
-    # spread_directions = np.deg2rad(cell.directions)
     slope_angle = np.deg2rad(slope_angle_deg)
 
 

@@ -18,7 +18,7 @@ import numpy as np
 from datetime import timedelta
 
 
-from embrs.utilities.fire_util import CellStates
+from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.fire_util import FuelConstants as fc
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import UtilFuncs as util
@@ -356,6 +356,7 @@ class Visualizer:
         fire_patches = []
         tree_patches = []
         burnt_patches = []
+        crown_patches = []
         alpha_arr = [0, 1]
 
         # Add low and high polygons to prevent weird color mapping
@@ -389,6 +390,10 @@ class Visualizer:
                 #     c_val = np.min([1, c_val])
                 #     c_vals.append(c_val)
 
+            if c.state == CellStates.FIRE and c._crown_status != CrownStatus.NONE:
+                crown_patches.append(polygon)
+
+
             elif c.state == CellStates.FIRE and not c.fully_burning:
                 fire_patches.append(polygon)
                 max_intensity = np.max(c.I_ss)
@@ -404,6 +409,7 @@ class Visualizer:
         tree_patches = np.array(tree_patches)
         fire_patches = np.array(fire_patches)
         burnt_patches = np.array(burnt_patches)
+        crown_patches = np.array(crown_patches)
         alpha_arr = np.array(alpha_arr)
 
         tree_coll =  PatchCollection(tree_patches, match_original=True)
@@ -415,11 +421,14 @@ class Visualizer:
             fire_coll.set_cmap(mpl.colormaps["gist_heat"])
             fire_coll.set_norm(norm)
 
+        crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta')
+
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
         self.h_ax.add_collection(tree_coll)
         self.h_ax.add_collection(fire_coll)
         self.h_ax.add_collection(burnt_coll)
+        self.h_ax.add_collection(crown_coll)
 
         # Set time displays based on sim time
         sim_time_s = sim.time_step*sim.iters

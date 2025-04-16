@@ -28,7 +28,19 @@ def calc_R10(cell: Cell) -> float:
 
     omega = np.deg2rad(rel_wind_dir_deg)
 
-    R_0, _ = calc_r_0(fuel, cell.fmois)
+
+    # Ensure fuel moisture dimensions are right for Rothermel calcs
+    fmois = cell.fmois
+    if len(fuel.rel_indices) != len(fmois):
+        # If there is only one fuel moisture value make it that for all 3 classes
+        if len(fmois) == 1:
+            fmois = np.append(fmois, np.array([fmois[0], fmois[0]]))
+
+        # If there are two, make the third the same as the second
+        elif len(fmois) == 2:
+            fmois = np.append(fmois, fmois[1]) 
+
+    R_0, _ = calc_r_0(fuel, fmois)
 
     wind_speed_ft_min *= 0.4 # Adjustment factor for wind speed
 

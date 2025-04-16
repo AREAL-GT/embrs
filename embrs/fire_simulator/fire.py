@@ -17,7 +17,7 @@ from tqdm import tqdm
 import numpy as np
 
 from embrs.base_classes.base_fire import BaseFireSim
-from embrs.utilities.fire_util import CellStates, FuelConstants, UtilFuncs, HexGridMath
+from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs, HexGridMath
 from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
@@ -130,6 +130,7 @@ class FireSim(BaseFireSim):
 
         # Foliar moisture as a percentage of dry weight
         self.foliar_moisture_content = 100 # TODO: Set this somewhere in base_fire and sim initilization process
+        # TODO: Set this using equations in https://www.frames.gov/documents/catalog/forestry_canada_fire_danger_group_1992.pdf on page 20
 
         # Variables to keep track of agents in sim
         self._agent_list = []
@@ -205,33 +206,23 @@ class FireSim(BaseFireSim):
                 else:
                     cell.r_prev_list = np.zeros(len(cell.directions))
 
-                self.update_surface_steady_state(cell)
+                # Updates the cell's steady-state rate of spread and fireline intensity
+                # Also checks for crown fire initiation
+                self.update_steady_state(cell)
 
             # Set real time ROS and fireline intensity (vals stored in cell.r_t, cell.I_t)
             cell.set_real_time_vals()
 
-            # Update extent of surface fire along each direction and check for ignition
-            self.propagate_surface_fire(cell)
+            # Update extent of fire along each direction and check for ignition
+            self.propagate_fire(cell)
 
             # Remove any neighbors that are no longer burnable
-            self.remove_surface_neighbors(cell)
-
-            # Check for crown fire ignition within cell
-            self.check_for_crown_fire(cell)
+            self.remove_neighbors(cell)
 
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
 
             self.updated_cells[cell.id] = cell
-
-        # TODO: should there be a separate state for crown fires?
-        # TODO: Need to set up active crown spread directions (get ign_parameters etc.)
-        self._active_crowns.extend(self._new_active_crown_ignitions)
-
-        for active_crown in self._active_crowns:
-            # TODO: implement spread of active crown fire
-            pass
-
 
         self._iters += 1
 
@@ -401,7 +392,11 @@ class FireSim(BaseFireSim):
                         self._new_ignitions.append((neighbor, n_loc))
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
-                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
+
+                        if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
+                            neighbor._crown_status = CrownStatus.ACTIVE
+
+                        neighbor.r_prev_list, _, neighbor.r_h_ss, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
                         
                         self._updated_cells[neighbor.id] = neighbor
 
@@ -528,9 +523,11 @@ class FireSim(BaseFireSim):
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
                 cell.r_ss = r_list
                 cell.I_ss = I_list
+                cell.r_h_ss = r_h_ss
+                cell.I_h_ss = I_h_ss
                 cell.has_steady_state = True
                 cell.set_real_time_vals()
 
@@ -538,9 +535,11 @@ class FireSim(BaseFireSim):
         
         else:
             for cell, loc in self._new_ignitions:
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
                 cell.r_ss = r_list
                 cell.I_ss = I_list
+                cell.r_h_ss = r_h_ss
+                cell.I_h_ss = I_h_ss
                 cell.has_steady_state = True
                 cell.set_real_time_vals()
 
@@ -567,8 +566,7 @@ class FireSim(BaseFireSim):
         return False
     
 
-    def propagate_surface_fire(self, cell: Cell):
-        
+    def propagate_fire(self, cell: Cell):
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
             cell.fully_burning = True
 
@@ -577,8 +575,6 @@ class FireSim(BaseFireSim):
 
         # TODO: is there a way to prevent distances that are done from being computed?
         intersections = np.where(cell.fire_spread > cell.distances)[0]
-
-        # TODO: Check if fireline intensity along any direction is high to initiate crown fire
 
         # Check where fire spread has reached edge of cell
         if len(intersections) >= int(len(cell.distances)):
@@ -590,7 +586,7 @@ class FireSim(BaseFireSim):
             self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
 
 
-    def remove_surface_neighbors(self, cell: Cell):
+    def remove_neighbors(self, cell: Cell):
         # Remove any neighbors which are no longer burnable
             neighbors_to_rem = []
             for n_id in cell.burnable_neighbors:
@@ -609,21 +605,21 @@ class FireSim(BaseFireSim):
 
     def check_for_crown_fire(self, cell: Cell):
         # Return if crown fire not possible 
-        # TODO: checking for active crowns this way may not be correct
-        if not cell.has_canopy or cell in self._active_crowns:
+        if not cell.has_canopy:
             return
         
         # Calculate crown fire intensity threshold
         I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.foliar_moisture_content))**(3/2) # kW/m
+        
 
-        # TODO: should rewrite the Rothermel functions so that we can get fireline intensity more directly
-        # Calculate the maximum fireline intensity in the cell (along the heading direction)
-        R, _, I_r, _ = calc_r_h(cell)
-        t_r = 384 / cell.fuel.sav_ratio
-        H_a = I_r * t_r
-        I_t = H_a * R
+        # TODO: Need to consider edge case of backing fire (if R_h is pointed directly towards cell that ignited
+        # current cell) 
 
-        I_t = BTU_ft_min_to_kW_m(I_t) # kW/m
+        # Get the max rate of spread and fireline intensity within the cell
+        R_m_s = cell.r_h_ss
+        R = ft_min_to_m_s(R_m_s) * 60 # R in m/min
+        I_btu_ft_min = cell.I_h_ss
+        I_t = BTU_ft_min_to_kW_m(I_btu_ft_min) # I in kw/m
 
         # Check if fireline intensity is high enough to initiate crown fire
         if I_t >= I_o:
@@ -652,27 +648,57 @@ class FireSim(BaseFireSim):
             # Maximum crown fire spread rate (Correlation determined in Rothermel 1991)
             R_cmax = 3.34 * R_10
 
+            if cell._crown_status != CrownStatus.NONE:
+                # Check if surface fire intensity too low in already burning crown fires
+                t_r = 384 / cell.fuel.sav_ratio
+                H_a = cell.reaction_intensity * t_r
+                if (R_cmax * H_a) < I_o:
+                    cell._crown_status = CrownStatus.NONE
+                    return
+
             # Actual active crown fire spread rate
+            # TODO: this is the new spread rate for the cell, regardless of passive or active crown fire
             r_actual = R + cfb * (R_cmax - R) # m/min
 
             # TODO: should use the same checks farsite has for values of R_cmax etc.
             if r_actual >= rac:
                 # Active crown fire
-                self._new_active_crown_ignitions.append(cell)
+                cell._crown_status = CrownStatus.ACTIVE
+
             else:
                 # Passive crown fire
-                # TODO: when the associated surface fire stops burning the cell should be removed from this list
-                self._passive_crowns.append(cell)
+                cell._crown_status = CrownStatus.PASSIVE
 
-    def update_surface_steady_state(self, cell: Cell):
+            cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_actual)
+
+        else:
+            cell._crown_status = CrownStatus.NONE
+
+    def update_steady_state(self, cell: Cell):
         """_summary_
 
         Args:
             cell (Cell): _description_
         """
-        r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-        cell.r_ss = r_list
-        cell.I_ss = I_list
+
+        if not cell.has_steady_state:
+            r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell)
+            cell.r_ss = r_list
+            cell.I_ss = I_list
+            cell.r_h_ss = r_h_ss
+            cell.I_h_ss = I_h_ss
+
+        # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if so
+        self.check_for_crown_fire(cell)
+
+        if cell._crown_status == CrownStatus.NONE:
+            # Update values for cells that are just surface fires
+            r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+            cell.r_ss = r_list
+            cell.I_ss = I_list
+            cell.r_h_ss = r_h_ss
+            cell.I_h_ss = I_h_ss
+
         cell.has_steady_state = True
 
     def update_fuel_in_burning_cell(self, cell: Cell, loc: int):

@@ -60,6 +60,10 @@ class SpreadDecomp:
         12: [(4, 'F'), (8, 'A')]
     }
 
+class CrownStatus:
+    # Crown statuses
+    NONE, PASSIVE, ACTIVE = 0, 1, 2
+
 class CellStates:
     """Enumeration of the possible cell states.
 
