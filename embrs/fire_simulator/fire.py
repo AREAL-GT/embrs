@@ -624,9 +624,6 @@ class FireSim(BaseFireSim):
         # Check if fireline intensity is high enough to initiate crown fire
         if I_t >= I_o:
             # Surface fire will initiate a crown fire
-
-            # R = ft_min_to_m_s(R) * 60 # R in m/min
-
             # Check if crown should be passive or active
 
             # Threshold for active crown spread rate (Alexander 1988)
