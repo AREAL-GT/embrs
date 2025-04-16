@@ -224,7 +224,6 @@ class FireSim(BaseFireSim):
 
             self.updated_cells[cell.id] = cell
 
-
         # TODO: should there be a separate state for crown fires?
         # TODO: Need to set up active crown spread directions (get ign_parameters etc.)
         self._active_crowns.extend(self._new_active_crown_ignitions)
@@ -609,9 +608,6 @@ class FireSim(BaseFireSim):
                 cell.fully_burning = True        
 
     def check_for_crown_fire(self, cell: Cell):
-        # TODO: Check all calculations (units etc.)
-        # TODO: Get it in a case where both passive and active crown fires initiated
-
         # Return if crown fire not possible 
         # TODO: checking for active crowns this way may not be correct
         if not cell.has_canopy or cell in self._active_crowns:
@@ -633,21 +629,31 @@ class FireSim(BaseFireSim):
         if I_t >= I_o:
             # Surface fire will initiate a crown fire
 
+            R = ft_min_to_m_s(R) * 60 # R in m/min
+
             # Check if crown should be passive or active
 
-            rac = 3.0 / cell.canopy_bulk_density
+            # Threshold for active crown spread rate (Alexander 1988)
+            rac = 3.0 / cell.canopy_bulk_density # m/min
 
-            R_0 = I_o - (R/I_t)
+            # Critical surface fire spread rate
+            R_0 = I_o * (R/I_t) # m/min
 
+            # CFB scaling exponent
             a_c = -np.log(0.1) / (0.9 * (rac - R_0))
 
+            # Crown fraction burned, proportion of the trees involved in crowning phase
             cfb = 1 - np.exp(-a_c * (R - R_0))
-
+            
+            # Forward surface fire spread rate for fuel model 10 using 0.4 wind reduction factor
             R_10 = calc_R10(cell)
+            R_10 = ft_min_to_m_s(R_10) * 60 # R_10 in m/min
 
+            # Maximum crown fire spread rate (Correlation determined in Rothermel 1991)
             R_cmax = 3.34 * R_10
 
-            r_actual = R + cfb * (R_cmax - R)
+            # Actual active crown fire spread rate
+            r_actual = R + cfb * (R_cmax - R) # m/min
 
             # TODO: should use the same checks farsite has for values of R_cmax etc.
             if r_actual >= rac:
@@ -655,6 +661,7 @@ class FireSim(BaseFireSim):
                 self._new_active_crown_ignitions.append(cell)
             else:
                 # Passive crown fire
+                # TODO: when the associated surface fire stops burning the cell should be removed from this list
                 self._passive_crowns.append(cell)
 
     def update_surface_steady_state(self, cell: Cell):
