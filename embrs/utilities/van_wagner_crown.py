@@ -58,6 +58,8 @@ def calc_R10(cell: Cell) -> float:
 
     D_h = np.sqrt(x**2 + y**2)
 
+    alpha = np.arcsin(y/D_h)
+
     R_h = R_0 + (D_h / t)
 
     return R_h

@@ -607,7 +607,6 @@ class FireSim(BaseFireSim):
         # Calculate crown fire intensity threshold
         I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.fmc))**(3/2) # kW/m
         
-
         # TODO: Need to consider edge case of backing fire (if R_h is pointed directly towards cell that ignited
         # current cell) 
 
@@ -650,22 +649,20 @@ class FireSim(BaseFireSim):
                     return
 
             # Actual active crown fire spread rate
-            # TODO: this is the new spread rate for the cell, regardless of passive or active crown fire
             r_actual = R + cfb * (R_cmax - R) # m/min
 
             # TODO: should use the same checks farsite has for values of R_cmax etc.
             if r_actual >= rac:
                 # Active crown fire
                 cell._crown_status = CrownStatus.ACTIVE
+                r_h_in = r_actual / 60 # m/s
+                r_h_in = m_s_to_ft_min(r_h_in) # ft/min
+                cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_h_in)
 
             else:
                 # Passive crown fire
                 cell._crown_status = CrownStatus.PASSIVE
 
-
-            r_h_in = r_actual / 60 # m/s
-            r_h_in = m_s_to_ft_min(r_h_in) # ft/min
-            cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_h_in)
 
         else:
             cell._crown_status = CrownStatus.NONE
@@ -684,11 +681,11 @@ class FireSim(BaseFireSim):
             cell.r_h_ss = r_h_ss
             cell.I_h_ss = I_h_ss
 
-        # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if so
+        # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
         self.check_for_crown_fire(cell)
 
-        if cell._crown_status == CrownStatus.NONE:
-            # Update values for cells that are just surface fires
+        if cell._crown_status != CrownStatus.ACTIVE:
+            # Update values for cells that are not active crown fires
             r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
             cell.I_ss = I_list

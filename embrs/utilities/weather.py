@@ -8,7 +8,6 @@ import pytz
 import json
 import pvlib
 from typing import Iterator
-from astropy.time import Time
 
 from embrs.utilities.data_classes import *
 
@@ -436,14 +435,15 @@ class WeatherStream:
         date = self.params.start_datetime
         d_j = date.timetuple().tm_yday
 
-
         latn = 43 + 33.7 * np.exp(-0.0351 * (150 - lon))
-
+        
+        # Estimate day of the year where the min FMC occurs
         d_0 = 151 * (lat / latn) + 0.0172 * self.ref_elev
 
+        # Estimate the number of days away current date is from d_0
         nd = min(abs(d_j - d_0), 365 - abs(d_j - d_0))
 
-
+        # Calculate fmc based on nd threshold
         if nd < 30:
             fmc = 85 + 0.0189 * nd**2
 
