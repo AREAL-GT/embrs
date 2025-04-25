@@ -22,7 +22,7 @@ from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.rothermel import *
-from embrs.utilities.van_wagner_crown import calc_R10
+from embrs.utilities.crown_model import crown_fire
 from embrs.utilities.burnup import Burnup
 from embrs.utilities.unit_conversions import *
 
@@ -599,74 +599,6 @@ class FireSim(BaseFireSim):
                 # Set cell to fully burning when no burnable neighbors remain
                 cell.fully_burning = True        
 
-    def check_for_crown_fire(self, cell: Cell):
-        # Return if crown fire not possible 
-        if not cell.has_canopy:
-            return
-        
-        # Calculate crown fire intensity threshold
-        I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * self.fmc))**(3/2) # kW/m
-        
-        # TODO: Need to consider edge case of backing fire (if R_h is pointed directly towards cell that ignited
-        # current cell) 
-
-        # Get the max rate of spread and fireline intensity within the cell
-        R_m_s = cell.r_h_ss # m/s
-        R = R_m_s * 60 # R in m/min
-        I_btu_ft_min = cell.I_h_ss
-        I_t = BTU_ft_min_to_kW_m(I_btu_ft_min) # I in kw/m
-
-        # Check if fireline intensity is high enough to initiate crown fire
-        if I_t >= I_o:
-            # Surface fire will initiate a crown fire
-            # Check if crown should be passive or active
-
-            # Threshold for active crown spread rate (Alexander 1988)
-            rac = 3.0 / cell.canopy_bulk_density # m/min
-
-            # Critical surface fire spread rate
-            R_0 = I_o * (R/I_t) # m/min
-
-            # CFB scaling exponent
-            a_c = -np.log(0.1) / (0.9 * (rac - R_0))
-
-            # Crown fraction burned, proportion of the trees involved in crowning phase
-            cfb = 1 - np.exp(-a_c * (R - R_0))
-            
-            # Forward surface fire spread rate for fuel model 10 using 0.4 wind reduction factor
-            R_10 = calc_R10(cell)
-            R_10 = ft_min_to_m_s(R_10) * 60 # R_10 in m/min
-
-            # Maximum crown fire spread rate (Correlation determined in Rothermel 1991)
-            R_cmax = 3.34 * R_10
-
-            if cell._crown_status != CrownStatus.NONE:
-                # Check if surface fire intensity too low in already burning crown fires
-                t_r = 384 / cell.fuel.sav_ratio
-                H_a = cell.reaction_intensity * t_r
-                if (R_cmax * H_a) < I_o:
-                    cell._crown_status = CrownStatus.NONE
-                    return
-
-            # Actual active crown fire spread rate
-            r_actual = R + cfb * (R_cmax - R) # m/min
-
-            # TODO: should use the same checks farsite has for values of R_cmax etc.
-            if r_actual >= rac:
-                # Active crown fire
-                cell._crown_status = CrownStatus.ACTIVE
-                r_h_in = r_actual / 60 # m/s
-                r_h_in = m_s_to_ft_min(r_h_in) # ft/min
-                cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss = calc_propagation_in_cell(cell, R_h_in=r_h_in)
-
-            else:
-                # Passive crown fire
-                cell._crown_status = CrownStatus.PASSIVE
-
-
-        else:
-            cell._crown_status = CrownStatus.NONE
-
     def update_steady_state(self, cell: Cell):
         """_summary_
 
@@ -682,10 +614,11 @@ class FireSim(BaseFireSim):
             cell.I_h_ss = I_h_ss
 
         # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
-        self.check_for_crown_fire(cell)
+        crown_fire(cell, self.fmc)
 
         if cell._crown_status != CrownStatus.ACTIVE:
             # Update values for cells that are not active crown fires
+            cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
             r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
             cell.I_ss = I_list

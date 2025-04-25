@@ -69,6 +69,35 @@ def m_s_to_ft_min(m_s: float) -> float:
     f = m_s * g
     return f
 
+
+def ft_min_to_mph(f_ft_min: float) -> float:
+    """Converts from ft/min to mph
+
+    Args:
+        f_ft_min (float): ft/min
+
+    Returns:
+        _type_: float
+    """
+    g = 1 / mph_to_ft_min(1)
+    f = f_ft_min * g
+
+    return f
+
+def mph_to_ft_min(f_mph: float) -> float:
+    """Converts from mph to ft/min
+
+    Args:
+        f_mph (float): mph
+
+    Returns:
+        _type_: float
+    """
+    g = 88
+    f = f_mph * g
+
+    return f
+
 def Lbsft2_to_KiSq(f_libsft2: float) -> float:
     """Converts from lbs/ft^2 to kW/m^2
 
