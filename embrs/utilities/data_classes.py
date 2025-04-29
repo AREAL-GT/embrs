@@ -69,7 +69,25 @@ class LandscapeData:
     crs: any
 
 @dataclass
+class UniformMapParams:
+    elevation: Optional[float] = None
+    slope: Optional[float] = None
+    aspect: Optional[float] = None
+    fuel: Optional[int] = None
+    canopy_cover: Optional[float] = None
+    canopy_height: Optional[float] = None
+    canopy_base_height: Optional[float] = None
+    canopy_bulk_density: Optional[float] = None
+    fccs_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    height: Optional[float] = None
+    width: Optional[float] = None
+
+@dataclass
 class MapParams:
+    uniform_map: Optional[bool] = None
+    uniform_data: Optional[UniformMapParams] = None
     folder: Optional[str] = None
     lcp_filepath: Optional[str] = None
     fccs_filepath: Optional[str] = None

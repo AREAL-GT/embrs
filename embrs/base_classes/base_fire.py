@@ -254,20 +254,36 @@ class BaseFireSim:
         # Grab starting datetime
         self._start_datetime = sim_params.weather_input.start_datetime
 
-        # Generate a weather stream
-        self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
-        self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
-        
-        # Get wind data
-        self._wind_res = sim_params.weather_input.mesh_resolution
-        self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
-        self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
-        # Iterate over each layer (time step or vertical level, depending on the dataset structure)
-        for layer in range(self.wind_forecast.shape[0]):
-            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
-        
-        self.wind_forecast = self.flipud_forecast
+        # Check if map is uniform
+        if map_params.uniform_map:
+            self._uniform_map = True # TODO: use this parameter to make sure we don't change fuel moisture values
+
+
+            self._aspect_map = np.flipud(lcp_data.aspect_map) # Don't apply the rotation on uniform aspect data
+            
+            # TODO: generate a weather stream that uses no OpenMeteo data
+            # TODO: create wind forecast just based on the input
+
+            # TODO: check that OpenMeteo option is not selected (if it is throw an error)
+
+            
+        else:
+            self._uniform_map = False
+            # Generate a weather stream
+            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
+            self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
+            
+            # Get wind data
+            self._wind_res = sim_params.weather_input.mesh_resolution
+            self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+            self.flipud_forecast = np.empty(self.wind_forecast.shape)
+
+            # Iterate over each layer (time step or vertical level, depending on the dataset structure)
+            for layer in range(self.wind_forecast.shape[0]):
+                self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
+            
+            self.wind_forecast = self.flipud_forecast
 
     def _add_cell_neighbors(self):
         """Populate the "neighbors" property of each cell in the simulation with each cell's
