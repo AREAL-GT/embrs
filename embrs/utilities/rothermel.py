@@ -16,7 +16,6 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
     Returns:
         Tuple[np.ndarray, np.ndarray]: _description_
     """
-    
     R_h, R_0, I_r, alpha = calc_r_h(cell)
     spread_directions = np.deg2rad(cell.directions)
     if R_h < R_0 or R_0 == 0:
@@ -53,10 +52,7 @@ def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
 
         r_list.append(r_gamma)
         I_list.append(I_gamma)
-
-    
     return np.array(r_list), np.array(I_list)
-
 
 def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
@@ -85,7 +81,6 @@ def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, 
     rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
     slope_angle = np.deg2rad(slope_angle_deg)
 
-
     fuel = cell.fuel
     m_f = cell.fmois
 
@@ -95,7 +90,11 @@ def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, 
     if R_0 == 0:
         # No spread in this cell
         return 0, 0, 0, 0
-    
+
+    # Enforce maximum wind speed
+    U_max = 0.9 * I_r
+    wind_speed_ft_min = np.min([U_max, wind_speed_ft_min])
+
     phi_w = calc_wind_factor(fuel, wind_speed_ft_min)
     phi_s = calc_slope_factor(fuel, slope_angle)
     
@@ -127,8 +126,6 @@ def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) ->
 
     return vec_mag, vec_dir
 
-
-
 def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     """_summary_
 
@@ -154,7 +151,7 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
 
     R_0 = (I_r * flux_ratio)/heat_sink
 
-    return R_0, I_r
+    return R_0, I_r # ft/min, BTU/ft^2-min
 
 def get_working_m_f(fuel: Fuel, m_f: np.ndarray):
     indices = fuel.rel_indices
@@ -427,7 +424,7 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
     phi_e = calc_effective_wind_factor(R_h, R_0)
 
 
-    u_e = ((phi_e * (fuel.rel_packing_ratio**E))/C) ** (-B)
+    u_e = ((phi_e * (fuel.rel_packing_ratio**E))/C) ** (1/B)
 
     return u_e
 

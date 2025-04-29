@@ -194,7 +194,7 @@ class FireSim(BaseFireSim):
                 cell.t_elapsed_min = 0
 
                 # Update wind in cell
-                cell._update_weather(self._curr_weather_idx, self._weather_stream)
+                cell._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
                 
                 # Set previous rate of spreads to the most recent value
                 if cell.r_t is not None:
@@ -240,8 +240,12 @@ class FireSim(BaseFireSim):
         curr_weather = self._weather_stream.stream[self._curr_weather_idx]
 
         wind_speed = curr_weather.wind_speed
-    
-        t_ambF = curr_weather.temp
+
+        if self._uniform_map:
+            # TODO: should uniform maps use temperature too?
+            t_ambF = 75
+        else:
+            t_ambF = curr_weather.temp
 
         dt = self._time_step
 
@@ -379,7 +383,7 @@ class FireSim(BaseFireSim):
                 # Check that neighbor state is burnable
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
-                    neighbor._update_weather(self._curr_weather_idx, self._weather_stream)
+                    neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 
