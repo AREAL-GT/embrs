@@ -330,9 +330,10 @@ class Cell:
         self.moist_update = idx
         self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
 
-    def _update_weather(self, idx: int, weather_stream: WeatherStream):
-        # Update moisture content based on weather stream
-        self._update_moisture(idx, weather_stream)
+    def _update_weather(self, idx: int, weather_stream: WeatherStream, uniform: bool):
+        if not uniform:
+            # Update moisture content based on weather stream
+            self._update_moisture(idx, weather_stream)
 
         # Update wind to next value in forecast
         self.curr_wind = (self.forecast_wind_speeds[idx], self.forecast_wind_dirs[idx])

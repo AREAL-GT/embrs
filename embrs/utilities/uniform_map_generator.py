@@ -56,7 +56,7 @@ def generate_uniform_map(map_params: MapParams):
     display_fuel_map[0, 0] = map_params.uniform_data.fuel
 
     # Adjust the display_fuel_map to match the specified width and height
-    display_fuel_map = np.full((int(map_params.uniform_data.height), int(map_params.uniform_data.width)), 
+    display_fuel_map = np.full((int(map_params.uniform_data.height/30), int(map_params.uniform_data.width/30)), 
                                map_params.uniform_data.fuel, dtype=np.uint8)
 
 
@@ -67,16 +67,7 @@ def main():
     file_selector = UniformMapCreator()
     map_params = file_selector.run()
 
-    map_params.geo_info = GeoInfo()
-    map_params.geo_info.north_angle_deg = 0
-    map_params.geo_info.center_lat = map_params.uniform_data.latitude
-    map_params.geo_info.center_lon = map_params.uniform_data.longitude
-    map_params.geo_info.bounds = [map_params.uniform_data.longitude - (map_params.uniform_data.width / 2),
-                                  map_params.uniform_data.latitude - (map_params.uniform_data.height / 2),
-                                  map_params.uniform_data.longitude + (map_params.uniform_data.width / 2),
-                                  map_params.uniform_data.latitude + (map_params.uniform_data.height / 2)]
-    
-    map_params.geo_info.calc_time_zone()
+    map_params.geo_info = None
 
     if map_params is None:
         print("User exited before submitting necessary files.")

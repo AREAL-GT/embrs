@@ -22,7 +22,7 @@ from embrs.fire_simulator.cell import Cell
 from embrs.utilities.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
 from embrs.utilities.weather import WeatherStream
-from embrs.utilities.wind_forecast import run_windninja # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
+from embrs.utilities.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
 
 class BaseFireSim:
     def __init__(self, sim_params: SimParams):
@@ -225,7 +225,6 @@ class BaseFireSim:
         self._size = map_params.size()
         self._shape = map_params.shape(self._cell_size)
         self._roads = map_params.roads
-        self._north_dir_deg = map_params.geo_info.north_angle_deg
         self.coarse_elevation = np.empty(self._shape)
 
         # Load DataProductParams for each data product
@@ -235,7 +234,6 @@ class BaseFireSim:
         self._elevation_map = np.flipud(lcp_data.elevation_map)
         self._slope_map = np.flipud(lcp_data.slope_map)
         self._aspect_map = np.flipud(lcp_data.aspect_map)
-        self._aspect_map = (180 + self._aspect_map) % 360 
         self._fuel_map = np.flipud(lcp_data.fuel_map)
         self._cc_map = np.flipud(lcp_data.canopy_cover_map)
         self._ch_map = np.flipud(lcp_data.canopy_height_map)
@@ -254,22 +252,14 @@ class BaseFireSim:
         # Grab starting datetime
         self._start_datetime = sim_params.weather_input.start_datetime
 
-
-        # Check if map is uniform
-        if map_params.uniform_map:
-            self._uniform_map = True # TODO: use this parameter to make sure we don't change fuel moisture values
-
-
-            self._aspect_map = np.flipud(lcp_data.aspect_map) # Don't apply the rotation on uniform aspect data
-            
-            # TODO: generate a weather stream that uses no OpenMeteo data
-            # TODO: create wind forecast just based on the input
-
-            # TODO: check that OpenMeteo option is not selected (if it is throw an error)
-
-            
-        else:
+        # Handle regular map
+        if not map_params.uniform_map:
             self._uniform_map = False
+            self._north_dir_deg = map_params.geo_info.north_angle_deg
+
+            # If loading from lcp file change aspect to uphill direction
+            self._aspect_map = (180 + self._aspect_map) % 360 
+
             # Generate a weather stream
             self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
             self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
@@ -284,6 +274,25 @@ class BaseFireSim:
                 self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
             
             self.wind_forecast = self.flipud_forecast
+
+        # Handle uniform map
+        else:
+            self._uniform_map = True
+
+            # Set north to straight up
+            self._north_dir_deg = 0
+            
+            # Check that OpenMeteo option is not selected (if it is throw an error)
+            if sim_params.weather_input.input_type == "OpenMeteo":
+                raise ValueError(f"Error: If using a uniform map, OpenMeteo can not be used. Must specify a weather file")
+
+            # Create weather stream (just consisting of wind)
+            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
+            self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
+
+            # Create a uniform wind forecast
+            self._wind_res = 10e10
+            self.wind_forecast = create_uniform_wind(self._weather_stream)
 
     def _add_cell_neighbors(self):
         """Populate the "neighbors" property of each cell in the simulation with each cell's

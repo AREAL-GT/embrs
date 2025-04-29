@@ -199,10 +199,6 @@ class FileSelectBase:
     
 
 class UniformMapCreator(FileSelectBase):
-
-    # TODO: This won't need elevation or lat lon inputs
-    # TODO: this will need fuel moisture inputs (live and dead)
-
     def __init__(self):
 
         super().__init__("Uniform Map Creator")
@@ -212,7 +208,6 @@ class UniformMapCreator(FileSelectBase):
 
         self.map_folder.trace_add("write", self.validate_fields)
         
-        self.elevation = tk.DoubleVar()
         self.slope = tk.DoubleVar()
         self.aspect = tk.DoubleVar()
         self.fuel_selection = tk.StringVar()
@@ -224,21 +219,13 @@ class UniformMapCreator(FileSelectBase):
         self.canopy_bulk_density = tk.DoubleVar()
         self.fccs_id = tk.IntVar()
 
-        self.latitude = tk.DoubleVar()
-        self.longitude = tk.DoubleVar()
-
         self.width_m = tk.DoubleVar()
         self.height_m = tk.DoubleVar()
-
-
 
         frame = self.create_frame(self.root)
 
         # Create field to select save destination
         self.create_folder_selector(frame, "Save map to:   ", self.map_folder)
-        
-        # Create frame for elevation selection
-        self.create_spinbox_with_two_labels(frame, "Elevation:       ", 1e7, self.elevation, "meters")
 
         # Create frame for slope selection
         self.create_spinbox_with_two_labels(frame, "Slope:       ", 90, self.slope, "degrees")
@@ -270,12 +257,6 @@ class UniformMapCreator(FileSelectBase):
 
         # Create frame for duff loading selection
         self.create_spinbox_with_two_labels(frame, "FCCS Type:       ", 1e7, self.fccs_id, "")
-
-        # Create frame for latitude selection
-        self.create_spinbox_with_two_labels(frame, "Latitude:       ", 90, self.latitude, "degrees")
-        
-        # Create frame for longitude selection
-        self.create_spinbox_with_two_labels(frame, "Longitude:       ", 180, self.longitude, "degrees")
 
         # Create frame for width selection
         self.create_spinbox_with_two_labels(frame, "Width:       ", 1e7, self.width_m, "meters")
@@ -312,7 +293,6 @@ class UniformMapCreator(FileSelectBase):
 
         uniform_data = UniformMapParams()
 
-        uniform_data.elevation = self.elevation.get()
         uniform_data.slope = self.slope.get()
         uniform_data.aspect = self.aspect.get()
         uniform_data.fuel = self.fuel_selection_val
@@ -321,11 +301,8 @@ class UniformMapCreator(FileSelectBase):
         uniform_data.canopy_base_height = self.canopy_base_height.get()
         uniform_data.canopy_bulk_density = self.canopy_bulk_density.get()
         uniform_data.fccs_id = self.fccs_id.get()
-        uniform_data.latitude = self.latitude.get()
-        uniform_data.longitude = self.longitude.get()
         uniform_data.height = self.height_m.get()
         uniform_data.width = self.width_m.get()
-
 
         params = MapParams()
 

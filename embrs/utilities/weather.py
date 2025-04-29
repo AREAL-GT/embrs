@@ -21,7 +21,10 @@ class WeatherStream:
         if input_type == "OpenMeteo":
             self.get_stream_from_openmeteo()
         elif input_type == "File":
-            self.get_stream_from_file()
+            if geo is not None:
+                self.get_stream_from_file()
+            else:
+                self.get_uniform_stream()
         else:
             raise ValueError("Invalid weather input_type, must be either 'OpenMeteo' or 'File'")
 
@@ -321,6 +324,53 @@ class WeatherStream:
         self.input_wind_vel_units = data["wind_speed_units"]
         self.input_temp_units = data["temperature_units"]
 
+    def get_uniform_stream(self):
+        file = self.params.file
+        with open(file) as f:
+            data = json.load(f)
+
+        weather_data = {}
+
+        # File-based data is already at the correct time step, so use it directly
+        weather_data["wind_speed"] = data["weather_entries"]["wind_speed"]
+        weather_data["wind_direction"] = data["weather_entries"]["wind_direction"]
+
+        # TODO: Can make these an input
+        self.live_h_mf = 1.4
+        self.live_w_mf = 1.25
+
+        # Set Foliar moisture content to 100 # TODO: can make this an input
+        self.fmc = 100
+
+        # Generate stream with final data
+        self.stream = list(self.generate_uniform_stream(weather_data))
+
+        # Set units and time step based on OpenMeteo params
+        self.time_step = data["time_step_min"]
+        self.input_wind_ht = data["wind_height"]
+        self.input_wind_ht_units = data["wind_height_units"]
+        self.input_wind_vel_units = data["wind_speed_units"]
+        self.input_temp_units = data["temperature_units"]
+
+    def generate_uniform_stream(self, weather_data: dict) -> Iterator[WeatherEntry]:
+        for wind_speed, wind_dir in zip(
+            weather_data["wind_speed"],
+            weather_data["wind_direction"]
+        ):
+            yield WeatherEntry(
+                wind_speed=wind_speed,
+                wind_dir_deg=wind_dir,
+                temp=None,
+                rel_humidity=None,
+                cloud_cover=None,
+                rain=None,
+                dni=None,
+                dhi=None,
+                ghi=None,
+                solar_zenith=None,
+                solar_azimuth=None
+            )
+ 
     def generate_stream(self, hourly_data: dict) -> Iterator[WeatherEntry]:
         cum_rain = 0
         for wind_speed, wind_dir, temp, rel_humidity, cloud_cover, ghi, dhi, dni, rain, solar_zenith, solar_azimuth in zip(
