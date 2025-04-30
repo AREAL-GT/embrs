@@ -65,8 +65,6 @@ def crown_fire(cell: Cell, fmc: float):
             if r_actual >= rac:
                 # Active crown fire
                 cell._crown_status = CrownStatus.ACTIVE
-                # r_h_in = r_actual / 60 # m/s
-                # r_h_in = m_s_to_ft_min(r_h_in) # ft/min
                 cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
 
             else:

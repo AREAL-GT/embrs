@@ -103,8 +103,8 @@ class Cell:
         # Canopy bulk density in kg/m^3
         self.canopy_bulk_density = cell_data.canopy_bulk_density
 
-        # TODO: See if we can just check one of these values instead of all 3
-        self.has_canopy = self.canopy_height > 0 or self.canopy_cover > 0 or self.canopy_bulk_density > 0
+        # Check if cell has a canopy
+        self.has_canopy = self.canopy_height > 0 and self.canopy_cover > 0
 
         # Duff loading (tons/acre)
         self.wdf = cell_data.wdf

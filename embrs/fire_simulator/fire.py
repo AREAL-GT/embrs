@@ -564,7 +564,14 @@ class FireSim(BaseFireSim):
             return True
 
         return False
-    
+
+    def spot_fire(self, source: CrownStatus):
+
+        self.embers.spot_source = source
+        self.embers.loft()
+
+
+
 
     def propagate_fire(self, cell: Cell):
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:

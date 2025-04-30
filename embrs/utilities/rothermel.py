@@ -56,8 +56,7 @@ def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
 
 def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
-
-
+    
     wind_speed_ft_min = m_s_to_ft_min(wind_speed_m_s)
 
     wind_speed_ft_min *= cell.wind_adj_factor
