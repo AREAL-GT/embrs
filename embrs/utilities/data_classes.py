@@ -70,17 +70,15 @@ class LandscapeData:
 
 @dataclass
 class UniformMapParams:
-    elevation: Optional[float] = None
-    slope: Optional[float] = None
-    aspect: Optional[float] = None
+    elevation: Optional[float] = 0
+    slope: Optional[float] = 0
+    aspect: Optional[float] = 0
     fuel: Optional[int] = None
-    canopy_cover: Optional[float] = None
-    canopy_height: Optional[float] = None
-    canopy_base_height: Optional[float] = None
-    canopy_bulk_density: Optional[float] = None
-    fccs_id: Optional[int] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    canopy_cover: Optional[float] = 0
+    canopy_height: Optional[float] = 0
+    canopy_base_height: Optional[float] = 0
+    canopy_bulk_density: Optional[float] = 0
+    fccs_id: Optional[int] = 0
     height: Optional[float] = None
     width: Optional[float] = None
 

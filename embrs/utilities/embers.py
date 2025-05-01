@@ -170,13 +170,9 @@ class Embers:
 
         carry = []
         for ember in self.embers:
-
-            if ember.get('passed_prob') is None:
-                prob_spot = np.random.random() # [0, 1]
-                if prob_spot < self.ign_prob:
-                    ember['passed_prob'] = True
-                else:
-                    continue
+            prob_spot = np.random.random() # [0, 1]
+            if prob_spot > self.ign_prob:
+                continue
 
             sx, sy = ember['x'], ember['y']
 

@@ -641,7 +641,7 @@ class FireSim(BaseFireSim):
             cell.r_h_ss = r_h_ss
             cell.I_h_ss = I_h_ss
 
-        elif self._spot_ign_prob > 0: # TODO: should there be another flag to indicate not modelling spotting
+        if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0: # TODO: should there be another flag to indicate not modelling spotting
             self.embers.loft(cell, self.curr_time_m)
 
         cell.has_steady_state = True
