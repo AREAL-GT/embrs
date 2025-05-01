@@ -64,6 +64,44 @@ class CrownStatus:
     # Crown statuses
     NONE, PASSIVE, ACTIVE = 0, 1, 2
 
+class CanopySpecies:
+    species_names = {
+        0: "Engelmann spruce",
+        1: "Douglas fir",
+        2: "Western hemlock",
+        3: "Ponderosa pine",
+        4: "White pine",
+        5: "Grand fir",
+        6: "Longleaf pine",
+        7: "Pond pine",
+        8: "Loblolly pine"
+    }
+
+    species_ids = {
+        "Engelmann spruce": 0,
+        "Douglas fir": 1,
+        "Western hemlock": 2,
+        "Ponderosa pine": 3,
+        "White pine": 4,
+        "Grand fir": 5,
+        "Longleaf pine": 6,
+        "Pond pine": 7,
+        "Loblolly pine": 8
+    }
+
+    # Row of matrix corresponds to the species id
+    properties = np.array([
+        [15.7, 0.451, 12.6, 0.256],
+        [15.7, 0.451, 10.7, 0.278],
+        [15.7, 0.451, 6.3, 0.249],
+        [12.9, 0.453, 12.6, 0.256],
+        [12.9, 0.453, 10.7, 0.278],
+        [16.5, 0.515, 10.7, 0.278],
+        [2.71, 1.0, 11.9, 0.389],
+        [2.71, 1.0, 7.91, 0.344],
+        [2.71, 1.0, 13.5, 0.544]
+    ])
+
 class CellStates:
     """Enumeration of the possible cell states.
 

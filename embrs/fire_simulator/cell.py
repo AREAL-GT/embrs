@@ -144,6 +144,9 @@ class Cell:
         # Crown fire flame length in meters
         self.crown_flame_len_m = 0
 
+        # Crown fraction burned
+        self.cfb = 0
+
         # Dictionaries to store neighbors
         self._neighbors = {}
         self._burnable_neighbors = {}

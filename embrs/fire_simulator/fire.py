@@ -220,7 +220,19 @@ class FireSim(BaseFireSim):
 
             self.updated_cells[cell.id] = cell
 
+        # Get set of spot fires started in this time step # TODO: should there be another flag that says not to model spotting
+        if self._spot_ign_prob > 0:
+            self.propagate_embers()
+
         self._iters += 1
+
+    def propagate_embers(self):
+        spot_fires = self.embers.flight(self.curr_time_s + (self.time_step/60))
+
+        if spot_fires:
+            for spot in spot_fires:
+                self._new_ignitions.append(spot)
+                self.updated_cells[spot[0].id] = spot[0]
 
     def generate_burn_history_entry(self, cell, fuel_loads):
         # TODO: this assumes that any live fuel will be totally consumed
@@ -565,14 +577,6 @@ class FireSim(BaseFireSim):
 
         return False
 
-    def spot_fire(self, source: CrownStatus):
-
-        self.embers.spot_source = source
-        self.embers.loft()
-
-
-
-
     def propagate_fire(self, cell: Cell):
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
             cell.fully_burning = True
@@ -626,15 +630,19 @@ class FireSim(BaseFireSim):
 
         # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
         crown_fire(cell, self.fmc)
-
+        
         if cell._crown_status != CrownStatus.ACTIVE:
             # Update values for cells that are not active crown fires
             cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
+            # TODO: can we make this "surface_fire()" and set cell values in the function to make everythign a bit clearer
             r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
             cell.I_ss = I_list
             cell.r_h_ss = r_h_ss
             cell.I_h_ss = I_h_ss
+
+        elif self._spot_ign_prob > 0: # TODO: should there be another flag to indicate not modelling spotting
+            self.embers.loft(cell, self.curr_time_m)
 
         cell.has_steady_state = True
 

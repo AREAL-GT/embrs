@@ -40,6 +40,9 @@ def crown_fire(cell: Cell, fmc: float):
             # Crown fraction burned, proportion of the trees involved in crowning phase
             cfb = 1 - np.exp(-a_c * (R - R_0))
 
+            # Set the crown fraction burned in the cell
+            cell.cfb = cfb
+            
             set_accel_constant(cell, cfb)
             
             # Forward surface fire spread rate for fuel model 10 using 0.4 wind reduction factor

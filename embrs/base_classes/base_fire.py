@@ -14,6 +14,7 @@ from tqdm import tqdm
 import pickle
 import os
 
+from embrs.utilities.embers import Embers
 from embrs.utilities.fire_util import CellStates
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.utilities.fire_util import HexGridMath as hex
@@ -42,7 +43,13 @@ class BaseFireSim:
         # Variables to keep track of sim progress
         self._curr_time_s = 0
         self._iters = 0
-        
+
+        # Spot model parameters # TODO: temporary, move these to sim params and make them user entered
+        self._canopy_species = 5
+        self._dbh_cm = 20
+        self._spot_ign_prob = 0.25 # TODO: should figure out what a good value for this is
+        self._min_spot_distance = 50 # meters
+
         # Variable to store logger object
         self.logger = None
 
@@ -73,6 +80,12 @@ class BaseFireSim:
         live_w_mf = self._weather_stream.live_w_mf
 
         self.fmc = self._weather_stream.fmc
+
+        # Limits to pass into Embers
+        limits = (self.x_lim, self.y_lim)
+
+        # Spot fire modelling class
+        self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
 
         # Load Duff loading lookup table from LANDFIRE FCCS
         # TODO: make this path relative so it can be used on any machine
