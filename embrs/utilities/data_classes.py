@@ -146,10 +146,11 @@ class SimParams:
     cell_size: Optional[int] = None
     init_mf: Optional[float] = 0.08
     model_spotting: Optional[bool] = False
-    canopy_species: Optional[int] = 1
+    canopy_species: Optional[int] = 5
     dbh_cm: Optional[float] = 20.0
     spot_ign_prob: Optional[float] = 0.05
     min_spot_dist: Optional[float] = 50
+    spot_delay_s: Optional[float] = 30
     duration_s: Optional[float] = None
     visualize: Optional[bool] = None
     num_runs: Optional[int] = None
