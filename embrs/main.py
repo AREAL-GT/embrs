@@ -287,6 +287,8 @@ def load_sim_params(cfg_path: str) -> SimParams:
         end_datetime=end_datetime
     )
 
+    init_mf = config["Weather"].getfloat("init_mf", 0.08)
+
     write_logs = config["Simulation"].getboolean("write_logs", None)
     log_folder = config["Simulation"].get("log_folder", None)
 
@@ -302,9 +304,15 @@ def load_sim_params(cfg_path: str) -> SimParams:
     if t_step_s is None:
         raise ValueError(f"Error in {cfg_path}: 't_step_s' (time step) must be specified in the [Simulation] section.")
 
-    cell_size = config["Simulation"].getint("cell_size", None)
+    cell_size = config["Simulation"].getint("cell_size_m", None)
     if cell_size is None:
         raise ValueError(f"Error in {cfg_path}: 'cell_size' must be specified in the [Simulation] section.")
+
+    model_spotting = config["Simulation"].getboolean("model_spotting", False)
+    canopy_species = config["Simulation"].getint("canopy_species", 5)
+    dbh_cm = config["Simulation"].getfloat("dbh_cm", 20)
+    spot_ign_prob = config["Simulation"].getfloat("spot_ign_prob", 0.05)
+    min_spot_dist_m = config["Simulation"].getfloat("min_spot_dist_m", 50)
 
     user_class = config["Simulation"].get("user_class", None)
     user_path = config["Simulation"].get("user_path", None)
@@ -318,12 +326,19 @@ def load_sim_params(cfg_path: str) -> SimParams:
         log_folder=log_folder,
         weather_input=weather_params,
         t_step_s=t_step_s,
-        duration_s=duration_s,
         cell_size=cell_size,
-        num_runs=config["Simulation"].getint("num_runs", 1),
+        init_mf=init_mf,
+        model_spotting=model_spotting,
+        canopy_species=canopy_species,
+        dbh_cm=dbh_cm,
+        spot_ign_prob=spot_ign_prob,
+        min_spot_dist=min_spot_dist_m,
+        duration_s=duration_s,
         visualize=config["Simulation"].getboolean("visualize", False),
+        num_runs=config["Simulation"].getint("num_runs", 1),
         user_path=user_path,
         user_class=user_class,
+        write_logs=write_logs
     )
 
     return sim_params
