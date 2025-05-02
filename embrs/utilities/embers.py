@@ -43,6 +43,11 @@ class Embers:
         for count in range(1, 17):
             diameter = 0.005 * count
 
+            # Only loft embers that pass probability check
+            prob_spot = np.random.random() # [0, 1]
+            if prob_spot > self.ign_prob:
+                continue
+
             zf = self.torchheight(diameter, z_0)
             if zf > 0:
                 # Appends to self.embers
@@ -170,10 +175,6 @@ class Embers:
 
         carry = []
         for ember in self.embers:
-            prob_spot = np.random.random() # [0, 1]
-            if prob_spot > self.ign_prob:
-                continue
-
             sx, sy = ember['x'], ember['y']
 
             diameter, Z, Zelev, curr_time, elapsed = ember['diam'], ember['height'], ember['start_elev'], ember['curr_time'], ember['elapsed']
