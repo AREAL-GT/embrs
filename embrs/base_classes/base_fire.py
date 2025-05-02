@@ -44,11 +44,11 @@ class BaseFireSim:
         self._curr_time_s = 0
         self._iters = 0
 
-        # Spot model parameters # TODO: temporary, move these to sim params and make them user entered
-        self._canopy_species = 5
-        self._dbh_cm = 20
-        self._spot_ign_prob = 0.25 # TODO: should figure out what a good value for this is
-        self._min_spot_distance = 50 # meters
+        # # Spot model parameters # TODO: temporary, move these to sim params and make them user entered
+        # self._canopy_species = 5
+        # self._dbh_cm = 20
+        # self._spot_ign_prob = 0.05 # TODO: should figure out what a good value for this is
+        # self._min_spot_distance = 50 # meters
 
         # Variable to store logger object
         self.logger = None
@@ -81,11 +81,13 @@ class BaseFireSim:
 
         self.fmc = self._weather_stream.fmc
 
-        # Limits to pass into Embers
-        limits = (self.x_lim, self.y_lim)
 
-        # Spot fire modelling class
-        self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
+        if self.model_spotting:
+            # Limits to pass into Embers
+            limits = (self.x_lim, self.y_lim)
+
+            # Spot fire modelling class
+            self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
 
         # Load Duff loading lookup table from LANDFIRE FCCS
         # TODO: make this path relative so it can be used on any machine
@@ -306,6 +308,16 @@ class BaseFireSim:
             # Create a uniform wind forecast
             self._wind_res = 10e10
             self.wind_forecast = create_uniform_wind(self._weather_stream)
+
+
+        self.model_spotting = sim_params.model_spotting
+
+        if self.model_spotting:
+            self._canopy_species = sim_params.canopy_species
+            self._dbh_cm = sim_params.dbh_cm
+            self._spot_ign_prob = sim_params.spot_ign_prob
+            self._min_spot_distance = sim_params.min_spot_dist
+
 
     def _add_cell_neighbors(self):
         """Populate the "neighbors" property of each cell in the simulation with each cell's
