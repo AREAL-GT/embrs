@@ -44,12 +44,6 @@ class BaseFireSim:
         self._curr_time_s = 0
         self._iters = 0
 
-        # # Spot model parameters # TODO: temporary, move these to sim params and make them user entered
-        # self._canopy_species = 5
-        # self._dbh_cm = 20
-        # self._spot_ign_prob = 0.05 # TODO: should figure out what a good value for this is
-        # self._min_spot_distance = 50 # meters
-
         # Variable to store logger object
         self.logger = None
 
@@ -81,7 +75,6 @@ class BaseFireSim:
 
         self.fmc = self._weather_stream.fmc
 
-
         if self.model_spotting:
             # Limits to pass into Embers
             limits = (self.x_lim, self.y_lim)
@@ -90,8 +83,11 @@ class BaseFireSim:
             self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
 
         # Load Duff loading lookup table from LANDFIRE FCCS
-        # TODO: make this path relative so it can be used on any machine
-        with open(f"/Users/rui/Documents/Research/Code/embrs/embrs/utilities/duff_loading.pkl", "rb") as file:
+        base_dir = os.path.dirname(__file__)
+        duff_path = os.path.join(base_dir, '..', 'utilities', 'duff_loading.pkl')
+        duff_path = os.path.normpath(duff_path)
+
+        with open(duff_path, "rb") as file:
             duff_lookup = pickle.load(file)
 
         # Populate cell_grid with cells
