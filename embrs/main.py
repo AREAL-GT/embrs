@@ -313,6 +313,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
     dbh_cm = config["Simulation"].getfloat("dbh_cm", 20)
     spot_ign_prob = config["Simulation"].getfloat("spot_ign_prob", 0.05)
     min_spot_dist_m = config["Simulation"].getfloat("min_spot_dist_m", 50)
+    spot_delay_s = config["Simulation"].getint("spot_delay_s", 30)
 
     user_class = config["Simulation"].get("user_class", None)
     user_path = config["Simulation"].get("user_path", None)
@@ -333,6 +334,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
         dbh_cm=dbh_cm,
         spot_ign_prob=spot_ign_prob,
         min_spot_dist=min_spot_dist_m,
+        spot_delay_s=spot_delay_s,
         duration_s=duration_s,
         visualize=config["Simulation"].getboolean("visualize", False),
         num_runs=config["Simulation"].getint("num_runs", 1),

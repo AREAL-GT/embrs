@@ -127,6 +127,7 @@ class FireSim(BaseFireSim):
         self._active_crowns = []
         self._new_active_crown_ignitions = []
         self._passive_crowns = []
+        self._scheduled_spot_fires = {}
 
         # Variables to keep track of agents in sim
         self._agent_list = []
@@ -230,9 +231,32 @@ class FireSim(BaseFireSim):
         spot_fires = self.embers.flight(self.curr_time_s + (self.time_step/60))
 
         if spot_fires:
+            # Schedule spot fires using the ignition delay
             for spot in spot_fires:
-                self._new_ignitions.append(spot)
-                self.updated_cells[spot[0].id] = spot[0]
+                ign_time = self.curr_time_s + self._spot_delay_s
+
+                if self._scheduled_spot_fires.get(ign_time) is None:
+                    self._scheduled_spot_fires[ign_time] = [spot]
+                else:
+                    self._scheduled_spot_fires[ign_time].append(spot)
+
+        if self._scheduled_spot_fires:
+            # Ignite spots that have been scheduled previously
+            pending_times = list(self._scheduled_spot_fires.keys())
+
+            for time in pending_times:
+                if time <= self.curr_time_s:
+                    # All cells with this time should be ignited
+                    new_spots = self._scheduled_spot_fires[time]
+                    
+                    for spot in new_spots:
+                        self._new_ignitions.append(spot)
+                        self.updated_cells[spot[0].id] = spot[0]
+
+                    del self._scheduled_spot_fires[time]
+
+                if time > self.curr_time_s:
+                    break
 
     def generate_burn_history_entry(self, cell, fuel_loads):
         # TODO: this assumes that any live fuel will be totally consumed

@@ -413,6 +413,7 @@ class SimFolderSelector(FileSelectBase):
         self.dbh_cm = tk.DoubleVar(value=20)
         self.spot_ign_prob = tk.DoubleVar(value=0.05)
         self.min_spot_dist = tk.DoubleVar(value=50)
+        self.spot_delay = tk.IntVar(value=30)
         self.duration = tk.DoubleVar(value=1.0)
         self.num_runs = tk.IntVar(value=1)
         self.user_path = tk.StringVar()
@@ -529,6 +530,7 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(self.spotting_options_frame, "Diam. at Breast Height:", 100, self.dbh_cm, 'cm', row=1, column=0)
         self.create_spinbox_with_two_labels(self.spotting_options_frame, "Spot Ignition Probability:", 1.0, self.spot_ign_prob, "", row=2, column=0)
         self.create_spinbox_with_two_labels(self.spotting_options_frame, "Min. Spot Distance. (m):", np.inf, self.min_spot_dist, "meters", row=3, column=0)
+        self.create_spinbox_with_two_labels(self.spotting_options_frame, "Spot Delay (s)", np.inf, self.spot_delay, "seconds", row=4, column=0)
 
         self.duration.trace_add("write", self.duration_changed)
         self.canopy_species_name.trace_add("write", self.canopy_species_changed)
@@ -827,6 +829,7 @@ class SimFolderSelector(FileSelectBase):
                 dbh_cm = self.dbh_cm.get(),
                 spot_ign_prob = self.spot_ign_prob.get(),
                 min_spot_dist = self.min_spot_dist.get(),
+                spot_delay_s = self.spot_delay.get(),
                 cell_size = self.cell_size.get(),
                 duration_s = duration_s,
                 visualize = self.viz_on.get(),

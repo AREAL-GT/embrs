@@ -317,6 +317,7 @@ class BaseFireSim:
             self._dbh_cm = sim_params.dbh_cm
             self._spot_ign_prob = sim_params.spot_ign_prob
             self._min_spot_distance = sim_params.min_spot_dist
+            self._spot_delay_s = sim_params.spot_delay_s
 
 
     def _add_cell_neighbors(self):
