@@ -22,7 +22,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
         I_list = [0] * len(spread_directions)
         r_list = [0] * len(spread_directions)
 
-        return np.array(r_list), np.array(I_list)
+        return np.array(r_list), np.array(I_list), 0, 0
 
     cell.reaction_intensity = I_r
 

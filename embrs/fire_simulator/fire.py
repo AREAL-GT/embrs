@@ -220,8 +220,8 @@ class FireSim(BaseFireSim):
 
             self.updated_cells[cell.id] = cell
 
-        # Get set of spot fires started in this time step # TODO: should there be another flag that says not to model spotting
-        if self._spot_ign_prob > 0:
+        # Get set of spot fires started in this time step
+        if self.model_spotting and self._spot_ign_prob > 0:
             self.propagate_embers()
 
         self._iters += 1
@@ -640,9 +640,10 @@ class FireSim(BaseFireSim):
             cell.I_ss = I_list
             cell.r_h_ss = r_h_ss
             cell.I_h_ss = I_h_ss
-
-        if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0: # TODO: should there be another flag to indicate not modelling spotting
-            self.embers.loft(cell, self.curr_time_m)
+        
+        if self.model_spotting:
+            if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                self.embers.loft(cell, self.curr_time_m)
 
         cell.has_steady_state = True
 
