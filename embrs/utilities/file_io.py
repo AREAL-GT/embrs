@@ -18,7 +18,7 @@ import sys
 import os
 
 from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, UniformMapParams
-from embrs.utilities.fire_util import FuelConstants
+from embrs.utilities.fire_util import FuelConstants, CanopySpecies
 from embrs.base_classes.control_base import ControlClass
 
 class FileSelectBase:
@@ -43,7 +43,7 @@ class FileSelectBase:
         :rtype: tk.Frame
         """
         frame = tk.Frame(tar)
-        frame.pack(fill=BOTH, padx=5, pady=5)
+        frame.grid(sticky='nsew', padx=5, pady=5)
         return frame
 
     def create_entry_with_label_and_button(self, frame: tk.Frame, text: str, text_var: any,
@@ -121,28 +121,26 @@ class FileSelectBase:
 
         return label, entry, button, frame
 
-    def create_spinbox_with_two_labels(self, frame: tk.Frame, left_label:str, max_val:float,
-                                       var: any, right_label:str):
-        """Creates a frame containing a spinbox with one or two labels
+    def create_spinbox_with_two_labels(self, frame: tk.Frame, left_label: str, max_val: float,
+                                    var: any, right_label: str,
+                                    row=0, column=0):
+        """Creates a frame containing a spinbox with one or two labels."""
+        new_frame = tk.Frame(frame)
+        new_frame.grid(row=row, column=column, sticky='w', padx=5, pady=2)
 
-        :param frame: Root frame where the new frame should be located 
-        :type frame: tk.Frame
-        :param left_label: Label to be displayed to the left of the spinbox
-        :type left_label: str
-        :param max_val: Max allowable value in the spinbox
-        :type max_val: float
-        :param var: Variable where the result of the spinbox entry should be stored
-        :type var: any
-        :param right_label: Label to be displayed to the right of the spinbox
-        :type right_label: str
-        """
-        new_frame = self.create_frame(frame)
-        tk.Label(new_frame, text=left_label).grid(row=0, column=0)
-        tk.Spinbox(new_frame, from_=0, to=max_val, textvariable=var,
-                   width=5).grid(row=0, column=1, sticky='w')
+        tk.Label(new_frame, text=left_label).grid(row=0, column=0, sticky='w')
+
+        if isinstance(var, tk.DoubleVar):
+            spinbox = tk.Spinbox(new_frame, from_=0, to=max_val, increment=0.01,
+                                textvariable=var, width=6, format="%.2f")
+        else:
+            spinbox = tk.Spinbox(new_frame, from_=0, to=max_val, textvariable=var, width=6)
+
+        spinbox.grid(row=0, column=1, sticky='w')
 
         if right_label is not None:
-            tk.Label(new_frame, text=right_label).grid(row=0, column=2)
+            tk.Label(new_frame, text=right_label).grid(row=0, column=2, sticky='w')
+
 
     def select_file(self, text_var: any, file_type: list):
         """Function that opens a filedialog window and prompts user to select a file from their
@@ -396,166 +394,106 @@ class MapGenFileSelector(FileSelectBase):
         self.root.withdraw()
         self.root.quit()
 
-class SimFolderSelector(FileSelectBase):
-    """Class used to prompt user for inputs to set up a sim
-    """
-    def __init__(self, submit_callback:Callable):
-        """Constructor method, populates tk window with all necessary elements and initializes
-        necessary variables
-        """
-        super().__init__("EMBRS")
 
+class SimFolderSelector(FileSelectBase):
+    def __init__(self, submit_callback: Callable):
+        super().__init__("EMBRS")
         self.submit_callback = submit_callback
 
-        # Define variables
+        # Define Variables
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.weather_file = tk.StringVar()
-        self.init_mf = tk.DoubleVar()
-        self.time_step = tk.IntVar()
-        self.cell_size = tk.IntVar()
-        self.duration = tk.DoubleVar()
-        self.num_runs = tk.IntVar()
+        self.init_mf = tk.DoubleVar(value=8)
+        self.time_step = tk.IntVar(value=5)
+        self.cell_size = tk.IntVar(value=10)
+        self.model_spotting = tk.BooleanVar(value=True)
+        self.canopy_species_name = tk.StringVar(value="Engelmann spruce")
+        self.canopy_species = 0
+        self.dbh_cm = tk.DoubleVar(value=20)
+        self.spot_ign_prob = tk.DoubleVar(value=0.05)
+        self.min_spot_dist = tk.DoubleVar(value=50)
+        self.duration = tk.DoubleVar(value=1.0)
+        self.num_runs = tk.IntVar(value=1)
         self.user_path = tk.StringVar()
         self.user_class_name = tk.StringVar()
-        self.viz_on = tk.BooleanVar()
-        self.skip_log = tk.BooleanVar()
-        self.use_open_meteo = tk.BooleanVar()
-        self.use_weather_file = tk.BooleanVar()
-        self.mesh_resolution = tk.IntVar()
+        self.viz_on = tk.BooleanVar(value=True)
+        self.skip_log = tk.BooleanVar(value=False)
+        self.use_open_meteo = tk.BooleanVar(value=True)
+        self.use_weather_file = tk.BooleanVar(value=False)
+        self.mesh_resolution = tk.IntVar(value=250)
         self.start_date = tk.StringVar()
-        self.end_date = tk.StringVar() 
-        self.start_hour = tk.IntVar()
-        self.start_min = tk.IntVar()
-        self.end_hour = tk.IntVar()
-        self.end_min = tk.IntVar()
-        self.start_ampm = tk.StringVar()
-        self.end_ampm = tk.StringVar()
+        self.end_date = tk.StringVar()
+        self.start_hour = tk.IntVar(value=12)
+        self.start_min = tk.IntVar(value=0)
+        self.end_hour = tk.IntVar(value=12)
+        self.end_min = tk.IntVar(value=0)
+        self.start_ampm = tk.StringVar(value="AM")
+        self.end_ampm = tk.StringVar(value="AM")
 
-        # Define some useful variables
         self.prev_t_unit = "hours"
         self.max_duration = np.inf
         self.class_options = []
         self.user_module = None
 
-        # Set some initial values
-        self.time_step.set(5)
-        self.init_mf.set(8)
-        self.cell_size.set(10)
-        self.duration.set(1.0)
-        self.num_runs.set(1)
-        self.viz_on.set(False)
-        self.skip_log.set(False)
-        self.use_open_meteo.set(True)
-        self.use_weather_file.set(False)
-        self.mesh_resolution.set(250)
-        self.start_hour.set(12)
-        self.start_min.set(0)
-        self.end_hour.set(12)
-        self.end_min.set(0)
-        self.start_ampm.set("AM")
-        self.end_ampm.set("AM")
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill='both')
 
-        frame = self.create_frame(self.root)
+        self.weather_tab = ttk.Frame(self.notebook)
+        self.model_tab = ttk.Frame(self.notebook)
+        self.user_tab = ttk.Frame(self.notebook)
 
-        # Create frame for map folder selection
-        self.create_folder_selector(frame, "Map folder:    ", self.map_folder)
+        self.notebook.add(self.weather_tab, text='Weather Inputs')
+        self.notebook.add(self.model_tab, text='Model Settings')
+        self.notebook.add(self.user_tab, text='User Module')
 
-        # Create frame for log folder selection
-        _, self.log_entry, self.log_button, self.log_frame = self.create_folder_selector(frame, "Log folder:     ", self.log_folder)
-        tk.Checkbutton(self.log_frame, text='Disable logging',
-                variable=self.skip_log).grid(row=0, column=3)
+        self.setup_weather_tab()
+        self.setup_model_tab()
+        self.setup_user_tab()
 
+        self.submit_button = tk.Button(self.root, text="Submit", command=self.submit, state='disabled')
+        self.submit_button.pack(pady=10)
 
-        weather_option_frame = self.create_frame(frame)
+        self.update_datetime()
+        self.open_meteo_toggled()
+
+    def setup_weather_tab(self):
+        self.create_folder_selector(self.weather_tab, "Map folder:", self.map_folder)
+        _, self.log_entry, self.log_button, self.log_frame = self.create_folder_selector(self.weather_tab, "Log folder:", self.log_folder)
+        tk.Checkbutton(self.log_frame, text='Disable logging', variable=self.skip_log, command=self.write_logs_toggled).grid(row=0, column=3)
+        weather_option_frame = self.create_frame(self.weather_tab)
         tk.Label(weather_option_frame, text="Weather Option:").grid(row=0, column=0)
-        tk.Checkbutton(weather_option_frame, text='Import OpenMeteo Weather',
-                       variable=self.use_open_meteo).grid(row=0, column=1)
-        
-        tk.Checkbutton(weather_option_frame, text='Import Weather .json File',
-                       variable=self.use_weather_file).grid(row=0, column=2)
+        tk.Checkbutton(weather_option_frame, text='Import OpenMeteo Weather', variable=self.use_open_meteo, command=self.open_meteo_toggled).grid(row=0, column=1)
+        tk.Checkbutton(weather_option_frame, text='Import Weather .json File', variable=self.use_weather_file, command=self.weather_file_toggled).grid(row=0, column=2)
 
-        self.open_meteo_frame = self.create_frame(frame)
-
+        self.open_meteo_frame = self.create_frame(self.weather_tab)
         tk.Label(self.open_meteo_frame, text="Start Date:").grid(row=0, column=0)
         self.start_cal = DateEntry(self.open_meteo_frame, date_pattern="y-mm-dd", background='white')
-        self.start_cal.grid(row=0, column =1)
+        self.start_cal.grid(row=0, column=1)
         self.start_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
-        
-        # Start time selection
         tk.Label(self.open_meteo_frame, text="Start Time:").grid(row=0, column=2)
-        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, format="%2.0f", textvariable=self.start_hour).grid(row=0, column=3)
-        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, format="%02.0f", textvariable=self.start_min).grid(row=0, column=4, padx=5)
-        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.start_ampm).grid(row=0, column=5, padx=5)
-    
-        # End time selection
-        tk.Label(self.open_meteo_frame, text="End Time:").grid(row=1, column=2)
-        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, format="%2.0f", textvariable=self.end_hour).grid(row=1, column=3)
-        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, format="%02.0f", textvariable=self.end_min).grid(row=1, column=4, padx=5)
-        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.end_ampm).grid(row=1, column=5, padx=5)
+        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, textvariable=self.start_hour).grid(row=0, column=3)
+        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, textvariable=self.start_min).grid(row=0, column=4)
+        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.start_ampm).grid(row=0, column=5)
 
         tk.Label(self.open_meteo_frame, text="End Date:").grid(row=1, column=0)
         self.end_cal = DateEntry(self.open_meteo_frame, date_pattern="y-mm-dd", background='white')
-        self.end_cal.grid(row=1, column =1)
+        self.end_cal.grid(row=1, column=1)
         self.end_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
+        tk.Label(self.open_meteo_frame, text="End Time:").grid(row=1, column=2)
+        tk.Spinbox(self.open_meteo_frame, from_=1, to=12, width=5, textvariable=self.end_hour).grid(row=1, column=3)
+        tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, textvariable=self.end_min).grid(row=1, column=4)
+        ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.end_ampm).grid(row=1, column=5)
 
-        # Create frame for wind file selection
-        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(frame, "Weather file: ", self.weather_file, [("JavaScript Object Notation","*.JSON")])
+        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(self.weather_tab, "Weather file:", self.weather_file, [("JSON Files", "*.json")])
 
-        self.weather_file.set("")
-        self.weather_button.configure(state='disabled')
-        self.weather_entry.configure(state='disabled')
+        weather_settings = self.create_frame(self.weather_tab)
+        self.create_spinbox_with_two_labels(weather_settings, "Wind Mesh Resolution:", np.inf, self.mesh_resolution, "meters", row=0, column=0)
+        self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture:", 100, self.init_mf, "%", row=0, column=1)
 
-        self.create_spinbox_with_two_labels(frame, "Wind Mesh Resolution:       ", np.inf, self.mesh_resolution, "meters") # TODO: the max val of this should probably be set based on sim size
-
-        self.create_spinbox_with_two_labels(frame, "Initial Fuel Moisture:    ", 100, self.init_mf, "%")
-
-        # Create frame for time step selection
-        self.create_spinbox_with_two_labels(frame, "Time step:     ", np.inf, self.time_step, "seconds")
-
-        # Create frame for cell size selection
-        self.create_spinbox_with_two_labels(frame, "Cell size:       ", np.inf, self.cell_size, "meters") # TODO: the max val of this should probably be set based on sim size
-
-        # Create frame for sim time selection
-        self.create_spinbox_with_two_labels(frame, "Duration:       ", self.max_duration, self.duration, "hours")
-
-
-        # Create frame for num runs selection
-        self.create_spinbox_with_two_labels(frame, "Iterations:      ", np.inf,
-
-                                            self.num_runs, None)
-
-        # Create frame for user module selection
-        self.create_file_selector(frame, "User module:", self.user_path, [("python file","*.py")])
-
-        # Create frame for user class selection
-        class_name_frame = tk.Frame(frame)
-        class_name_frame.pack(padx=10,pady=5)
-        tk.Label(class_name_frame, text = "User class name:").grid(row=0, column=0)
-        self.class_opt_menu = tk.OptionMenu(class_name_frame, self.user_class_name,
-                                            self.class_options)
-        self.class_opt_menu.grid(row=0, column=1)
-
-        # Create frame for viz selection
-        viz_frame = tk.Frame(frame)
-        viz_frame.pack(padx=10, pady=5)
-        tk.Checkbutton(viz_frame, text='Visualize in Real-time',
-                       variable = self.viz_on).grid(row=0, column=0)
-
-        # Create a submit button
-        self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
-        self.submit_button.pack(pady=10)
-
-        # Define variable callbacks
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
         self.weather_file.trace_add("write", self.weather_file_changed)
-        self.duration.trace_add("write", self.duration_changed)
-        self.user_path.trace_add("write", self.user_path_changed)
-        self.user_class_name.trace_add("write", self.class_changed)
-        self.skip_log.trace_add("write", self.write_logs_toggled)
-        self.use_open_meteo.trace_add("write", self.open_meteo_toggled)
-        self.use_weather_file.trace_add("write", self.weather_file_toggled)
 
         self.start_hour.trace_add("write", self.update_datetime)
         self.start_min.trace_add("write", self.update_datetime)
@@ -564,29 +502,118 @@ class SimFolderSelector(FileSelectBase):
         self.end_min.trace_add("write", self.update_datetime)
         self.end_ampm.trace_add("write", self.update_datetime)
 
-        self.update_datetime()
+    def setup_model_tab(self):
+        # Create a big frame that will hold two columns
+        self.model_content_frame = self.create_frame(self.model_tab)
+
+        # Now place spinboxes: left side (col=0), right side (col=1)
+        self.create_spinbox_with_two_labels(self.model_content_frame, "Time Step (s):", np.inf, self.time_step, "seconds", row=0, column=0)
+        self.create_spinbox_with_two_labels(self.model_content_frame, "Cell Size (m):", np.inf, self.cell_size, "meters", row=0, column=1)
+
+        self.create_spinbox_with_two_labels(self.model_content_frame, "Duration (hours):", self.max_duration, self.duration, "hours", row=1, column=0)
+        self.create_spinbox_with_two_labels(self.model_content_frame, "Iterations:", np.inf, self.num_runs, None, row=1, column=1)
+
+        self.viz_frame = self.create_frame(self.model_tab)
+        tk.Checkbutton(self.viz_frame, text = "Visualize in Real-time", variable=self.viz_on, onvalue=True, offvalue=False).grid(row = 0, column=0, pady=10)
 
 
-    def update_datetime(self, *args):
-        """Update datetime values whenever any input field changes"""
-        start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
-        start_time = time(start_hr, self.start_min.get())
-        self.start_datetime = datetime.combine(self.start_cal.get_date(), start_time)
 
-        end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
-        end_time = time(end_hr, self.end_min.get())
-        self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
+        # Spotting toggle
+        self.spotting_frame = self.create_frame(self.model_tab)
+        spotting_toggle = tk.Checkbutton(self.spotting_frame, text="Model Spotting", variable=self.model_spotting, onvalue=True, offvalue=False, command=self.model_spotting_toggled)
+        spotting_toggle.grid(row=0, column=0, pady=10)
 
-        if self.end_datetime < self.start_datetime:
-            # User is likely still working on entering dates, don't limit duration
-            self.max_duration = np.inf
+        self.spotting_options_frame = self.create_frame(self.spotting_frame)
+        tk.Label(self.spotting_options_frame, text="Canopy Species:").grid(row=0, column=0)
+        tk.OptionMenu(self.spotting_options_frame, self.canopy_species_name, *CanopySpecies.species_names.values()).grid(row=0, column=1)
+        self.create_spinbox_with_two_labels(self.spotting_options_frame, "Diam. at Breast Height:", 100, self.dbh_cm, 'cm', row=1, column=0)
+        self.create_spinbox_with_two_labels(self.spotting_options_frame, "Spot Ignition Probability:", 1.0, self.spot_ign_prob, "", row=2, column=0)
+        self.create_spinbox_with_two_labels(self.spotting_options_frame, "Min. Spot Distance. (m):", np.inf, self.min_spot_dist, "meters", row=3, column=0)
 
+        self.duration.trace_add("write", self.duration_changed)
+        self.canopy_species_name.trace_add("write", self.canopy_species_changed)
+
+
+    def setup_user_tab(self):
+        self.create_file_selector(self.user_tab, "User module:", self.user_path, [("Python Files", "*.py")])
+        
+        class_name_frame = tk.Frame(self.user_tab)
+        class_name_frame.grid(row=1, column=0, sticky='w', padx=10, pady=5)
+
+        tk.Label(class_name_frame, text="User class name:").grid(row=0, column=0)
+        self.class_opt_menu = tk.OptionMenu(class_name_frame, self.user_class_name, self.class_options)
+        self.class_opt_menu.grid(row=0, column=1)
+
+        self.user_path.trace_add("write", self.user_path_changed)
+        self.user_class_name.trace_add("write", self.class_changed)
+
+    def write_logs_toggled(self, *args):
+        if self.skip_log.get():
+            self.log_button.configure(state='disabled')
+            self.log_entry.configure(state='disabled')
+            self.log_folder.set("")
+        
         else:
-            # Update max duration based on length of forecast
-            forecast_len = self.end_datetime - self.start_datetime
-            forecast_len_hr = forecast_len.total_seconds() / 3600
-            self.max_duration = forecast_len_hr
-            self.duration.set(self.max_duration)
+            self.log_button.configure(state='normal')
+            self.log_entry.configure(state='normal')
+
+        self.validate_fields()
+
+    def model_spotting_toggled(self):
+        if self.model_spotting.get():
+            self.spotting_options_frame.grid(sticky='w', padx= 5, pady=5)
+        else:
+            self.spotting_options_frame.grid_remove()
+
+    def open_meteo_toggled(self, *args):
+        """Callback for the OpenMeteo toggle button. Ensures only OpenMeteo is selected."""
+        if self.use_open_meteo.get():
+            # Turn off weather file option
+            self.use_weather_file.set(False)
+            # Disable weather file widgets
+            self.weather_file.set("")
+            self.weather_button.configure(state='disabled')
+            self.weather_entry.configure(state='disabled')
+            # Enable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='normal')
+        else:
+            self.use_weather_file.set(True)
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='disabled')
+
+            self.weather_button.configure(state='normal')
+            self.weather_entry.configure(state='normal')
+            self.max_duration = np.inf # No limit on duration when using a file
+
+        self.validate_fields()
+
+    def weather_file_toggled(self, *args):
+        """Callback for the Weather File toggle button. Ensures only Weather File is selected."""
+        if self.use_weather_file.get():
+            # Turn off OpenMeteo option
+            self.use_open_meteo.set(False)
+            # Disable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='disabled')
+            # Enable weather file widgets
+            self.weather_button.configure(state='normal')
+            self.weather_entry.configure(state='normal')
+        else:
+            # Prevent both options from being off
+            self.use_open_meteo.set(True)
+            self.use_weather_file.set(False)
+            # Disable weather file widgets
+            self.weather_file.set("")
+            self.weather_button.configure(state='disabled')
+            self.weather_entry.configure(state='disabled')
+            # Enable OpenMeteo widgets
+            for widget in self.open_meteo_frame.winfo_children():
+                widget.configure(state='normal')
+
+
+    def canopy_species_changed(self, *args):        
+        self.canopy_species = CanopySpecies.species_ids[self.canopy_species_name.get()]
 
     def duration_changed(self, *args):
         """Callback function that handles the sim duration changing, prevents values greater than 
@@ -727,65 +754,26 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", "User class must be instance of ControlClass!")
             window.destroy()
 
-    def open_meteo_toggled(self, *args):
-        """Callback for the OpenMeteo toggle button. Ensures only OpenMeteo is selected."""
-        if self.use_open_meteo.get():
-            # Turn off weather file option
-            self.use_weather_file.set(False)
-            # Disable weather file widgets
-            self.weather_file.set("")
-            self.weather_button.configure(state='disabled')
-            self.weather_entry.configure(state='disabled')
-            # Enable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='normal')
+    def update_datetime(self):
+        """Update datetime values whenever any input field changes"""
+        start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
+        start_time = time(start_hr, self.start_min.get())
+        self.start_datetime = datetime.combine(self.start_cal.get_date(), start_time)
+
+        end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
+        end_time = time(end_hr, self.end_min.get())
+        self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
+
+        if self.end_datetime < self.start_datetime:
+            # User is likely still working on entering dates, don't limit duration
+            self.max_duration = np.inf
+
         else:
-            self.use_weather_file.set(True)
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='disabled')
-
-            self.weather_button.configure(state='normal')
-            self.weather_entry.configure(state='normal')
-            self.max_duration = np.inf # No limit on duration when using a file
-
-        self.validate_fields()
-
-    def weather_file_toggled(self, *args):
-        """Callback for the Weather File toggle button. Ensures only Weather File is selected."""
-        if self.use_weather_file.get():
-            # Turn off OpenMeteo option
-            self.use_open_meteo.set(False)
-            # Disable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='disabled')
-            # Enable weather file widgets
-            self.weather_button.configure(state='normal')
-            self.weather_entry.configure(state='normal')
-        else:
-            # Prevent both options from being off
-            self.use_open_meteo.set(True)
-            self.use_weather_file.set(False)
-            # Disable weather file widgets
-            self.weather_file.set("")
-            self.weather_button.configure(state='disabled')
-            self.weather_entry.configure(state='disabled')
-            # Enable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='normal')
-
-        self.validate_fields()
-
-    def write_logs_toggled(self, *args):
-        if self.skip_log.get():
-            self.log_button.configure(state='disabled')
-            self.log_entry.configure(state='disabled')
-            self.log_folder.set("")
-        
-        else:
-            self.log_button.configure(state='normal')
-            self.log_entry.configure(state='normal')
-
-        self.validate_fields()
+            # Update max duration based on length of forecast
+            forecast_len = self.end_datetime - self.start_datetime
+            forecast_len_hr = forecast_len.total_seconds() / 3600
+            self.max_duration = forecast_len_hr
+            self.duration.set(self.max_duration)
 
     def convert_to_24_hr_time(self, hour, ampm):
         if ampm == "PM" and hour != 12:
@@ -834,6 +822,11 @@ class SimFolderSelector(FileSelectBase):
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
                 init_mf = self.init_mf.get()/100,
+                model_spotting = self.model_spotting.get(),
+                canopy_species = self.canopy_species,
+                dbh_cm = self.dbh_cm.get(),
+                spot_ign_prob = self.spot_ign_prob.get(),
+                min_spot_dist = self.min_spot_dist.get(),
                 cell_size = self.cell_size.get(),
                 duration_s = duration_s,
                 visualize = self.viz_on.get(),
