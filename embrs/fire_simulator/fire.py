@@ -576,7 +576,21 @@ class FireSim(BaseFireSim):
                 cell.I_ss = I_list
                 cell.r_h_ss = r_h_ss
                 cell.I_h_ss = I_h_ss
+
+                crown_fire(cell, self.fmc)
+
+                if cell._crown_status != CrownStatus.ACTIVE:
+                    cell.r_ss = r_list
+                    cell.I_ss = I_list
+                    cell.r_h_ss = r_h_ss
+                    cell.I_h_ss = I_h_ss
+                    
                 cell.has_steady_state = True
+
+                if self.model_spotting:
+                    if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                        self.embers.loft(cell, self.curr_time_m)
+
                 cell.set_real_time_vals()
 
         # Update current time
@@ -645,16 +659,17 @@ class FireSim(BaseFireSim):
             cell (Cell): _description_
         """
 
-        if not cell.has_steady_state:
-            r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell)
-            cell.r_ss = r_list
-            cell.I_ss = I_list
-            cell.r_h_ss = r_h_ss
-            cell.I_h_ss = I_h_ss
+        # if not cell.has_steady_state:
+        #     r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell)
+        #     cell.r_ss = r_list
+        #     cell.I_ss = I_list
+        #     cell.r_h_ss = r_h_ss
+        #     cell.I_h_ss = I_h_ss
+
 
         # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
         crown_fire(cell, self.fmc)
-        
+
         if cell._crown_status != CrownStatus.ACTIVE:
             # Update values for cells that are not active crown fires
             cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
@@ -664,10 +679,6 @@ class FireSim(BaseFireSim):
             cell.I_ss = I_list
             cell.r_h_ss = r_h_ss
             cell.I_h_ss = I_h_ss
-        
-        if self.model_spotting:
-            if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
-                self.embers.loft(cell, self.curr_time_m)
 
         cell.has_steady_state = True
 

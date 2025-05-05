@@ -113,7 +113,6 @@ class Cell:
         self._set_wind_adj_factor()
 
         # Variables to keep track of burning fuel content
-        self._fuel_content = 1
         self.fully_burning = False
 
         self.init_dead_mf = cell_data.init_dead_mf
@@ -440,21 +439,6 @@ class Cell:
                 H = self.canopy_height
                 self.wind_adj_factor = 0.555/(np.sqrt(f*3.28*H) * np.log((20 + 1.18*H)/(0.43*H)))
 
-    def _set_fuel_content(self, fuel_content: float):
-        """Sets the remaining fuel content in the cell.
-
-        Fuel content represents the proportion of available fuel, where:
-        - `1.0` indicates a fully fueled cell.
-        - `0.0` indicates a completely burned-out cell.
-
-        Args:
-            fuel_content (float): The amount of fuel remaining in the cell, ranging from 0 to 1.
-
-        Side Effects:
-            - Updates the `_fuel_content` attribute with the specified value.
-        """
-        self._fuel_content = fuel_content
-
     def _set_fuel_type(self, fuel_type: Fuel):
         """Sets the fuel type of the cell based on the selected Fuel Model.
 
@@ -499,8 +483,6 @@ class Cell:
             self.r_h_ss = 0
             self.I_h_ss = 0
             self.r_h_prev = 0
-
-            self.fuel_at_ignition = self._fuel_content
 
     def __str__(self):
         """Returns a formatted string representation of the cell.
@@ -665,12 +647,6 @@ class Cell:
         Can be any of the 13 Anderson FBFMs
         """
         return self._fuel
-
-    @property
-    def fuel_content(self) -> float:
-        """Fraction of fuel remaining at the cell, between 0 and 1
-        """
-        return self._fuel_content
 
     @property
     def state(self) -> CellStates:

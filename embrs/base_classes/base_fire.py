@@ -366,7 +366,7 @@ class BaseFireSim:
                     if road_cell is not None:
                         if road_cell.state == CellStates.FIRE:
                             road_cell._set_state(CellStates.FUEL)
-                        road_cell._set_fuel_content(rc.road_fuel_vals[road_type])
+                        
 
     def _set_firebreaks(self):
         """Updates the simulation grid to incorporate firebreaks.
@@ -403,7 +403,6 @@ class BaseFireSim:
                 cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
 
                 if cell is not None:
-                    cell._set_fuel_content(fuel_val/100)
                     if cell not in self._fire_break_cells:
                         self._fire_break_cells.append(cell)
     
