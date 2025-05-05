@@ -15,9 +15,9 @@ def crown_fire(cell: Cell, fmc: float):
         I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * fmc))**(3/2) # kW/m
 
         # Get the max rate of spread and fireline intensity within the cell
-        R_m_s = cell.r_h_ss # m/s
+        R_m_s = np.max(cell.r_ss)
         R = R_m_s * 60 # R in m/min
-        I_btu_ft_min = cell.I_h_ss
+        I_btu_ft_min = np.max(cell.I_ss)
         I_t = BTU_ft_min_to_kW_m(I_btu_ft_min) # I in kw/m
 
         # Check if fireline intensity is high enough to initiate crown fire
