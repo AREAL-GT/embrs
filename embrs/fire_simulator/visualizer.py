@@ -102,9 +102,6 @@ class Visualizer:
                             legend_elements.append(mpatches.Patch(color = color,
                                                 label = curr_cell.fuel.name))
 
-                        if curr_cell.fuel_content < 1 and curr_cell.fuel.burnable:
-                            fire_breaks.append(polygon)
-                            break_fuel_arr.append(curr_cell.fuel_content)
 
                         # else:
                         polygon.set(color = color)
