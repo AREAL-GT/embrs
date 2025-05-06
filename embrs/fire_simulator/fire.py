@@ -584,7 +584,20 @@ class FireSim(BaseFireSim):
                     cell.I_ss = I_list
                     cell.r_h_ss = r_h_ss
                     cell.I_h_ss = I_h_ss
+
+                if cell._break_width > 0:
+                    flame_len_ft = calc_flame_len(I_h_ss)
+                    flame_len_m = ft_to_m(flame_len_ft)
+
+                    hold_prob = cell.calc_hold_prob(flame_len_m)
                     
+                    rand = np.random.random()
+
+                    cell.breached = rand > hold_prob
+
+                else:
+                    cell.breached = True
+
                 cell.has_steady_state = True
 
                 if self.model_spotting:
@@ -630,10 +643,10 @@ class FireSim(BaseFireSim):
             # Set cell to fully burning when all edges reached
             cell.fully_burning = True
 
-        for idx in intersections:
-            # Check if ignition signal should be sent to each intersecting neighbor
-            self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
-
+        if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
+            for idx in intersections:
+                # Check if ignition signal should be sent to each intersecting neighbor
+                self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
 
     def remove_neighbors(self, cell: Cell):
         # Remove any neighbors which are no longer burnable

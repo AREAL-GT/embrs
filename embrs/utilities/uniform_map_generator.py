@@ -13,7 +13,6 @@ from embrs.map_generator import get_user_data, save_to_file
 
 def generate_uniform_map(map_params: MapParams):
 
-
     elevation_map = np.array([[map_params.uniform_data.elevation]])
     slope_map = np.array([[map_params.uniform_data.slope]])
     aspect_map = np.array([[map_params.uniform_data.aspect]])

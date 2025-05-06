@@ -72,6 +72,12 @@ class Cell:
         self._cell_size = cell_size # defined as the edge length of hexagon
         self._cell_area = self.calc_cell_area()
 
+        # Width in meters of any fuel discontinuity within cell (road or firebreak)
+        self._break_width = 0 
+
+        # Variable to track if fuel discontinuity within cell can be breached
+        self.breached = True
+
     def _set_cell_data(self, cell_data: CellData):
         """_summary_
 
@@ -130,12 +136,8 @@ class Cell:
         self.dynamic_fuel_load = []
         self.burn_idx = -1
 
-        # Set state for non burnable types to BURNT
-        if self._fuel.burnable:
-            self._state = CellStates.FUEL
-        
-        else:
-            self._state = CellStates.BURNT
+        # Default state is fuel
+        self._state = CellStates.FUEL
 
         # Crown fire attribute
         self._crown_status = CrownStatus.NONE
@@ -495,6 +497,36 @@ class Cell:
         return (f"(id: {self.id}, {self.x_pos}, {self.y_pos}, {self.elevation_m}, "
                 f"type: {self.fuel.name}, "
                 f"state: {self.state}")
+    
+    def calc_hold_prob(self, flame_len_m):
+        """Calculate the probability that the fuel break in the cell will hold 
+        Returns 0 if there is no fire break present
+
+        Args:
+            flame_len_m (_type_): _description_
+        """
+        # Mees et. al 1993
+
+        if self._break_width == 0:
+            return 0
+
+        x = self._break_width
+        m = flame_len_m
+        T = 1 # TODO: make this a tunable parameter?
+
+        if m <= 0.61:
+            h = 0
+        elif 0.61 < m < 2.44:
+            h = (m - 0.61)/m
+        else:
+            h = 0.75
+
+        if x < (h*m):
+            prob = 0
+        else:
+            prob = 1 - np.exp(((x - h*m) * np.log(0.15))/(T*m - h*m))
+
+        return prob
 
     def calc_cell_area(self):
         """Calculates the area of the hexagonal cell in square meters.

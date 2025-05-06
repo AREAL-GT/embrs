@@ -447,3 +447,13 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
     e = ((z**2 - 1)**0.5)/z
 
     return e
+
+def calc_flame_len(fli: float):
+    # Fireline intensity in Btu/ft/min
+
+    fli /= 60 # convert to Btu/ft/s
+
+    # Brown and Davis 1973 pg. 175
+    flame_len_ft = 0.45 * fli ** (0.46)
+
+    return flame_len_ft

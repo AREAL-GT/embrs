@@ -170,7 +170,7 @@ class PolygonDrawer:
         self.current_line = None  # For storing the current line segment
         self.temp_line_segments = []  # For storing temporary line segments
         self.lines = []
-        self.fire_break_fuel_vals = []
+        self.fire_break_widths = []
 
         # Parameter to track whether in ignition or fire-break mode
         self.mode = 'ignition'
@@ -469,7 +469,7 @@ class PolygonDrawer:
 
         elif self.mode == 'fire-breaks':
             self.line_segments = []
-            self.fire_break_fuel_vals = []
+            self.fire_break_widths = []
             self.reset_current_lines()
             self.ax.set_title("Draw line segments to specify fire-breaks")
             self.no_fire_breaks_button.ax.set_visible(True)
@@ -504,7 +504,7 @@ class PolygonDrawer:
 
                 val = self.get_fuel_value()
 
-                self.fire_break_fuel_vals.append(val)
+                self.fire_break_widths.append(val)
 
             self.hide_buttons()
             title = "Draw another fire-break line or click 'Apply' to save changes and finish"
@@ -532,13 +532,13 @@ class PolygonDrawer:
         self.fig.canvas.draw()
 
     def get_fuel_value(self) -> float:
-        """Prompts user for the fuel value of a just drawn fire-break
+        """Prompts user for the width of a just drawn fire-break
 
         :return: float fuel value entered by the user
         :rtype: float
         """
         app = QApplication([])
-        request  = "Enter percent fuel remaining in fire break:"
+        request  = "Enter fire break width in meters:"
         value, ok = QInputDialog.getDouble(None, "Input Dialog", request)
         if ok:
             return value
@@ -571,7 +571,7 @@ class PolygonDrawer:
         :type event: matplotlib.backend_bases.MouseEvent
         """
         self.line_segments = []
-        self.fire_break_fuel_vals = []
+        self.fire_break_widths = []
         self.valid = True
         plt.close(self.fig)
 
@@ -599,4 +599,4 @@ class PolygonDrawer:
         :rtype: Tuple[list, list]
         """
 
-        return self.line_segments, self.fire_break_fuel_vals
+        return self.line_segments, self.fire_break_widths

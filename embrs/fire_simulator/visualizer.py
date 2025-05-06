@@ -101,8 +101,6 @@ class Visualizer:
                             added_colors.append(color)
                             legend_elements.append(mpatches.Patch(color = color,
                                                 label = curr_cell.fuel.name))
-
-
                         # else:
                         polygon.set(color = color)
                         tree_patches.append(polygon)
@@ -186,12 +184,12 @@ class Visualizer:
 
             # Plot roads if they exist
             if sim.roads is not None:
-                for road, road_type in sim.roads:
+                for road, road_type, road_width in sim.roads:
                     
                     x, y = road[0], road[1]
 
                     road_color = rc.road_color_mapping[road_type]
-                    h_ax.plot(x, y, color= road_color)
+                    h_ax.plot(x, y, color= road_color, linewidth = 0.25 * road_width)
 
                     if road_color not in added_colors:
                         added_colors.append(road_color)
@@ -203,15 +201,13 @@ class Visualizer:
                 # Create a colormap for grey shades
                 cmap = mpl.colormaps["Greys_r"]
 
-                for fire_break in sim.fire_breaks:
-                    line = fire_break['geometry']
-                    fuel_val = fire_break['fuel_value']
-                    if isinstance(line, LineString):
-                        # Normalize the fuel_val between 0 and 1
-                        normalized_fuel_val = fuel_val / 100.0
+                for fire_break, break_width in sim.fire_breaks:
+                    if isinstance(fire_break, LineString):
+                        # TODO: Should probably just display breaks in one color
+                        normalized_fuel_val = break_width / 100.0
                         color = cmap(normalized_fuel_val)
-                        x, y = line.xy
-                        h_ax.plot(x, y, color=color)
+                        x, y = fire_break.xy
+                        h_ax.plot(x, y, color=color, linewidth=0.25*break_width)
 
             h_ax.legend(handles=legend_elements, loc='upper right', borderaxespad=0)
             self.legend_elements = legend_elements
@@ -248,11 +244,11 @@ class Visualizer:
 
             # Plot roads if they exist
             if sim.roads is not None:
-                for road, road_type in sim.roads:
+                for road, road_type, road_width in sim.roads:
                     x, y = road[0], road[1]
                     
                     road_color = fc.fuel_color_mapping[91]
-                    h_ax.plot(x, y, color= road_color)
+                    # h_ax.plot(x, y, color= road_color, linewidth=0.25 * road_width)
 
             h_ax.legend(handles=saved_legend, loc='upper right', borderaxespad=0)
 

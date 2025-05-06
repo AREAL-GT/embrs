@@ -13,7 +13,7 @@ from embrs.utilities.fuel_models import Fuel
 @dataclass
 class MapDrawerData:
     fire_breaks: Optional[Dict] = field(default_factory=dict)
-    fuel_vals: Optional[List] = field(default_factory=list)
+    break_widths: Optional[List] = field(default_factory=list)
     initial_ign: Optional[List] = field(default_factory=list)
 
 @dataclass

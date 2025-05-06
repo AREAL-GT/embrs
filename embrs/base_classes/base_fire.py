@@ -257,7 +257,7 @@ class BaseFireSim:
 
         # Load scenario specific data
         scenario = map_params.scenario_data
-        self._fire_breaks = zip(scenario.fire_breaks, scenario.fuel_vals)
+        self._fire_breaks = list(zip(scenario.fire_breaks, scenario.break_widths))
         self._initial_ignition = scenario.initial_ign
 
         # Grab starting datetime
@@ -305,7 +305,6 @@ class BaseFireSim:
             self._wind_res = 10e10
             self.wind_forecast = create_uniform_wind(self._weather_stream)
 
-
         self.model_spotting = sim_params.model_spotting
 
         if self.model_spotting:
@@ -342,31 +341,23 @@ class BaseFireSim:
                 cell._burnable_neighbors = dict(neighbors)
 
     def _set_roads(self):
-        """Updates the simulation grid to incorporate roads.
-
-        This method processes the road data and modifies grid cells accordingly. 
-        Roads are defined as a list of coordinate points with an associated type. 
-        If a road cell is currently burning (`CellStates.FIRE`), it is reset to 
-        `CellStates.FUEL`. The fuel content is updated based on road type.
-
-        Side Effects:
-            - Modifies the state of grid cells corresponding to roads.
-            - Updates fuel content for road cells.
-
-        Raises:
-            - None explicitly, but depends on `get_cell_from_xy`.
-
+        """_summary_
         """
-        #TODO: need to figure out how we are going to model roads going forward
         if self.roads is not None:
-            for road, road_type in self.roads:
+            for road, _, road_width in self.roads:
                 for road_x, road_y in zip(road[0], road[1]):
                     road_cell = self.get_cell_from_xy(road_x, road_y, oob_ok = True)
 
                     if road_cell is not None:
+                        if road_width > self._cell_size:
+                            # Set to urban fuel type
+                            road_cell._set_fuel_type(Anderson13(91))
+                        
+                        road_cell._break_width = road_width
+                        
                         if road_cell.state == CellStates.FIRE:
                             road_cell._set_state(CellStates.FUEL)
-                        
+
 
     def _set_firebreaks(self):
         """Updates the simulation grid to incorporate firebreaks.
@@ -391,7 +382,10 @@ class BaseFireSim:
             - Updates the `_fire_break_cells` list with affected cells.
         """
 
-        for line, fuel_val in self.fire_breaks:
+        # TODO: this should set the break_width field of the intersecting cells based on the width of the fire breaks
+        # TODO: If the width of the break is greater than the cell size, set fuel to non-burnable type
+
+        for line, break_width in self.fire_breaks:
             length = line.length
 
             step_size = 0.5
@@ -405,7 +399,12 @@ class BaseFireSim:
                 if cell is not None:
                     if cell not in self._fire_break_cells:
                         self._fire_break_cells.append(cell)
-    
+
+                    if break_width > self._cell_size:
+                        cell._set_fuel_type(Anderson13(91))
+
+                    cell._break_width = break_width
+
     def _set_state_in_polygons(self, polygons: list, state: CellStates):
         """Updates the state of grid cells within given polygons.
 

@@ -1,7 +1,7 @@
 """Module used to run the application that allows users to generate a new map file.
 """
 
-from typing import Tuple, List
+from typing import Tuple, List, Dict, Any
 import json
 import pickle
 import sys
@@ -57,9 +57,9 @@ def generate_map_from_file(map_params: MapParams):
 
         # Convert world coordinates to pixel coordinates
         raster_roads = []
-        for road, road_type in projected_roads:
+        for road, road_type, road_width in projected_roads:
             raster_coords = [world_to_pixel(x, y, map_params.lcp_data.transform, map_params.lcp_data.rows) for x, y in road]
-            raster_roads.append((raster_coords, road_type))
+            raster_roads.append((raster_coords, road_type, road_width))
 
         # Only keep parts of roads within sim boundaries
         map_params.roads = trim_roads(map_params, raster_roads)
@@ -93,7 +93,7 @@ def trim_roads(map: MapParams, raster_roads: List) -> List:
         List: _description_
     """
     trimmed_roads = []
-    for road, road_type in raster_roads:
+    for road, road_type, road_width in raster_roads:
         x_trimmed, y_trimmed = [], []
         x, y = zip(*road)
 
@@ -103,12 +103,12 @@ def trim_roads(map: MapParams, raster_roads: List) -> List:
                 y_trimmed.append(y[i])
 
         if x_trimmed and y_trimmed:
-            trimmed_roads.append(((x_trimmed, y_trimmed), road_type))
+            trimmed_roads.append(((x_trimmed, y_trimmed), road_type, road_width))
         
         x_display = np.array(x_trimmed) / 30
         y_display = np.array(y_trimmed) / 30
 
-        plt.plot(x_display, y_display, color=rc.road_color_mapping[road_type])
+        plt.plot(x_display, y_display, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25) # TODO: play with road width scaling
 
     return trimmed_roads
 
@@ -127,9 +127,9 @@ def project_osm_roads(roads: List[Tuple[List[Tuple[float, float]], str]], src_cr
     transformer = pyproj.Transformer.from_crs(src_crs, dst_crs, always_xy=True)
 
     projected_roads = []
-    for road, road_type in roads:
+    for road, road_type, road_width in roads:
         projected_coords = [transformer.transform(lon, lat) for lon, lat in road]
-        projected_roads.append((projected_coords, road_type))
+        projected_roads.append((projected_coords, road_type, road_width))
 
     return projected_roads
 
@@ -376,7 +376,7 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
     data['roads'] = {'file': road_path}
 
     data['initial_igntion'] = [mapping(polygon) for polygon in user_data.initial_ign]
-    data['fire_breaks'] = [{"geometry": mapping(line), "fuel_value": fuel_value} for line, fuel_value in zip(user_data.fire_breaks, user_data.fuel_vals)]
+    data['fire_breaks'] = [{"geometry": mapping(line), "break_width": break_width} for line, break_width in zip(user_data.fire_breaks, user_data.break_widths)]
 
     map_params.scenario_data = user_data
 
@@ -388,7 +388,7 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
     with open(save_path + "/" + folder_name + ".json", 'w') as f:
         json.dump(data, f, indent=4)
 
-def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Tuple[List[Tuple[float, float]], str]]:
+def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Dict[str, Any]]:
     """
     Fetches road data from OpenStreetMap (OSM) Overpass API within the specified bounding box.
     
@@ -396,7 +396,7 @@ def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Tuple[Lis
         bounds (Tuple): (left, bottom, right, top) in WGS84 coordinates (EPSG:4326).
 
     Returns:
-        List[Tuple[List[Tuple[float, float]], str]]: List of roads with coordinate tuples and road types.
+        List[Dict]: List of dictionaries containing road coordinates, type, and width-related metadata.
     """
     left, bottom, right, top = bounds
     overpass_url = "http://overpass-api.de/api/interpreter"
@@ -427,11 +427,43 @@ def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Tuple[Lis
     roads = []
     for elem in osm_data['elements']:
         if elem['type'] == 'way' and 'highway' in elem['tags']:
-            road_type = elem['tags']['highway']
+            tags = elem['tags']
+            road_type = tags.get('highway')
             road_coords = [nodes[node_id] for node_id in elem['nodes'] if node_id in nodes]
-            if road_coords and road_type in rc.major_road_types:
-                roads.append((road_coords, road_type))
+            if not road_coords or road_type not in rc.major_road_types:
+                continue
 
+            if tags.get('width'):
+                road_width = float(tags.get('width'))
+
+            elif tags.get('est_width'):
+                road_width = float(tags.get('est_width'))
+            
+            else: # Have to estimate the width
+                num_lanes = tags.get('lanes')
+                lane_width = tags.get('lane_width')
+
+                if num_lanes is not None:
+                    num_lanes = int(num_lanes)
+                    if lane_width is not None:
+                        lane_width = float(lane_width)
+                        road_width = num_lanes * lane_width + rc.shoulder_widths_m[road_type]
+
+                    else:
+                        if road_type == 'motorway' and num_lanes > 2:
+                            road_type = 'big_motorway'
+
+                        road_width = num_lanes * rc.lane_widths_m[road_type] + rc.shoulder_widths_m[road_type]
+
+                elif lane_width is not None :
+                    lane_width = float(lane_width)
+                    road_width = rc.default_lanes * lane_width + rc.shoulder_widths_m[road_type]
+                
+                else:
+                    road_width = rc.default_lanes * rc.lane_widths_m[road_type] + rc.shoulder_widths_m[road_type]
+
+            roads.append((road_coords, road_type, road_width))
+            
     print(f"Fetched {len(roads)} roads from OSM.")
     return roads
     
@@ -561,13 +593,13 @@ def get_user_data(fig: matplotlib.figure.Figure) -> dict:
     transformed_polys = transform_polygons(polygons)
     shapely_polygons = get_shapely_polys(transformed_polys)
 
-    lines, fuel_vals = drawer.get_fire_breaks()
+    lines, break_widths = drawer.get_fire_breaks()
     transformed_lines = transform_lines(lines, 30)
     line_strings = [LineString(line) for line in transformed_lines]
 
     user_data = MapDrawerData(
         fire_breaks = line_strings,
-        fuel_vals = fuel_vals,
+        break_widths = break_widths,
         initial_ign = shapely_polygons
     )
 

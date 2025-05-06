@@ -226,45 +226,45 @@ class UniformMapCreator(FileSelectBase):
         self.create_folder_selector(frame, "Save map to:   ", self.map_folder)
 
         # Create frame for slope selection
-        self.create_spinbox_with_two_labels(frame, "Slope:       ", 90, self.slope, "degrees")
+        self.create_spinbox_with_two_labels(frame, "Slope:       ", 90, self.slope, "degrees", row = 1)
 
         # Create frame for aspect selection
-        self.create_spinbox_with_two_labels(frame, "Aspect:       ", 360, self.aspect, "degrees")
+        self.create_spinbox_with_two_labels(frame, "Aspect:       ", 360, self.aspect, "degrees", row = 2)
 
         # Create frame for fuel selection
         fuel_frame = tk.Frame(frame)
-        fuel_frame.pack(padx=10,pady=5)
+        fuel_frame.grid(padx=10,pady=5)
         tk.Label(fuel_frame, text="Uniform Fuel Type:",
-                 anchor="center").grid(row=0, column=0)
+                 anchor="center").grid(row=2, column=0)
 
         tk.OptionMenu(fuel_frame, self.fuel_selection,
-                      *FuelConstants.fuel_names.values()).grid(row=0, column=1)
+                      *FuelConstants.fuel_names.values()).grid(row=2, column=1)
 
 
         # Create frame for canopy height selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Height:       ", 1e7, self.canopy_height, "meters")
+        self.create_spinbox_with_two_labels(frame, "Canopy Height:       ", 1e7, self.canopy_height, "meters", row =4)
 
         # Create frame for canopy cover selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Cover:       ", 100, self.canopy_cover, "%")
+        self.create_spinbox_with_two_labels(frame, "Canopy Cover:       ", 100, self.canopy_cover, "%", row=5)
 
         # Create frame for canopy base height selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Base Height:       ", 1e7, self.canopy_base_height, "meters")
+        self.create_spinbox_with_two_labels(frame, "Canopy Base Height:       ", 1e7, self.canopy_base_height, "meters", row=6)
 
         # Create frame for canopy bulk density selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Bulk Density:       ", 1e7, self.canopy_bulk_density, "kg/m^3")
+        self.create_spinbox_with_two_labels(frame, "Canopy Bulk Density:       ", 1e7, self.canopy_bulk_density, "kg/m^3", row=7)
 
         # Create frame for duff loading selection
-        self.create_spinbox_with_two_labels(frame, "FCCS Type:       ", 1e7, self.fccs_id, "")
+        self.create_spinbox_with_two_labels(frame, "FCCS Type:       ", 1e7, self.fccs_id, "", row=8)
 
         # Create frame for width selection
-        self.create_spinbox_with_two_labels(frame, "Width:       ", 1e7, self.width_m, "meters")
+        self.create_spinbox_with_two_labels(frame, "Width:       ", 1e7, self.width_m, "meters", row=9)
 
         # Create frame for height selection
-        self.create_spinbox_with_two_labels(frame, "Height:       ", 1e7, self.height_m, "meters")
+        self.create_spinbox_with_two_labels(frame, "Height:       ", 1e7, self.height_m, "meters", row=10)
 
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
-        self.submit_button.pack(pady=10)
+        self.submit_button.grid(pady=10)
 
         self.width_m.trace_add("write", self.validate_fields)
         self.height_m.trace_add("write", self.validate_fields)
@@ -351,16 +351,17 @@ class MapGenFileSelector(FileSelectBase):
         
         # Create frame for importing roads
         import_road_frame = tk.Frame(frame)
-        import_road_frame.pack(padx=10,pady=5)
+        import_road_frame.grid(pady=10)
+
         self.import_roads_button = tk.Checkbutton(import_road_frame,
                                    text='Import Roads from OpenStreetMap',
                                    variable = self.import_roads, anchor="center")
 
-        self.import_roads_button.grid(row=0, column=0)
+        self.import_roads_button.grid(row=5, column=0)
 
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
-        self.submit_button.pack(pady=10)
+        self.submit_button.grid(pady=10)
 
         
         self.output_map_folder.trace_add("write", self.validate_fields)

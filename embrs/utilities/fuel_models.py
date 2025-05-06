@@ -18,6 +18,7 @@ References:
 import numpy as np
 import os
 import json
+from embrs.utilities.unit_conversions import *
 
 class Fuel:
     """Represents a generic fuel type with physical and combustion properties.
@@ -89,7 +90,7 @@ class Fuel:
             self.f_i = f_i
             self.f_ij = f_ij
 
-            self.w_0 = w_0 * 0.0459137 # convert to lbs/ft^2
+            self.w_0 =  TPA_to_Lbsft2(w_0) # convert to lbs/ft^2 
             self.w_n = self.w_0 * (1 - self.s_T)
             self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
             self.w_n_live = self.w_n[3] + self.w_n[4]
