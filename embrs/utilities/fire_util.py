@@ -159,30 +159,43 @@ class FuelConstants:
                         99: 'xkcd:black', -100: 'xkcd:red'}
 
 
-class RoadConstants: # TODO: need to change this class to reflect new road modelling approach
-    """Information on the modelling of different road types.
-
-    Attributes:
-        - **major_road_types** (list): list of the names of each of the major road types defined by `OpenStreetMap <https://wiki.openstreetmap.org/wiki/United_States/Road_classification>`_.
-        - **road_fuel_vals** (dict): dictionary mapping road types to the amount of fuel modelled along them.
-        - **road_color_mapping** (dict): dictionary mapping road types to their display color for visualizations.
-
-    """
+class RoadConstants:
     # Road types
     major_road_types = ['motorway', 'trunk' , 'primary', 'secondary',
-                        'tertiary', 'unclassified', 'residential']
+                        'tertiary', 'residential']
 
-    # Fuel values for each road type
-    road_fuel_vals = {'motorway': 0, 'trunk': 0 , 'primary': 0.1, 'secondary': 0.15,
-                      'tertiary': 0.2, 'unclassified': 0.3, 'residential': 0.25}
+    # Standard lane widths for each road type
+    lane_widths_m = {
+        'motorway': 3.66,
+        'big_motorway': 3.66,
+        'trunk': 3.66,
+        'primary': 3.66,
+        'secondary': 3.05,
+        'tertiary': 3.05,
+        'residential': 3.05
+    }
 
+    # Standard shoulder width for each road type (total shoulder width)
+    shoulder_widths_m = {
+        'motorway': 4.27,
+        'big_motorway': 6.10, # For motorways with more than 2 lanes
+        'trunk': 4.27,
+        'primary': 4.27,
+        'secondary': 1.83,
+        'tertiary': 1.83,
+        'residential': 1.83
+    }
+
+    # Standard number of lanes for each road type
+    default_lanes = 2
+    
     road_color_mapping = {
         'motorway': '#4B0082',  # Indigo
+        'big_motorway': '#4B0082',
         'trunk': '#800080',    # Purple
         'primary': '#9400D3',  # DarkViolet
         'secondary': '#9932CC',  # DarkOrchid
         'tertiary': '#BA55D3',  # MediumOrchid
-        'unclassified': '#DA70D6',  # Orchid
         'residential': '#EE82EE',  # Violet
     }
 
