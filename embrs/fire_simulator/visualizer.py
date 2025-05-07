@@ -60,6 +60,9 @@ class Visualizer:
         h_fig = plt.figure(figsize=(10, 10))
         h_ax = h_fig.add_axes([0.05, 0.05, 0.9, 0.9])
 
+        self.h_ax = h_ax
+        self.fig = h_fig
+
         # Create meshgrid for plotting contours
         x = np.arange(0, sim.shape[1])
         y = np.arange(0, sim.shape[0])
@@ -182,7 +185,7 @@ class Visualizer:
                     x, y = road[0], road[1]
 
                     road_color = rc.road_color_mapping[road_type]
-                    h_ax.plot(x, y, color= road_color, linewidth = 0.25 * road_width)
+                    h_ax.plot(x, y, color= road_color, linewidth = self.meters_to_points(road_width))
 
                     if road_color not in added_colors:
                         added_colors.append(road_color)
@@ -234,7 +237,7 @@ class Visualizer:
                     x, y = road[0], road[1]
                     
                     road_color = fc.fuel_color_mapping[91]
-                    # h_ax.plot(x, y, color= road_color, linewidth=0.25 * road_width)
+                    h_ax.plot(x, y, color= road_color, linewidth=self.meters_to_points(road_width))
 
             h_ax.legend(handles=saved_legend, loc='upper right', borderaxespad=0)
 
@@ -296,9 +299,6 @@ class Visualizer:
                                              head_width = 50, color = 'r', zorder= 3)
         
         h_ax.add_artist(self.arrow_obj)
-
-        self.h_ax = h_ax
-        self.fig = h_fig
 
         self.fig.canvas.draw()
         self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
@@ -472,3 +472,11 @@ class Visualizer:
             self.h_ax.scatter(x,y, c=[cmap(norm(time))])
 
         print("Finished visualizing....")
+
+    def meters_to_points(self, meters):
+        fig_width_inch, _ = self.fig.get_size_inches()
+        width_m = self.sim.cell_size * np.sqrt(3) * self.sim.grid_width
+        meters_per_inch = width_m / fig_width_inch
+        meters_per_point = meters_per_inch / 72
+        return meters / meters_per_point
+
