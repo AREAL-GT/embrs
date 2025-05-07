@@ -455,6 +455,9 @@ class Cell:
         """
         self._fuel = fuel_type
 
+        if self._fuel.burnable:
+            self.set_arrays()
+
     def _set_state(self, state: CellStates):
         """Sets the state of the cell.
 
