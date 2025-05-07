@@ -55,6 +55,7 @@ class BaseFireSim:
         self._frontier = set()
         self._fire_break_cells = []
         self.starting_ignitions = []
+        self._urban_cells = []
 
         # List to store agents in the sim
         self._agent_list = []
@@ -150,6 +151,10 @@ class BaseFireSim:
                 # Get data for cell
                 new_cell._set_cell_data(cell_data)
 
+                # If the fuel type is urban add it to urban cell list
+                if fuel_key == 91:
+                    self._urban_cells.append(new_cell)
+
                 # Set wind forecast in cell
                 wind_col = int(np.floor(cell_x/self._wind_res))
                 wind_row = int(np.floor(cell_y/self._wind_res))
@@ -179,6 +184,11 @@ class BaseFireSim:
         # Set burnt cells
         # if not self._burnt_cells is None:
         #     self._set_state_in_polygons(self.burnt_cells, CellStates.BURNT)
+
+        # Overwrite urban cells to their neighbors (road modelling handles fire spread through roads)
+        for cell in self._urban_cells:
+            self._overwrite_urban_fuel(cell)
+
 
         # Apply fire breaks
         self._set_firebreaks()
@@ -352,12 +362,33 @@ class BaseFireSim:
                         if road_width > self._cell_size:
                             # Set to urban fuel type
                             road_cell._set_fuel_type(Anderson13(91))
-                        
+                        else:
+                            if road_cell._fuel.model_num == 91:
+                                self._overwrite_urban_fuel(road_cell)
+
                         road_cell._break_width = road_width
                         
                         if road_cell.state == CellStates.FIRE:
                             road_cell._set_state(CellStates.FUEL)
 
+    def _overwrite_urban_fuel(self, cell: Cell):
+        """_summary_
+
+        Args:
+            cell (Cell): _description_
+        """
+        fuel_types = []
+        for id in cell.neighbors.keys():
+            neighbor = self._cell_dict[id]
+            fuel_num = neighbor._fuel.model_num
+            if neighbor._fuel.burnable:
+                fuel_types.append(fuel_num)
+
+        if fuel_types:
+            counts = np.bincount(fuel_types)
+            new_fuel_num = np.argmax(counts)
+
+            cell._set_fuel_type(Anderson13(new_fuel_num))
 
     def _set_firebreaks(self):
         """Updates the simulation grid to incorporate firebreaks.

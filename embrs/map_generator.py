@@ -61,6 +61,9 @@ def generate_map_from_file(map_params: MapParams):
             raster_coords = [world_to_pixel(x, y, map_params.lcp_data.transform, map_params.lcp_data.rows) for x, y in road]
             raster_roads.append((raster_coords, road_type, road_width))
 
+        # Interpolate points along roads
+        raster_roads = interpolate_roads(raster_roads)
+
         # Only keep parts of roads within sim boundaries
         map_params.roads = trim_roads(map_params, raster_roads)
         
@@ -81,6 +84,42 @@ def generate_map_from_file(map_params: MapParams):
         display_fuel_map = src.read(4)
 
     plt.imshow(np.flipud(display_fuel_map), cmap=cmap, norm=norm)
+
+
+def interpolate_roads(roads: List, spacing_m: float = 0.5):
+    """_summary_
+
+    Args:
+        roads (List): _description_
+        spacing_m (float, optional): _description_. Defaults to 0.5.
+
+    Returns:
+        _type_: _description_
+    """
+    interpolated_roads = []
+
+    for road in roads:
+        interpolated_road = []
+        for i in range(len(road[0]) - 1):
+            start = road[0][i]
+            end = road[0][i + 1]
+
+            dist_m = np.sqrt((start[0] - end[0])**2 + (start[1] - end[1])**2)
+
+            if dist_m > spacing_m:
+                num_points = int(np.ceil(dist_m/spacing_m))
+
+                x = np.linspace(start[0], end[0], num_points)
+                y = np.linspace(start[1], end[1], num_points)
+
+                interpolated_road.extend(list(zip(x,y)))
+            else:
+                interpolated_road.append(start)
+
+        interpolated_road.append(road[0][-1])
+        interpolated_roads.append((interpolated_road, road[1], road[2]))
+
+    return interpolated_roads
 
 def trim_roads(map: MapParams, raster_roads: List) -> List:
     """_summary_

@@ -74,7 +74,6 @@ class Visualizer:
             print("Initializing visualization... ")
             burnt_patches = []
             alpha_arr = [0, 1]
-            break_fuel_arr = [0, 1]
 
             # Add low and high polygons to prevent weird color mapping
             r = 1/np.sqrt(3)
@@ -82,7 +81,6 @@ class Visualizer:
             high_poly = mpatches.RegularPolygon((-10,-10), numVertices=6, radius=r, orientation=0)
             fire_patches = [low_poly, high_poly]
             tree_patches = [low_poly, high_poly]
-            fire_breaks = [low_poly, high_poly]
 
             legend_elements = []
             added_colors = []
@@ -116,9 +114,6 @@ class Visualizer:
             # Create collections grouping cells in each of their states
             tree_coll =  PatchCollection(tree_patches, match_original = True)
 
-            if len(fire_breaks) > 0:
-                breaks_coll = PatchCollection(fire_breaks, edgecolor='none')
-                breaks_coll.set(array= break_fuel_arr, cmap=mpl.colormaps["gist_gray"])
 
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
             if len(alpha_arr) > 0:
@@ -129,11 +124,9 @@ class Visualizer:
 
             burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
 
-            self.collections = [copy.copy(breaks_coll), copy.copy(tree_coll),
-                                copy.copy(fire_coll), copy.copy(burnt_coll)]
+            self.collections = [copy.copy(tree_coll), copy.copy(fire_coll), copy.copy(burnt_coll)]
 
             # Add collections to plot
-            h_ax.add_collection(breaks_coll)
             h_ax.add_collection(tree_coll)
             h_ax.add_collection(fire_coll)
             h_ax.add_collection(burnt_coll)
@@ -197,17 +190,10 @@ class Visualizer:
                                                label = f"Road - {road_type}"))
 
             # Plot firebreaks if they exist
-            if sim.fire_breaks is not None:
-                # Create a colormap for grey shades
-                cmap = mpl.colormaps["Greys_r"]
-
-                for fire_break, break_width in sim.fire_breaks:
-                    if isinstance(fire_break, LineString):
-                        # TODO: Should probably just display breaks in one color
-                        normalized_fuel_val = break_width / 100.0
-                        color = cmap(normalized_fuel_val)
-                        x, y = fire_break.xy
-                        h_ax.plot(x, y, color=color, linewidth=0.25*break_width)
+            for fire_break, break_width in sim.fire_breaks:
+                if isinstance(fire_break, LineString):
+                    x, y = fire_break.xy
+                    h_ax.plot(x, y, color='blue', linewidth=0.25*break_width)
 
             h_ax.legend(handles=legend_elements, loc='upper right', borderaxespad=0)
             self.legend_elements = legend_elements
