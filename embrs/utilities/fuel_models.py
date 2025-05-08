@@ -49,7 +49,7 @@ class Fuel:
     """
     def __init__(self, name: str, model_num: int, burnable, f_i: np.ndarray, f_ij: np.ndarray, w_0: np.ndarray,
                  s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float,
-                 rho_b: float, rel_packing_ratio: float, fc_W: float):
+                 rho_b: float, rel_packing_ratio: float):
         """Initializes a generic fuel model with its physical and combustion properties.
 
         This constructor defines the primary attributes of a fuel model, including 
@@ -113,8 +113,8 @@ class Fuel:
             self.rel_packing_ratio = rel_packing_ratio
             self.rho_b = rho_b
 
-            # TODO: this means live fuels not included in Burnup. Is that what we want?
-            for i in range(3):
+            # TODO: this means live fuels included in Burnup. Is that what we want?
+            for i in range(5):
                 if self.w_0[i] > 0:
                     self.rel_indices.append(i)
 
@@ -181,7 +181,6 @@ class Anderson13(Fuel):
             fuel_bed_depth = None
             rho_b = None
             rel_packing_ratio = None
-            fc_W = None
 
         else:
             f_i = np.array(self._fuel_models["f_i"][model_id])
@@ -193,9 +192,8 @@ class Anderson13(Fuel):
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
-            fc_W = self._fuel_models["fuel_consumption_W"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio, fc_W)
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
 
 class ScottBurgan40(Fuel):
     _fuel_models = None # class-level cache
@@ -229,7 +227,6 @@ class ScottBurgan40(Fuel):
             fuel_bed_depth = None
             rho_b = None
             rel_packing_ratio = None
-            fc_W = None
 
         else:
             f_i = np.array(self._fuel_models["f_i"][model_id])
@@ -241,6 +238,5 @@ class ScottBurgan40(Fuel):
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
-            fc_W = self._fuel_models["fuel_consumption_W"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio, fc_W)
+        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
