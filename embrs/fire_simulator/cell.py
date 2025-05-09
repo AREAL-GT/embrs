@@ -196,24 +196,24 @@ class Cell:
         self.sigma = self._fuel.s[indices]
 
         self.dfms = []
-        fmois = []
+        fmois = np.zeros(5)
 
         if 0 in indices:
             self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
             self.dfms.append(self.dfm1)
-            fmois.append(self.init_dead_mf)
+            fmois[0] = self.init_dead_mf
         if 1 in indices:
             self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
             self.dfms.append(self.dfm10)
-            fmois.append(self.init_dead_mf)
+            fmois[1] = self.init_dead_mf
         if 2 in indices:
             self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
             self.dfms.append(self.dfm100)
-            fmois.append(self.init_dead_mf)
+            fmois[2] = self.init_dead_mf
         if 3 in indices:
-            fmois.append(self.init_live_h_mf)
+            fmois[3] = self.init_live_h_mf
         if 4 in indices:
-            fmois.append(self.init_live_w_mf)
+            fmois[4] = self.init_live_w_mf
 
         self.fmois = np.array(fmois)
 

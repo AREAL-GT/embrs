@@ -471,17 +471,15 @@ class FireSim(BaseFireSim):
             - Currently, fuel moisture content updates are not implemented.
         """
 
-        m_f = get_working_m_f(cell.fuel, cell.fmois)
-        neighbor_m_f = get_working_m_f(neighbor.fuel, neighbor.fmois)
 
         # Get the rate of spread in ft/s
         r_ft_s = m_s_to_ft_min(r_gamma)
 
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_ft_s * calc_heat_sink(cell.fuel, m_f) # TODO: make sure this computation is valid (I think it is)
+        heat_source = r_ft_s * calc_heat_sink(cell.fuel, cell.fmois) # TODO: make sure this computation is valid (I think it is)
 
         # Get the heat sink using the neighbors fuel and moisture content
-        heat_sink = calc_heat_sink(neighbor.fuel, neighbor_m_f)
+        heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)
         
         # Calculate a ignition rate of spread
         r_ign = heat_source / heat_sink
