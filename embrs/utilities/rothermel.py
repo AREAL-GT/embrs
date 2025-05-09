@@ -136,8 +136,6 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
         Tuple[float, float]: _description_
     """
 
-    m_f = get_working_m_f(fuel, m_f)
-
     # Calculate moisture damping constants
     dead_mf, live_mf = get_characteristic_moistures(fuel, m_f)
     live_mx = calc_live_mx(fuel, dead_mf)
@@ -151,21 +149,6 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     R_0 = (I_r * flux_ratio)/heat_sink
 
     return R_0, I_r # ft/min, BTU/ft^2-min
-
-def get_working_m_f(fuel: Fuel, m_f: np.ndarray):
-    indices = fuel.rel_indices
-
-    m_f_temp = []
-
-    j = 0
-    for i in range(5):
-        if i in indices:
-            m_f_temp.append(m_f[j])
-            j += 1
-        else:
-            m_f_temp.append(0)
-
-    return np.array(m_f_temp)
 
 
 def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
