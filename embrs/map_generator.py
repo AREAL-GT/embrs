@@ -16,7 +16,7 @@ import pyproj
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
-from shapely.geometry import Polygon, LineString
+from shapely.geometry import Polygon, LineString, Point
 from shapely.geometry import mapping
 import numpy as np
 
@@ -628,38 +628,44 @@ def get_user_data(fig: matplotlib.figure.Figure) -> dict:
         print("Incomplete data provided. Not writing data to file, terminating...")
         sys.exit(0)
 
-    polygons = drawer.get_ignitions()
-    transformed_polys = transform_polygons(polygons)
-    shapely_polygons = get_shapely_polys(transformed_polys)
+    ignitions = drawer.get_ignitions()
+    initial_ignitions = transform_geometries(ignitions)
 
-    lines, break_widths = drawer.get_fire_breaks()
-    transformed_lines = transform_lines(lines, 30)
-    line_strings = [LineString(line) for line in transformed_lines]
+    breaks, break_widths = drawer.get_fire_breaks()
+    fire_breaks = transform_geometries(breaks)
 
     user_data = MapDrawerData(
-        fire_breaks = line_strings,
+        fire_breaks = fire_breaks,
         break_widths = break_widths,
-        initial_ign = shapely_polygons
+        initial_ign = initial_ignitions
     )
 
     return user_data
 
-def transform_polygons(polygons: list) -> list:
-    """Function to transform polygons to the proper scale for the sim map
+def transform_geometries(geometries: list) -> list:
+    """Transform geometry coordinates to the sim map scale (e.g., scale by 30)."""
+    transformed_geometries = []
 
-    :param polygons: list of polygons drawn by user
-    :type polygons: list
+    for geo in geometries:
+        if isinstance(geo, Point):
+            transformed_pt = Point(geo.x * 30, geo.y * 30)
+            transformed_geometries.append(transformed_pt)
 
-    :return: list of polygons scaled up appropriately
-    :rtype: list
-    """
-    transformed_polygons = []
-    for polygon in polygons:
+        elif isinstance(geo, LineString):
+            scaled_coords = [(x * 30, y * 30) for x, y in geo.coords]
+            scaled_coords = remove_consec_duplicates(scaled_coords)
+            transformed_line = LineString(scaled_coords)
+            transformed_geometries.append(transformed_line)
 
-        transformed_polygon = [(x*30, y*30) for x,y in polygon]
-        transformed_polygons.append(transformed_polygon)
+        elif isinstance(geo, Polygon):
+            scaled_coords = [(x * 30, y * 30) for x, y in geo.exterior.coords]
+            transformed_polygon = Polygon(scaled_coords)
+            transformed_geometries.append(transformed_polygon)
 
-    return transformed_polygons
+        else:
+            raise ValueError(f"Unknown geometry type: {type(geo)}")
+
+    return transformed_geometries
 
 def transform_lines(line_segments: list, scale_factor: float) -> list:
     """Function to transform lines to the proper scale for the sim map

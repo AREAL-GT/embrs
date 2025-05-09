@@ -8,7 +8,7 @@ Also contains various properties on the overall state of the fire.
 """
 
 from typing import Tuple
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon, LineString
 import numpy as np
 from tqdm import tqdm
 import pickle
@@ -179,7 +179,7 @@ class BaseFireSim:
         self._add_cell_neighbors()
 
         # Set initial ignitions
-        self._set_state_in_polygons(self.initial_ignition, CellStates.FIRE)
+        self._set_state_from_geometries(self.initial_ignition, CellStates.FIRE)
 
         # Set burnt cells
         # if not self._burnt_cells is None:
@@ -436,7 +436,7 @@ class BaseFireSim:
 
                     cell._break_width = break_width
 
-    def _set_state_in_polygons(self, polygons: list, state: CellStates):
+    def _set_state_from_geometries(self, geometries: list, state: CellStates):
         """Updates the state of grid cells within given polygons.
 
         This method iterates over a list of polygons and updates the state of 
@@ -465,29 +465,66 @@ class BaseFireSim:
             - Modifies `_cell_grid` by updating cell states.
             - Appends new ignitions to `starting_ignitions` when applicable.
         """
-        for polygon in polygons:
-            minx, miny, maxx, maxy = polygon.bounds
-            # Get row and col indices for bounding box
-            min_row = int(miny // (self.cell_size * 1.5))
-            max_row = int(maxy // (self.cell_size * 1.5))
-            min_col = int(minx // (self.cell_size * np.sqrt(3)))
-            max_col = int(maxx // (self.cell_size * np.sqrt(3)))
+
+        for geom in geometries:
+
+            if isinstance(geom, Polygon):
+                minx, miny, maxx, maxy = geom.bounds
+                # Get row and col indices for bounding box
+                min_row = int(miny // (self.cell_size * 1.5))
+                max_row = int(maxy // (self.cell_size * 1.5))
+                min_col = int(minx // (self.cell_size * np.sqrt(3)))
+                max_col = int(maxx // (self.cell_size * np.sqrt(3)))
+                
+                for row in range(min_row, max_row + 1):
+                    for col in range(min_col, max_col + 1):
+
+                        # Check that row and col are in bounds
+                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
+                            cell = self._cell_grid[row, col]
+
+                            # See if cell is within polygon
+                            if geom.contains(Point(cell.x_pos, cell.y_pos)):
+                                
+                                if state == CellStates.BURNT:
+                                    cell._set_state(state)
+                                
+                                elif state == CellStates.FIRE and cell._fuel.burnable:
+                                    self.starting_ignitions.append((cell, 0))
             
-            for row in range(min_row, max_row + 1):
-                for col in range(min_col, max_col + 1):
+            elif isinstance(geom, LineString):
+                length = geom.length
 
-                    # Check that row and col are in bounds
-                    if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-                        cell = self._cell_grid[row, col]
+                step_size = 0.5
+                num_steps = int(length/step_size) + 1
 
-                        # See if cell is within polygon
-                        if polygon.contains(Point(cell.x_pos, cell.y_pos)):
-                            
-                            if state == CellStates.BURNT:
-                                cell._set_state(state)
-                            
-                            elif state == CellStates.FIRE and cell._fuel.burnable:
-                                self.starting_ignitions.append((cell, 0))
+                for i in range(num_steps):
+                    point = geom.interpolate(i * step_size)
+
+                    cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
+
+                    if cell is not None:
+                        
+                        if state == CellStates.BURNT:
+                            cell._set_state(state)
+                        
+                        elif state == CellStates.FIRE and cell._fuel.burnable and cell not in self.starting_ignitions:
+                            self.starting_ignitions.append((cell, 0))
+
+            elif isinstance(geom, Point):
+                x, y = geom.x, geom.y
+
+                cell = self.get_cell_from_xy(x, y, oob_ok=True)
+
+                if cell is not None:
+                    if state == CellStates.BURNT:
+                        cell._set_state(state)
+                    
+                    elif state == CellStates.FIRE and cell._fuel.burnable and cell not in self.starting_ignitions:
+                        self.starting_ignitions.append((cell, 0))
+
+            else:
+                raise ValueError(f"Unknown geometry type: {type(geom)}")
 
     @property
     def frontier(self) -> list:
