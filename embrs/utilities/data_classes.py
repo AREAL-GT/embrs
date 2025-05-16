@@ -157,6 +157,16 @@ class SimParams:
     user_path: Optional[str] = None
     user_class: Optional[str] = None
     write_logs: Optional[bool] = None
+    prediction_model: Optional[bool] = False
+
+@dataclass
+class PredictorParams:
+    time_horizon_hr: Optional[float] = 2.0
+    time_step_s: Optional[int] = 30
+    cell_size_m: Optional[float] = 30
+    dead_mf: Optional[float] = 0.08
+    live_mf: Optional[float] = 0.30
+
 
 @dataclass
 class WindNinjaTask:

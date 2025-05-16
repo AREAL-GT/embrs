@@ -334,8 +334,8 @@ class Cell:
         self.moist_update = idx
         self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
 
-    def _update_weather(self, idx: int, weather_stream: WeatherStream, uniform: bool):
-        if not uniform:
+    def _update_weather(self, idx: int, weather_stream: WeatherStream, ignore_moisture: bool):
+        if not ignore_moisture:
             # Update moisture content based on weather stream
             self._update_moisture(idx, weather_stream)
 

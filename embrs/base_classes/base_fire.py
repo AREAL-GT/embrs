@@ -15,27 +15,63 @@ import pickle
 import os
 
 from embrs.utilities.embers import Embers
-from embrs.utilities.fire_util import CellStates
-from embrs.utilities.fire_util import RoadConstants as rc
-from embrs.utilities.fire_util import HexGridMath as hex
+from embrs.utilities.fire_util import CellStates, CrownStatus
+from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
 from embrs.utilities.data_classes import SimParams, CellData
 from embrs.fire_simulator.cell import Cell
+from embrs.utilities.crown_model import crown_fire
+from embrs.utilities.rothermel import *
 from embrs.utilities.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
 from embrs.utilities.weather import WeatherStream
+from embrs.utilities.burnup import Burnup
 from embrs.utilities.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
 
 class BaseFireSim:
-    def __init__(self, sim_params: SimParams):
+    def __init__(self, sim_params: SimParams, burnt_region: list = None):
         """Base fire class, takes in a sim input object to initialize a fire simulation object.
 
         Args:
-            sim_input (SimInput): Contains all the data necessary for initializing a sim,
-                                  see SimInput documentation for more info
+            sim_params (SimParams): Contains all the data necessary for initializing a sim
+            burnt_region (list, optional): List of regions that are already burnt. Defaults to None.
+
+        Attributes Initialized:
+            - **Core Parameters:**
+                - display_frequency (int): How often to display updates
+                - _sim_params (SimParams): Original simulation parameters
+                - burnout_thresh (float): Fuel fraction threshold for considering a cell burnt
+
+            - **Progress Tracking:**
+                - _curr_time_s (int): Current simulation time in seconds
+                - _iters (int): Number of iterations completed
+
+            - **Weather Management:**
+                - _curr_weather_idx (int): Current index in weather forecast
+                - _last_weather_update (float): Time of last weather update
+                - weather_changed (bool): Whether weather has changed this iteration
+
+            - **Cell Management:**
+                - _cell_grid (ndarray): 2D array of Cell objects
+                - _cell_dict (dict): Dictionary mapping cell IDs to Cell objects
+                - _updated_cells (dict): Cells modified in current iteration
+                - _burning_cells (list): Currently burning cells
+                - _new_ignitions (list): New ignitions for next iteration
+                - _burnt_cells (list): Cells that have fully burnt
+                - _soaked (list): Cells that have been suppressed
+                - _frontier (set): Cells at the fire front
+                - starting_ignitions (list): Initial ignition points
+
+            - **Crown Fire:**
+                - _active_crowns (list): Cells with active crown fires
+                - _passive_crowns (list): Cells with passive crown fires
+                - _new_active_crown_ignitions (list): New crown fire ignitions
         """
+        print("Base Fire Initializing...")
 
         # Constant parameters
         self.display_frequency = 300
+        self._sim_params = sim_params
+        self.burnout_thresh = 0.01
 
         # Store sim input values in class variables
         self._parse_sim_params(sim_params)
@@ -44,44 +80,54 @@ class BaseFireSim:
         self._curr_time_s = 0
         self._iters = 0
 
+        # Variables to keep track of current wind conditions
+        self._curr_weather_idx = 0
+        self._last_weather_update = 0
+        self.weather_changed = True
+
         # Variable to store logger object
         self.logger = None
 
-        # Containers for cells
-        self._burning_cells = []
-        self._cell_dict = {}
+        # Containers for keeping track of updates to cells 
         self._updated_cells = {}
+
+        # Containers for cells
+        self._cell_dict = {}
         self._soaked = []
+        self._burning_cells = []
+        self._new_ignitions = []
+        self._burnt_cells = []
         self._frontier = set()
         self._fire_break_cells = []
         self.starting_ignitions = []
         self._urban_cells = []
 
-        # List to store agents in the sim
-        self._agent_list = []
-
-        # Boolean indicating if wind has changed since last iteration        
-        self.wind_changed = True
-
-        # Boolean indicating if sim is finished
-        self._finished = False
+        # Crown fire containers
+        self._active_crowns = []
+        self._new_active_crown_ignitions = []
+        self._passive_crowns = []
+        self._scheduled_spot_fires = {}
 
         # Set up backing array
         self._cell_grid = np.empty(self._shape, dtype=Cell)
         self._grid_width = self._cell_grid.shape[1] - 1
         self._grid_height = self._cell_grid.shape[0] - 1
 
-        live_h_mf = self._weather_stream.live_h_mf
-        live_w_mf = self._weather_stream.live_w_mf
-
-        self.fmc = self._weather_stream.fmc
+        if not self.prediction_model:
+            live_h_mf = self._weather_stream.live_h_mf
+            live_w_mf = self._weather_stream.live_w_mf
+            self.fmc = self._weather_stream.fmc
 
         if self.model_spotting:
-            # Limits to pass into Embers
-            limits = (self.x_lim, self.y_lim)
+            if not self.prediction_model:
+                # Limits to pass into Embers
+                limits = (self.x_lim, self.y_lim)
+                # Spot fire modelling class
+                self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
 
-            # Spot fire modelling class
-            self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
+            else:
+                # TODO: Add prediction model spotting
+                pass
 
         # Load Duff loading lookup table from LANDFIRE FCCS
         base_dir = os.path.dirname(__file__)
@@ -93,102 +139,103 @@ class BaseFireSim:
 
         # Populate cell_grid with cells
         id = 0
-        for i in tqdm(range(self._shape[1]), desc="Initializing cells"):
-            for j in range(self._shape[0]):
-                # Initialize cell object
-                new_cell = Cell(id, i, j, self._cell_size)
+        total_cells = self._shape[0] * self._shape[1]
+        with tqdm(total=total_cells, desc="Initializing cells") as pbar:
+            for i in range(self._shape[1]):
+                for j in range(self._shape[0]):
+                    # Initialize cell object
+                    new_cell = Cell(id, i, j, self._cell_size)
 
-                # Initialize cell data class
-                cell_data = CellData()
+                    # Initialize cell data class
+                    cell_data = CellData()
 
-                # Set initial moisture values
-                cell_data.init_dead_mf = self._init_mf
-                cell_data.live_h_mf = live_h_mf
-                cell_data.live_w_mf = live_w_mf
+                    # Set initial moisture values
+                    cell_data.init_dead_mf = self._init_mf
+                    cell_data.live_h_mf = live_h_mf
+                    cell_data.live_w_mf = live_w_mf
 
-                cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
+                    cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
-                # Get row and col of data arrays corresponding to cell
-                data_col = int(np.floor(cell_x/self._data_res))
-                data_row = int(np.floor(cell_y/self._data_res))
-                
-                # Get fuel type
-                fuel_key = self._fuel_map[data_row, data_col]
-                fuel = Anderson13(fuel_key)
-                cell_data.fuel_type = fuel
+                    # Get row and col of data arrays corresponding to cell
+                    data_col = int(np.floor(cell_x/self._data_res))
+                    data_row = int(np.floor(cell_y/self._data_res))
+                    
+                    # Get fuel type
+                    fuel_key = self._fuel_map[data_row, data_col]
+                    fuel = Anderson13(fuel_key)
+                    cell_data.fuel_type = fuel
 
-                # Get cell elevation from elevation map
-                cell_data.elevation = self._elevation_map[data_row, data_col]
-                self.coarse_elevation[j, i] = cell_data.elevation
+                    # Get cell elevation from elevation map
+                    cell_data.elevation = self._elevation_map[data_row, data_col]
+                    self.coarse_elevation[j, i] = cell_data.elevation
 
-                # Get cell aspect from aspect map
-                cell_data.aspect = self._aspect_map[data_row, data_col]
+                    # Get cell aspect from aspect map
+                    cell_data.aspect = self._aspect_map[data_row, data_col]
 
-                # Get cell slope from slope map
-                cell_data.slope_deg = self._slope_map[data_row, data_col]
+                    # Get cell slope from slope map
+                    cell_data.slope_deg = self._slope_map[data_row, data_col]
 
-                # Get canopy cover from canopy cover map
-                cell_data.canopy_cover = self._cc_map[data_row, data_col]
+                    # Get canopy cover from canopy cover map
+                    cell_data.canopy_cover = self._cc_map[data_row, data_col]
 
-                # Get canopy height from canopy height map
-                cell_data.canopy_height = self._ch_map[data_row, data_col]
+                    # Get canopy height from canopy height map
+                    cell_data.canopy_height = self._ch_map[data_row, data_col]
 
-                # Get canopy base height from cbh map
-                cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
+                    # Get canopy base height from cbh map
+                    cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
 
-                # Get canopy bulk density from cbd map
-                cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
+                    # Get canopy bulk density from cbd map
+                    cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
 
-                # Get duff fuel loading from fccs map
-                fccs_id = int(self._fccs_map[data_row, data_col])
-                if duff_lookup.get(fccs_id) is not None:
-                    cell_data.wdf = duff_lookup[fccs_id] # tons/acre
-                else:
-                    # TODO: Figure out why this is sometimes getting called
-                    cell_data.wdf = 0
+                    # Get duff fuel loading from fccs map
+                    fccs_id = int(self._fccs_map[data_row, data_col])
+                    if not self.prediction_model and duff_lookup.get(fccs_id) is not None:
+                        cell_data.wdf = duff_lookup[fccs_id] # tons/acre
+                    else:
+                        # TODO: Figure out why this is sometimes getting called
+                        cell_data.wdf = 0
 
+                    # Get data for cell
+                    new_cell._set_cell_data(cell_data)
 
-                # Get data for cell
-                new_cell._set_cell_data(cell_data)
+                    # If the fuel type is urban add it to urban cell list
+                    if fuel_key == 91:
+                        self._urban_cells.append(new_cell)
 
-                # If the fuel type is urban add it to urban cell list
-                if fuel_key == 91:
-                    self._urban_cells.append(new_cell)
+                    # Set wind forecast in cell
+                    wind_col = int(np.floor(cell_x/self._wind_res))
+                    wind_row = int(np.floor(cell_y/self._wind_res))
 
-                # Set wind forecast in cell
-                wind_col = int(np.floor(cell_x/self._wind_res))
-                wind_row = int(np.floor(cell_y/self._wind_res))
+                    # Account for WindNinja differences in mesh_resolution
+                    if wind_row > self.wind_forecast.shape[1] - 1:
+                        wind_row = self.wind_forecast.shape[1] - 1
 
-                # Account for WindNinja differences in mesh_resolution
-                if wind_row > self.wind_forecast.shape[1] - 1:
-                    wind_row = self.wind_forecast.shape[1] - 1
+                    if wind_col > self.wind_forecast.shape[2] - 1:
+                        wind_col = self.wind_forecast.shape[2] - 1
 
-                if wind_col > self.wind_forecast.shape[2] - 1:
-                    wind_col = self.wind_forecast.shape[2] - 1
+                    wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
+                    wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
+                    new_cell._set_wind_forecast(wind_speed, wind_dir)
 
-                wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
-                wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
-                new_cell._set_wind_forecast(wind_speed, wind_dir)
-
-                # Add cell to the backing array
-                self._cell_grid[j,i] = new_cell
-                self._cell_dict[id] = new_cell
-                id +=1
+                    # Add cell to the backing array
+                    self._cell_grid[j,i] = new_cell
+                    self._cell_dict[id] = new_cell
+                    id +=1
+                    pbar.update(1)
 
         # Populate neighbors field for each cell with pointers to each of its neighbors
         self._add_cell_neighbors()
 
         # Set initial ignitions
         self._set_state_from_geometries(self.initial_ignition, CellStates.FIRE)
-
+        
         # Set burnt cells
-        # if not self._burnt_cells is None:
-        #     self._set_state_in_polygons(self.burnt_cells, CellStates.BURNT)
-
+        if burnt_region is not None:
+            self._set_state_from_geometries(burnt_region, CellStates.BURNT)
+        
         # Overwrite urban cells to their neighbors (road modelling handles fire spread through roads)
         for cell in self._urban_cells:
             self._overwrite_urban_fuel(cell)
-
 
         # Apply fire breaks
         self._set_firebreaks()
@@ -196,7 +243,7 @@ class BaseFireSim:
         # Apply Roads 
         self._set_roads()
         
-        print("Initialization complete...")
+        print("Base initialization complete...")
 
     def _parse_sim_params(self, sim_params: SimParams):
         """Parses and initializes simulation input parameters.
@@ -234,6 +281,8 @@ class BaseFireSim:
             wind_forecast (ndarray): Wind data map (may need flipping).
             wind_forecast_t_step (float): Wind data time step in seconds.
         """
+        # Set prediction model flag
+        self.prediction_model = sim_params.prediction_model
 
         # Load general sim params
         self._cell_size = sim_params.cell_size
@@ -281,10 +330,16 @@ class BaseFireSim:
             # If loading from lcp file change aspect to uphill direction
             self._aspect_map = (180 + self._aspect_map) % 360 
 
+
+            # TODO: Add prediction model wind forecast
+            # if self.prediction_model:
+
+
             # Generate a weather stream
-            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
-            self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
-            
+            if not self.prediction_model:
+                self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
+                self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
+                
             # Get wind data
             self._wind_res = sim_params.weather_input.mesh_resolution
             self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
@@ -349,6 +404,395 @@ class BaseFireSim:
 
                 cell._neighbors = neighbors
                 cell._burnable_neighbors = dict(neighbors)
+
+    def remove_neighbors(self, cell: Cell):
+        # Remove any neighbors which are no longer burnable
+        neighbors_to_rem = []
+        for n_id in cell.burnable_neighbors:
+            neighbor = self._cell_dict[n_id]
+
+            if neighbor.state != CellStates.FUEL:
+                neighbors_to_rem.append(n_id)
+
+        if neighbors_to_rem:
+            for n_id in neighbors_to_rem:
+                del cell.burnable_neighbors[n_id]
+
+        if len(cell.burnable_neighbors) == 0:
+            # Set cell to fully burning when no burnable neighbors remain
+            cell.fully_burning = True        
+
+    def update_steady_state(self, cell: Cell):
+        """Updates the steady state fire spread values for a cell.
+
+        Calculates and sets the steady state rate of spread (ROS) and fireline intensity values 
+        for a given cell. This includes checking for crown fire conditions and updating the cell's 
+        spread parameters accordingly.
+
+        Args:
+            cell (Cell): The cell object to update steady state values for.
+
+        Notes:
+            - For non-crown fires, calculates surface fire ROS and intensity using Rothermel's model
+            - For active crown fires, uses crown fire spread calculations from crown_model.py
+            - Updates cell attributes including:
+                - r_ss: Steady state ROS values
+                - I_ss: Steady state intensity values 
+                - r_h_ss: Horizontal ROS components
+                - I_h_ss: Horizontal intensity components
+                - has_steady_state: Set to True after calculation
+        """
+
+        # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
+        crown_fire(cell, self.fmc)
+
+        if cell._crown_status != CrownStatus.ACTIVE:
+            # Update values for cells that are not active crown fires
+            cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
+            # TODO: can we make this "surface_fire()" and set cell values in the function to make everythign a bit clearer
+            r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+            cell.r_ss = r_list
+            cell.I_ss = I_list
+            cell.r_h_ss = r_h_ss
+            cell.I_h_ss = I_h_ss
+
+        cell.has_steady_state = True
+
+    def propagate_fire(self, cell: Cell):
+        if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
+            cell.fully_burning = True
+
+        # Update extent of fire spread along each direction
+        cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
+
+        # TODO: is there a way to prevent distances that are done from being computed?
+        intersections = np.where(cell.fire_spread > cell.distances)[0]
+
+        # Check where fire spread has reached edge of cell
+        if len(intersections) >= int(len(cell.distances)):
+            # Set cell to fully burning when all edges reached
+            cell.fully_burning = True
+
+        if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
+            for idx in intersections:
+                # Check if ignition signal should be sent to each intersecting neighbor
+                self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+
+    def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
+        """Attempts to ignite neighboring cells based on fire spread conditions.
+
+        This method evaluates fire spread from a burning cell to its neighbors. 
+        If a neighboring cell meets ignition criteria, it is transitioned to the `FIRE` state 
+        and its fire spread parameters are updated.
+
+        Args:
+            cell (Cell): The currently burning cell attempting to ignite its neighbors.
+            r_gamma (float): The rate of spread within the burning cell along the ignition direction.
+            end_point (list): A list of tuples representing fire spread endpoints, where each tuple 
+                            contains:
+                            - An integer indicating the ignition location along the neighboring cell.
+                            - A letter (A-F) indicating which neighbor the fire is spreading to.
+
+        Returns:
+            list: A list of successfully ignited neighboring `Cell` objects.
+
+        Behavior:
+            - Iterates through `end_point` to identify potential ignition locations.
+            - Calls `get_neighbor_from_end_point()` to retrieve the corresponding neighboring cell.
+            - Checks if the neighbor is in a burnable state (`CellStates.FUEL` and has a burnable fuel type).
+            - Computes the **ignition rate of spread** (`r_ign`) using `calc_ignition_ros()`.
+            - If `r_ign > 1e-3`, the neighbor is ignited:
+                - Adds the cell to `_new_ignitions`.
+                - Initializes fire spread parameters (`directions`, `distances`, `end_pts`).
+                - Updates wind conditions using `_update_wind()`.
+                - Computes in-cell fire propagation using `calc_propagation_in_cell()`.
+                - Logs the update to `_updated_cells`
+
+        Notes:
+            - The ignition threshold (`1e-3`) is a placeholder; consider using mass-loss calculations 
+            or setting `R_min` dynamically.
+            - If a neighboring cell is **not** ignitable but exists in `cell.burnable_neighbors`, 
+            it is removed from that list.
+    """
+
+        # Loop through end points
+        for pt in end_point:
+
+            # Get the location of the potential ignition on the neighbor
+            n_loc = pt[0]
+
+            # Get the Cell object of the neighbor
+            neighbor = self.get_neighbor_from_end_point(cell, pt)
+
+            if neighbor:
+                # Check that neighbor state is burnable
+                if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
+                    # Make ignition calculation
+                    neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+                    r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
+                    r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
+
+                    # Check that ignition ros is greater than no wind no slope ros
+                    if 0 < r_0 < r_ign:
+                        self._new_ignitions.append((neighbor, n_loc))
+                        neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+                        neighbor._set_state(CellStates.FIRE)
+
+                        if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
+                            neighbor._crown_status = CrownStatus.ACTIVE
+
+                        neighbor.r_prev_list, _, neighbor.r_h_ss, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
+                        
+                        self._updated_cells[neighbor.id] = neighbor
+
+    def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
+        """Calculates the rate of spread (ROS) required for ignition between a burning cell 
+        and an unburnt neighboring cell.
+
+        This method determines the ignition ROS by comparing the heat source of the burning 
+        cell to the heat sink of the unburned neighbor. The calculation follows:
+
+            r_ign = heat_source_of_burning_cell / heat_sink_of_unburned_neighbor
+
+        where:
+            - `heat_source_of_burning_cell` is calculated as:
+                
+                heat_source_of_burning_cell = r_gamma * heat_sink_of_burning_cell
+
+            This accounts for the energy available for fire spread along the ignition direction.
+            - `r_gamma` represents the rate of spread within the burning cell in the ignition direction.
+            - `heat_sink_of_burning_cell` and `heat_sink_of_unburned_neighbor` are computed 
+            using the **Rothermel fire spread model**, which accounts for fuel properties and moisture content.
+
+        Args:
+            cell (Cell): The burning cell acting as the heat source.
+            neighbor (Cell): The adjacent unburned cell receiving heat (potential ignition target).
+            r_gamma (float): The rate of spread within the burning cell along the igniting direction.
+
+        Returns:
+            float: The calculated ignition rate of spread (ROS), representing the minimum 
+                fire spread rate required for ignition of the neighboring cell.
+
+        Notes:
+            - The `calc_heat_sink` function is used to compute both heat source and sink values.
+            - This method assumes that `r_gamma` is precomputed and valid.
+            - The accuracy of this calculation depends on correct fuel moisture modeling.
+            - Currently, fuel moisture content updates are not implemented.
+        """
+
+
+        # Get the rate of spread in ft/s
+        r_ft_s = m_s_to_ft_min(r_gamma)
+
+        # Get the heat source in the direction of question by eliminating denominator
+        heat_source = r_ft_s * calc_heat_sink(cell.fuel, cell.fmois) # TODO: make sure this computation is valid (I think it is)
+
+        # Get the heat sink using the neighbors fuel and moisture content
+        heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)
+        
+        # Calculate a ignition rate of spread
+        r_ign = heat_source / heat_sink
+
+        return r_ign
+    
+    def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple[int, str]) -> Cell:
+        """Retrieves the neighboring cell corresponding to a fire spread endpoint.
+
+            This method identifies which neighboring cell is adjacent to a given fire spread 
+            endpoint within the burning cell. The endpoint location is represented as a tuple:
+
+                (position_index, neighbor_letter)
+
+            where:
+                - `position_index` (int) is a number from `1-12` indicating the fire spread endpoint 
+                on the neighboring cell.
+                - `neighbor_letter` (str) is a letter from `A-F` indicating which of the six 
+                neighboring cells the endpoint borders.
+
+            The mapping of these conventions is defined in **HexGridMath** (see `utilities.fire_util`).
+
+            Args:
+                cell (Cell): The burning cell from which the fire spreads.
+                end_point (Tuple[int, str]): A tuple representing the endpoint of the fire spread direction.
+
+            Returns:
+                Optional[Cell]: The neighboring cell that the endpoint borders if it exists and is burnable, 
+                                otherwise `None`.
+
+            Notes:
+                - Even-row and odd-row hexagonal grids use different neighbor mappings (handled via `HexGridMath`).
+                - The method ensures that the retrieved neighbor exists within the simulation grid bounds.
+                - Only neighbors listed in `cell.burnable_neighbors` are considered valid.
+            """
+        # Get the letter representing the neighbor location relative to cell
+        neighbor_letter = end_point[1]
+
+        # Get neighbor based on neighbor_letter
+        if cell._row % 2 == 0:
+            diff_to_letter_map = HexGridMath.even_neighbor_letters
+            
+        else:
+            diff_to_letter_map = HexGridMath.odd_neighbor_letters
+
+        # Get the row and col difference between cell and neighbor
+        dx, dy = diff_to_letter_map[neighbor_letter]
+
+        row_n = int(cell.row + dy)
+        col_n = int(cell.col + dx)
+
+        if self._grid_height >= row_n >=0 and self._grid_width >= col_n >= 0:
+            # Retrieve neighbor from cell grid
+            neighbor = self._cell_grid[row_n, col_n]
+
+            # If neighbor in cell's neighbors return it
+            if neighbor.id in cell.burnable_neighbors:
+                return neighbor
+
+        return None
+    
+    def propagate_embers(self):
+        spot_fires = self.embers.flight(self.curr_time_s + (self.time_step/60))
+
+        if spot_fires:
+            # Schedule spot fires using the ignition delay
+            for spot in spot_fires:
+                ign_time = self.curr_time_s + self._spot_delay_s
+
+                if self._scheduled_spot_fires.get(ign_time) is None:
+                    self._scheduled_spot_fires[ign_time] = [spot]
+                else:
+                    self._scheduled_spot_fires[ign_time].append(spot)
+
+        if self._scheduled_spot_fires:
+            # Ignite spots that have been scheduled previously
+            pending_times = list(self._scheduled_spot_fires.keys())
+
+            for time in pending_times:
+                if time <= self.curr_time_s:
+                    # All cells with this time should be ignited
+                    new_spots = self._scheduled_spot_fires[time]
+                    
+                    for spot in new_spots:
+                        self._new_ignitions.append(spot)
+                        self.updated_cells[spot[0].id] = spot[0]
+
+                    del self._scheduled_spot_fires[time]
+
+                if time > self.curr_time_s:
+                    break
+    
+
+    def generate_burn_history_entry(self, cell, fuel_loads):
+        # TODO: this assumes that any live fuel will be totally consumed
+        # TODO: verify this assumption
+
+        entry = [0] * len(cell.fuel.w_0)
+        j = 0
+        for i in range(len(cell.fuel.w_0)):
+            if i in cell.fuel.rel_indices:
+                entry[i] = fuel_loads[j]
+                j += 1
+
+        return entry
+
+    def compute_burn_histories(self, new_ignitions):
+        # TODO: This assumes weather will be static across burn history
+        curr_weather = self._weather_stream.stream[self._curr_weather_idx]
+
+        wind_speed = curr_weather.wind_speed
+
+        if self._uniform_map:
+            # TODO: should uniform maps use temperature too?
+            t_ambF = 75
+        else:
+            t_ambF = curr_weather.temp
+
+        dt = self._time_step
+
+        for cell, _ in new_ignitions:
+            # Reset cell burn history
+            cell.burn_history = []
+
+            # Get cell duff loading (tons/acre)
+            wdf = cell.wdf
+
+            I_r = cell.reaction_intensity  # BTU/ft2/min
+
+            # TODO: should we add wind speed to the burnup model?
+            u = 0   #wind_speed * cell.wind_adj_factor
+            
+            # Get fuel bed depth
+            depth = cell.fuel.fuel_depth_ft
+
+            # Calculate duff moisture content
+            if 2 in cell.fuel.rel_indices:
+                mx = cell.fmois[2]
+            elif 1 in cell.fuel.rel_indices:
+                mx = cell.fmois[1]
+            else:
+                mx = cell.fmois[0]
+
+            dfm = -0.347 + 6.42 * mx
+            dfm = max(dfm, 0.10)
+
+            # Calculate Residence time using FARSITE equation
+            fli = np.max(cell.I_ss) # BTU/ft/min
+            ros = m_s_to_ft_min(np.max(cell.r_ss)) #ft/min
+            
+            t_r = (fli*60) / (ros * I_r) # residence time in seconds
+            
+            # Clip to allowable values in FOFEM
+            t_r = np.min([t_r, 120])
+            t_r = np.max([t_r, 10])
+
+            burn_mgr = Burnup(cell)
+            burn_mgr.set_fire_data(3000, I_r, t_r, u, depth, t_ambF, dt, wdf, dfm)
+
+            burn_mgr.arrays()
+            now = 1
+            d_time = burn_mgr.ti
+            burn_mgr.duff_burn()
+
+            if not (burn_mgr.start(d_time, now)):
+                # Burnup does not predict ignition
+                # Set to amount consumed in flaming front
+                # This is how farsite does it
+                fuel_loads = burn_mgr.get_flaming_front_consumption()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
+                cell.burn_history = [entry]
+
+                continue
+
+            burn_mgr.fi = burn_mgr.fire_intensity()
+
+            if d_time > burn_mgr.tdf:
+                burn_mgr.dfi = 0
+
+            while now <= burn_mgr.ntimes:
+                burn_mgr.step(burn_mgr.dt, d_time, burn_mgr.dfi)
+                now += 1
+
+                d_time += burn_mgr.dt
+                if d_time > burn_mgr.tdf:
+                    burn_mgr.dfi = 0
+
+                burn_mgr.fi = burn_mgr.fire_intensity()
+                
+                if burn_mgr.fi <= burn_mgr.fi_min:
+                    break
+
+                fuel_loads = burn_mgr.get_updated_fuel_loading()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
+                cell.burn_history.append(entry)
+
+            if len(cell.burn_history) == 0:
+                # Intensity was not high enough to ignite
+                # Set to amount consumed in flaming front
+                # This is how farsite does it
+                fuel_loads = burn_mgr.get_flaming_front_consumption()
+                entry = self.generate_burn_history_entry(cell, fuel_loads)
+                cell.burn_history = [entry]
+
 
     def _set_roads(self):
         """_summary_
@@ -568,6 +1012,15 @@ class BaseFireSim:
         return np.mean(x_coords), np.mean(y_coords)
 
     def hex_round(self, q, r):
+        """Rounds floating point hex coordinates to their nearest integer hex coordinates.
+
+        Args:
+            q (float): q coordinate in hex coordinate system
+            r (float): r coordinate in hex coordinate system
+
+        Returns:
+            tuple: (q, r) integer coordinates of the nearest hex cell
+        """
         s = -q - r
         q_r = round(q)
         r_r = round(r)
@@ -592,20 +1045,18 @@ class BaseFireSim:
         (0,0) is considered the lower left corner of the sim window, x increases to the
         right, y increases up.
 
-        :param x_m: x position of the desired point in units of meters
-        :type x_m: float
-        :param y_m: y position of the desired point in units of meters
-        :type y_m: float
-        :param oob_ok: whether out of bounds input is ok, if set to `True` out of bounds input
-                       will return None, defaults to `False`
-        :type oob_ok: bool, optional
-        :raises ValueError: oob_ok is `False` and (x_m, y_m) is out of the sim bounds
-        :return: :class:`~fire_simulator.cell.Cell` at the requested point, returns `None` if the
-                 point is out of bounds and oob_ok is `True`
-        :rtype: :class:`~fire_simulator.cell.Cell`
+        Args:
+            x_m (float): x position of the desired point in units of meters
+            y_m (float): y position of the desired point in units of meters
+            oob_ok (bool, optional): whether out of bounds input is ok, if set to `True` out of bounds input
+                                   will return None. Defaults to False.
+
+        Raises:
+            ValueError: oob_ok is `False` and (x_m, y_m) is out of the sim bounds
+
+        Returns:
+            Cell: Cell at the requested point, returns `None` if the point is out of bounds and oob_ok is `True`
         """
-
-
         try:
             if x_m < 0 or y_m < 0:
                 if not oob_ok:
@@ -636,21 +1087,21 @@ class BaseFireSim:
             return None
 
     def get_cell_from_indices(self, row: int, col: int) -> Cell:
-        """Returns the cell in the sim at the indices [row, col] in 
-           :py:attr:`~fire_simulator.fire.FireSim.cell_grid`.
+        """Returns the cell in the sim at the indices [row, col] in the cell_grid.
         
         Columns increase left to right in the sim visualization window, rows increase bottom to
         top.
 
-        :param row: row index of the desired cell
-        :type row: int
-        :param col: col index of the desired cell
-        :type col: int
-        :raises TypeError: if row or col is not of type int
-        :raises ValueError: if row or col is out of the array bounds
-        :return: :class:`~fire_simulator.cell.Cell` instance at the indices [row, col] in the 
-                 :py:attr:`~fire_simulator.fire.FireSim.cell_grid`.
-        :rtype: :class:`~fire_simulator.cell.Cell`
+        Args:
+            row (int): row index of the desired cell
+            col (int): col index of the desired cell
+
+        Raises:
+            TypeError: if row or col is not of type int
+            ValueError: if row or col is out of the array bounds
+
+        Returns:
+            Cell: Cell instance at the indices [row, col] in the cell_grid
         """
         if not isinstance(row, int) or not isinstance(col, int):
             msg = (f"Row and column must be integer index values. "
@@ -677,31 +1128,23 @@ class BaseFireSim:
     def set_state_at_xy(self, x_m: float, y_m: float, state: CellStates):
         """Set the state of the cell at the point (x_m, y_m) in the Cartesian plane.
 
-        :param x_m: x position of the desired point in meters
-        :type x_m: float
-        :param y_m: y position of the desired point in meters
-        :type y_m: float
-        :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
-                      :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`)
-        :type state: :class:`~utilities.fire_util.CellStates`
+        Args:
+            x_m (float): x position of the desired point in meters
+            y_m (float): y position of the desired point in meters
+            state (CellStates): desired state to set the cell to (CellStates.FIRE,
+                               CellStates.FUEL, or CellStates.BURNT)
         """
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
         self.set_state_at_cell(cell, state)
 
     def set_state_at_indices(self, row: int, col: int, state: CellStates):
-        """Set the state of the cell at the indices [row, col] in 
-        :py:attr:`~fire_simulator.fire.FireSim.cell_grid`.
+        """Set the state of the cell at the indices [row, col] in the cell_grid.
 
-        Columns increase left to right in the sim window, rows increase bottom to top.
-
-        :param row: row index of the desired cell
-        :type row: int
-        :param col: col index of the desired cell
-        :type col: int
-        :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
-                      :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`) if set to
-                      :py:attr:`CellStates.FIRE`
-        :type state: :class:`~utilities.fire_util.CellStates`
+        Args:
+            row (int): row index of the desired cell
+            col (int): col index of the desired cell
+            state (CellStates): desired state to set the cell to (CellStates.FIRE,
+                               CellStates.FUEL, or CellStates.BURNT)
         """
         cell = self.get_cell_from_indices(row, col)
         self.set_state_at_cell(cell, state)
@@ -709,16 +1152,15 @@ class BaseFireSim:
     def set_state_at_cell(self, cell: Cell, state: CellStates):
         """Set the state of the specified cell
 
-        :param cell: :class:`~fire_simulator.cell.Cell` object whose state is to be changed
-        :type cell: :class:`~fire_simulator.cell.Cell`
-        :param state: desired state to set the cell to (:py:attr:`CellStates.FIRE`,
-                      :py:attr:`CellStates.FUEL`, or :py:attr:`CellStates.BURNT`) if set to
-                      :py:attr:`CellStates.FIRE`
-        :type state: :class:`~utilities.fire_util.CellStates`
-        :raises TypeError: if 'cell' is not of type :class:`~fire_simulator.cell.Cell`
-        :raises ValueError: if 'cell' is not a valid :class:`~fire_simulator.cell.Cell` in the 
-                            current fire Sim
-        :raises TypeError: if 'state' is not a valid :class:`~utilities.fire_util.CellStates` value
+        Args:
+            cell (Cell): Cell object whose state is to be changed
+            state (CellStates): desired state to set the cell to (CellStates.FIRE,
+                               CellStates.FUEL, or CellStates.BURNT)
+
+        Raises:
+            TypeError: if 'cell' is not of type Cell
+            ValueError: if 'cell' is not a valid Cell in the current fire Sim
+            TypeError: if 'state' is not a valid CellStates value
         """
         if not isinstance(cell, Cell):
             msg = f"'cell' must be of type 'Cell' not {type(cell)}"
@@ -759,31 +1201,28 @@ class BaseFireSim:
     def set_ignition_at_xy(self, x_m: float, y_m: float):
         """Set a wild fire in the cell at position (x_m, y_m) in the Cartesian plane.
 
-        :param x_m: x position of the desired wildfire ignition point in meters
-        :type x_m: float
-        :param y_m: y position of the desired wildfire ignition point in meters
-        :type y_m: float
+        Args:
+            x_m (float): x position of the desired wildfire ignition point in meters
+            y_m (float): y position of the desired wildfire ignition point in meters
         """
         cell = self.get_cell_from_xy(x_m, y_m)
-        self.set_wild_fire_at_cell(cell)
+        self.set_ignition_at_cell(cell)
 
     def set_ignition_at_indices(self, row: int, col: int):
-        """Set a wild fire in the cell at indices [row, col] in 
-        :py:attr:`~fire_simulator.fire.FireSim.cell_grid`
+        """Set a wild fire in the cell at indices [row, col] in the cell_grid
 
-        :param row: row index of the desired wildfire ignition cell
-        :type row: int
-        :param col: col index of the desired wildfire ignition cell
-        :type col: int
+        Args:
+            row (int): row index of the desired wildfire ignition cell
+            col (int): col index of the desired wildfire ignition cell
         """
         cell = self.get_cell_from_indices(row, col)
-        self.set_wild_fire_at_cell(cell)
+        self.set_ignition_at_cell(cell)
 
     def set_ignition_at_cell(self, cell: Cell):
         """Set a wild fire at a specific cell
 
-        :param cell: :class:`~fire_simulator.cell.Cell` object to set a wildfire in
-        :type cell: :class:`~fire_simulator.cell.Cell`
+        Args:
+            cell (Cell): Cell object to set a wildfire in
         """
         self.set_state_at_cell(cell, CellStates.FIRE)
 
@@ -792,26 +1231,22 @@ class BaseFireSim:
         """Set the fraction of fuel remaining at a point (x_m, y_m) in the Cartesian plane between
         0 and 1.
 
-        :param x_m: x position in meters of the point where fuel content should be changed 
-        :type x_m: float
-        :param y_m: y position in meters of the point where fuel content should be changed
-        :type y_m: float
-        :param fuel_content: desired fuel content at point (x_m, y_m) between 0 and 1. 
-        :type fuel_content: float
+        Args:
+            x_m (float): x position in meters of the point where fuel content should be changed
+            y_m (float): y position in meters of the point where fuel content should be changed
+            fuel_content (float): desired fuel content at point (x_m, y_m) between 0 and 1
         """
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok = True)
         self.set_fuel_content_at_cell(cell, fuel_content)
 
     def set_fuel_content_at_indices(self, row: int, col: int, fuel_content: float):
         """Set the fraction of fuel remanining in the cell at indices [row, col] in 
-        :py:attr:`~fire_simulator.fire.FireSim.cell_grid` between 0 and 1.
+        the cell_grid between 0 and 1.
 
-        :param row: row index of the cell where fuel content should be changed
-        :type row: int
-        :param col: col index of the cell where fuel content should be changed
-        :type col: int
-        :param fuel_content: desired fuel content at indices [row, col} between 0 and 1.
-        :type fuel_content: float
+        Args:
+            row (int): row index of the cell where fuel content should be changed
+            col (int): col index of the cell where fuel content should be changed
+            fuel_content (float): desired fuel content at indices [row, col} between 0 and 1
         """
         cell = self.get_cell_from_indices(row, col)
         self.set_fuel_content_at_cell(cell, fuel_content)
@@ -819,14 +1254,14 @@ class BaseFireSim:
     def set_fuel_content_at_cell(self, cell: Cell, fuel_content: float):
         """Set the fraction of fuel remaining in a cell between 0 and 1
 
-        :param cell: :class:`~fire_simulator.cell.Cell` object to set fuel content in
-        :type cell: :class:`~fire_simulator.cell.Cell`
-        :param fuel_content: desired fuel content at cell between 0 and 1.
-        :type fuel_content: float
-        :raises TypeError: if 'cell' is not of type :class:`~fire_simulator.cell.Cell`
-        :raises ValueError: if 'cell' is not a valid :class:`~fire_simulator.cell.Cell` in the
-                            current sim
-        :raises ValueError: if 'fuel_content' is not between 0 and 1
+        Args:
+            cell (Cell): Cell object to set fuel content in
+            fuel_content (float): desired fuel content at cell between 0 and 1
+
+        Raises:
+            TypeError: if 'cell' is not of type Cell
+            ValueError: if 'cell' is not a valid Cell in the current sim
+            ValueError: if 'fuel_content' is not between 0 and 1
         """
         if not isinstance(cell, Cell):
             msg = f"'cell' must be of type Cell not {type(cell)}"
@@ -865,26 +1300,21 @@ class BaseFireSim:
     def set_fuel_moisture_at_xy(self, x_m: float, y_m: float, fuel_moisture: float):
         """Set the fuel moisture at the point (x_m, y_m) in the Cartesian plane.
 
-        :param x_m: x position in meters of the point where fuel moisture is set
-        :type x_m: float
-        :param y_m: y position in meters of the point where fuel moisture is set
-        :type y_m: float
-        :param fuel_moisture: desired fuel moisture at point (x_m, y_m), between 0 and 1.
-        :type fuel_moisture: float
+        Args:
+            x_m (float): x position in meters of the point where fuel moisture is set
+            y_m (float): y position in meters of the point where fuel moisture is set
+            fuel_moisture (float): desired fuel moisture at point (x_m, y_m), between 0 and 1
         """
-
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
         self.set_fuel_moisture_at_cell(cell, fuel_moisture)
 
     def set_fuel_moisture_at_indices(self, row: int, col: int, fuel_moisture: float):
         """Set the fuel moisture at the cell at indices [row, col] in the sim's backing array.
 
-        :param row: row index of the cell where fuel moisture is set
-        :type row: int
-        :param col: col index of the cell where fuel moisture is set
-        :type col: int
-        :param fuel_moisture: desired fuel moisture at indices [row, col], between 0 and 1.
-        :type fuel_moisture: float
+        Args:
+            row (int): row index of the cell where fuel moisture is set
+            col (int): col index of the cell where fuel moisture is set
+            fuel_moisture (float): desired fuel moisture at indices [row, col], between 0 and 1
         """
         cell = self.get_cell_from_indices(row, col)
         self.set_fuel_moisture_at_cell(cell, fuel_moisture)
@@ -892,14 +1322,14 @@ class BaseFireSim:
     def set_fuel_moisture_at_cell(self, cell: Cell, fuel_moisture: float):
         """Set the fuel mositure at a cell
 
-        :param cell: cell where fuel moisture is set
-        :type cell: :class:`~fire_simulator.cell.Cell`
-        :param fuel_moisture: desired fuel mositure at cell, between 0 and 1.
-        :type fuel_moisture: float
-        :raises TypeError: if 'cell' is not of type :class:`~fire_simulator.cell.Cell`
-        :raises ValueError: if 'cell' is not a valid :class:`~fire_simulator.cell.Cell` in the
-                            current sim
-        :raises ValueError: if 'fuel_moisture' is not between 0 and 1
+        Args:
+            cell (Cell): cell where fuel moisture is set
+            fuel_moisture (float): desired fuel mositure at cell, between 0 and 1
+
+        Raises:
+            TypeError: if 'cell' is not of type Cell
+            ValueError: if 'cell' is not a valid Cell in the current sim
+            ValueError: if 'fuel_moisture' is not between 0 and 1
         """
         if not isinstance(cell, Cell):
             msg = f"'cell' must be of type Cell not {type(cell)}"
@@ -1120,3 +1550,39 @@ class BaseFireSim:
         """List of shapely polygons that were initially ignited at the start of the sim
         """
         return self._initial_ignition
+
+    def _update_weather(self) -> bool:
+        """Updates the current wind conditions based on the forecast.
+
+        This method checks whether the time elapsed since the last wind update exceeds 
+        the wind forecast time step. If so, it updates the wind index and retrieves 
+        the next forecasted wind condition. If the forecast has no remaining entries, 
+        it raises a ValueError.
+
+        Returns:
+            bool: True if the wind conditions were updated, False otherwise.
+
+        Raises:
+            ValueError: If the wind forecast runs out of entries.
+
+        Side Effects:
+            - Updates _last_wind_update to the current simulation time.
+            - Increments _curr_weather_idx to the next wind forecast entry.
+            - Resets _curr_weather_idx to 0 if out of bounds and raises an error.
+        """
+        # Check if a wind forecast time step has elapsed since last update
+        weather_changed = self.curr_time_s - self._last_weather_update >= self.weather_t_step
+
+        if weather_changed:
+            # Reset last wind update to current time
+            self._last_weather_update = self.curr_time_s
+
+            # Increment wind index
+            self._curr_weather_idx += 1
+
+            # Check for out of bounds index
+            if self._curr_weather_idx >= len(self._weather_stream.stream):
+                self._curr_weather_idx = 0
+                raise ValueError("Weather forecast has no more entries!")
+        
+        return weather_changed
