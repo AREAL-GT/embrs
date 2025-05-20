@@ -60,13 +60,15 @@ class BaseFireSim:
                 - _soaked (list): Cells that have been suppressed
                 - _frontier (set): Cells at the fire front
                 - starting_ignitions (list): Initial ignition points
-
-            - **Crown Fire:**
-                - _active_crowns (list): Cells with active crown fires
-                - _passive_crowns (list): Cells with passive crown fires
-                - _new_active_crown_ignitions (list): New crown fire ignitions
         """
-        print("Base Fire Initializing...")
+        
+        prediction = self.is_prediction()
+        
+        if prediction:
+            print("Initializing prediction model backing array...")
+
+        else:
+            print("Initializing fire sim backing array...")
 
         # Constant parameters
         self.display_frequency = 300
@@ -103,9 +105,6 @@ class BaseFireSim:
         self._urban_cells = []
 
         # Crown fire containers
-        self._active_crowns = []
-        self._new_active_crown_ignitions = []
-        self._passive_crowns = []
         self._scheduled_spot_fires = {}
 
         # Set up backing array
@@ -113,13 +112,18 @@ class BaseFireSim:
         self._grid_width = self._cell_grid.shape[1] - 1
         self._grid_height = self._cell_grid.shape[0] - 1
 
-        if not self.prediction_model:
+        if not prediction:
             live_h_mf = self._weather_stream.live_h_mf
             live_w_mf = self._weather_stream.live_w_mf
             self.fmc = self._weather_stream.fmc
 
+        else:
+            live_h_mf = self.live_mf
+            live_w_mf = self.live_mf
+            self.fmc = 100
+
         if self.model_spotting:
-            if not self.prediction_model:
+            if not prediction:
                 # Limits to pass into Embers
                 limits = (self.x_lim, self.y_lim)
                 # Spot fire modelling class
@@ -189,7 +193,7 @@ class BaseFireSim:
 
                     # Get duff fuel loading from fccs map
                     fccs_id = int(self._fccs_map[data_row, data_col])
-                    if not self.prediction_model and duff_lookup.get(fccs_id) is not None:
+                    if not prediction and duff_lookup.get(fccs_id) is not None:
                         cell_data.wdf = duff_lookup[fccs_id] # tons/acre
                     else:
                         # TODO: Figure out why this is sometimes getting called
@@ -281,9 +285,6 @@ class BaseFireSim:
             wind_forecast (ndarray): Wind data map (may need flipping).
             wind_forecast_t_step (float): Wind data time step in seconds.
         """
-        # Set prediction model flag
-        self.prediction_model = sim_params.prediction_model
-
         # Load general sim params
         self._cell_size = sim_params.cell_size
         self._sim_duration = sim_params.duration_s
@@ -330,20 +331,21 @@ class BaseFireSim:
             # If loading from lcp file change aspect to uphill direction
             self._aspect_map = (180 + self._aspect_map) % 360 
 
-
-            # TODO: Add prediction model wind forecast
-            # if self.prediction_model:
-
+            if self.is_prediction():
+                # Set prediction wind forecast to zeros initially
+                self.wind_forecast = np.zeros((1, 1, 1, 2))
+                self.flipud_forecast = self.wind_forecast
+                self._wind_res = 10e10
 
             # Generate a weather stream
-            if not self.prediction_model:
-                self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
+            else:
+                self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info)
                 self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
                 
-            # Get wind data
-            self._wind_res = sim_params.weather_input.mesh_resolution
-            self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
-            self.flipud_forecast = np.empty(self.wind_forecast.shape)
+                # Get wind data
+                self._wind_res = sim_params.weather_input.mesh_resolution
+                self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+                self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
             # Iterate over each layer (time step or vertical level, depending on the dataset structure)
             for layer in range(self.wind_forecast.shape[0]):
@@ -363,7 +365,7 @@ class BaseFireSim:
                 raise ValueError(f"Error: If using a uniform map, OpenMeteo can not be used. Must specify a weather file")
 
             # Create weather stream (just consisting of wind)
-            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info, input_type=sim_params.weather_input.input_type)
+            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info)
             self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
 
             # Create a uniform wind forecast
@@ -438,8 +440,7 @@ class BaseFireSim:
             - Updates cell attributes including:
                 - r_ss: Steady state ROS values
                 - I_ss: Steady state intensity values 
-                - r_h_ss: Horizontal ROS components
-                - I_h_ss: Horizontal intensity components
+
                 - has_steady_state: Set to True after calculation
         """
 
@@ -450,11 +451,9 @@ class BaseFireSim:
             # Update values for cells that are not active crown fires
             cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
             # TODO: can we make this "surface_fire()" and set cell values in the function to make everythign a bit clearer
-            r_list, I_list, r_h_ss, I_h_ss = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+            r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
             cell.I_ss = I_list
-            cell.r_h_ss = r_h_ss
-            cell.I_h_ss = I_h_ss
 
         cell.has_steady_state = True
 
@@ -541,7 +540,7 @@ class BaseFireSim:
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
                             neighbor._crown_status = CrownStatus.ACTIVE
 
-                        neighbor.r_prev_list, _, neighbor.r_h_ss, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
+                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
                         
                         self._updated_cells[neighbor.id] = neighbor
 
@@ -1362,6 +1361,12 @@ class BaseFireSim:
         # Add cell to update dictionary
         self._updated_cells[cell.id] = cell
         self._soaked.append(cell.to_log_format())
+
+    def is_firesim(self) -> bool:
+        return self.__class__.__name__ == "FireSim"
+    
+    def is_prediction(self) -> bool:
+        return self.__class__.__name__ == "FirePredictor"
 
     def add_agent(self, agent: AgentBase):
         """Add agent to sim's list of registered agent.

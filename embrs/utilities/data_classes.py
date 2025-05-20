@@ -128,16 +128,6 @@ class WeatherParams:
     end_datetime: Optional[datetime] = None
 
 @dataclass
-class WeatherSeed: # TODO: this is going to be replaced by WeatherStream
-    params: Optional[WeatherParams] = None
-    time_step: Optional[float] = None
-    input_wind_ht: Optional[float] = None
-    input_wind_ht_units: Optional[str] = None
-    input_wind_vel_units: Optional[str] = None
-    input_temp_units: Optional[str] = None
-    weather_entries: Optional[List[WeatherEntry]] = None
-
-@dataclass
 class SimParams:
     map_params: Optional[MapParams] = None
     log_folder: Optional[str] = None
@@ -157,7 +147,6 @@ class SimParams:
     user_path: Optional[str] = None
     user_class: Optional[str] = None
     write_logs: Optional[bool] = None
-    prediction_model: Optional[bool] = False
 
 @dataclass
 class PredictorParams:
@@ -166,7 +155,6 @@ class PredictorParams:
     cell_size_m: Optional[float] = 30
     dead_mf: Optional[float] = 0.08
     live_mf: Optional[float] = 0.30
-
 
 @dataclass
 class WindNinjaTask:

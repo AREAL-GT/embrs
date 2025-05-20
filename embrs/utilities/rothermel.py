@@ -37,7 +37,7 @@ def calc_propagation_in_cell(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarra
 
     r_list, I_list = calc_vals_for_all_directions(cell, R_h, I_r, alpha, e)
     
-    return r_list, I_list, ft_min_to_m_s(R_h), I_h
+    return r_list, I_list
 
 def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
     spread_directions = np.deg2rad(cell.directions)

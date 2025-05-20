@@ -325,7 +325,7 @@ class UtilFuncs:
         if not cells:
             return None
 
-        polygons = [Polygon(UtilFuncs.hexagon_vertices(cell.x_pos, cell.y_pos, cell.cell_size)) for cell in cells]
+        polygons = [cell.polygon for cell in cells]
 
         merged_polygon = unary_union(polygons)
 

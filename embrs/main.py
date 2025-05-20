@@ -315,8 +315,8 @@ def load_sim_params(cfg_path: str) -> SimParams:
     min_spot_dist_m = config["Simulation"].getfloat("min_spot_dist_m", 50)
     spot_delay_s = config["Simulation"].getint("spot_delay_s", 30)
 
-    user_class = config["Simulation"].get("user_class", None)
-    user_path = config["Simulation"].get("user_path", None)
+    user_class = str(config["Simulation"].get("user_class", None))
+    user_path = str(config["Simulation"].get("user_path", None))
 
     if user_class is None or user_path is None:
         user_class = ""

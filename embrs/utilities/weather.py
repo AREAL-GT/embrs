@@ -14,9 +14,10 @@ from embrs.utilities.data_classes import *
 # TODO: Document this file
 
 class WeatherStream:
-    def __init__(self, params: WeatherParams, geo: GeoInfo, input_type = "OpenMeteo"):
+    def __init__(self, params: WeatherParams, geo: GeoInfo):
         self.params = params
         self.geo = geo
+        input_type = params.input_type
 
         if input_type == "OpenMeteo":
             self.get_stream_from_openmeteo()

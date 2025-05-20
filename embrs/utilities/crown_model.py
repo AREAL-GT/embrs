@@ -68,7 +68,7 @@ def crown_fire(cell: Cell, fmc: float):
             if r_actual >= rac:
                 # Active crown fire
                 cell._crown_status = CrownStatus.ACTIVE
-                cell.r_ss, cell.I_ss, cell.r_h_ss, cell.I_h_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
+                cell.r_ss, cell.I_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
 
             else:
                 # Passive crown fire
@@ -230,7 +230,7 @@ def calc_crown_propagation(cell, r_actual, alpha, vec_mag, sfc, cfb):
     r_list, I_list = calc_vals_for_all_directions(cell, r_actual, I_h, alpha, e)
 
     # return values in m/s and BTU/ft/min
-    return r_list, I_list, ft_min_to_m_s(r_actual), I_h, flame_len_m
+    return r_list, I_list, flame_len_m
 
 def crown_loading_burned(cell, cfb):
     cbd = cell.canopy_bulk_density
