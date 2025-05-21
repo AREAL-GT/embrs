@@ -527,7 +527,8 @@ class BaseFireSim:
                 # Check that neighbor state is burnable
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
-                    neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+                    if self.is_firesim(): # TODO: better way to handle with wanting to update moisture, but wind only populated for cells that are ignited for prediction model?
+                        neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 

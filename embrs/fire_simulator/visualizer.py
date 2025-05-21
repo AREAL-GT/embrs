@@ -420,24 +420,25 @@ class Visualizer:
         self.elapsed_text.set_text(time_str)
 
         # Plot agents at current time if they exist
-        if len(sim.agent_list) > 0:
-            if self.agents is not None:
-                for a in self.agents:
-                    a.remove()
-            if self.agent_labels is not None:
-                for label in self.agent_labels:
-                    label.remove()
+        if isinstance(sim, FireSim):
+            if len(sim.agent_list) > 0:
+                if self.agents is not None:
+                    for a in self.agents:
+                        a.remove()
+                if self.agent_labels is not None:
+                    for label in self.agent_labels:
+                        label.remove()
 
-            self.agents = []
-            for agent in sim.agent_list:
-                a = self.h_ax.scatter(agent.x, agent.y, marker=agent.marker, color=agent.color)
-                self.agents.append(a)
+                self.agents = []
+                for agent in sim.agent_list:
+                    a = self.h_ax.scatter(agent.x, agent.y, marker=agent.marker, color=agent.color)
+                    self.agents.append(a)
 
-            self.agent_labels = []
-            for agent in sim.agent_list:
-                if agent.label is not None:
-                    label = self.h_ax.annotate(agent.label, (agent.x, agent.y))
-                    self.agent_labels.append(label)
+                self.agent_labels = []
+                for agent in sim.agent_list:
+                    if agent.label is not None:
+                        label = self.h_ax.annotate(agent.label, (agent.x, agent.y))
+                        self.agent_labels.append(label)
 
         sim.updated_cells.clear()
 

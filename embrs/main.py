@@ -78,6 +78,10 @@ def run_sim(fire: FireSim, viz: Visualizer, progress_bar: tqdm, loader_window: L
     if user_code_path == "":
         user = None
     else:
+        user_module_dir = os.path.dirname(user_code_path)
+        if user_module_dir not in sys.path:
+            sys.path.insert(0, user_module_dir)
+
         # Strip the extension and path
         user_module_name = os.path.splitext(os.path.basename(user_code_path))[0]
 

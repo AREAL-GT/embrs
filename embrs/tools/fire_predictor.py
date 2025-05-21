@@ -1,453 +1,274 @@
-"""Module for running a prediction on a fire to project its state in a set amount of time.
 
-Runs a simplified version of the fire simulator to provide predictions.
-
-Utilizes a homogenous fuel map, adds noise to the wind forecast, and has the ability to be biased
-towards a more or less conservative prediction.
-
-.. autoclass:: FirePredictor
-    :members:
-
-"""
-from embrs.fire_simulator.fire import FireSim, Cell
 from embrs.base_classes.base_fire import BaseFireSim
-from embrs.utilities.fire_util import FireTypes, CellStates, UtilFuncs, cell_type, action_type
-from embrs.utilities.action import *
-from embrs.utilities.fire_util import RoadConstants as rc
+from embrs.fire_simulator.fire import FireSim
+from embrs.fire_simulator.cell import Cell
+from embrs.fire_simulator.visualizer import Visualizer
+from embrs.utilities.data_classes import PredictorParams, CellData
+from embrs.utilities.fire_util import UtilFuncs, CellStates
+from embrs.utilities.fuel_models import Anderson13
+from embrs.utilities.rothermel import *
+from embrs.utilities.crown_model import *
+from embrs.utilities.wind_forecast import run_windninja
 
-from shapely.geometry import Point
-
+import copy
 import numpy as np
-import mmap
-import subprocess
-import struct
-import os
 
 class FirePredictor(BaseFireSim):
-    """Predictor class responsible for running predictions over a fixed time horizon.
+    def __init__(self, params: PredictorParams, fire: FireSim):
 
-    :param orig_fire: FireSim object to predict the future spread for.
-    :type orig_fire: FireSim
-    :param time_horizon_hr: Time horizon in hours for which the model should predict over.
-    :type time_horizon_hr: float
-    :param fuel_type: Fuel type to be used for the predictor's homogenous fuel map. If -1, the
-        dominant fuel type in the original map will be used, defaults to -1
-    :type fuel_type: int, optional
-    :param bias: Bias term that controls how conservative the model is, will tend to over-predict
-        if >1, under-predict if <1, defaults to 1
-    :type bias: float, optional
-    :param time_step_s: Time step in seconds used for the prediction. This will be the temporal 
-        granularity of prediction result. If None, the time step of orig_fire will be used.
-    :type time_step_s: float
-    :param cell_size_m: Cell size in meters used for the prediction. This will be the spatial
-        granularity of the prediction result. If None, the cell size of orig_fire will be used.
-    :type cell_size_m: float, defaults to None
-    """
-    def __init__(self, orig_fire: FireSim, time_horizon_hr: float, fuel_type: int = -1, bias: float = 1, time_step_s: float = None, cell_size_m: float = None):
-        """Constructor for prediction model.
-        """
-        # Define the path to the bin folder
-        self.bin_folder = os.path.join(os.path.dirname(__file__), '..', 'bin')
-        os.makedirs(self.bin_folder, exist_ok=True)  # Create the bin directory if it doesn't exist
+        # Live reference to the fire sim
+        self.fire = fire
+        self.c_size = -1
+
+        self.beta_s = 0.5
+        self.beta_d = 0.5
+
+        self.wnd_spd_uncertainty = 2
+        self.wnd_dir_uncertainty = 5
+
+        self.set_params(params)
+
+    def set_params(self, params: PredictorParams):
+
+        generate_cell_grid = False
+
+        # How long the prediction will run for
+        self.time_horizon_hr = params.time_horizon_hr
+
+        # If cell size has changed since last set params, regenerate cell grid
+        cell_size = params.cell_size_m
+        if cell_size != self.c_size:
+            generate_cell_grid = True
+
+        # Track cell size
+        self.c_size = cell_size
+
+        # Set constant fuel moistures
+        self.dead_mf = params.dead_mf
+        self.live_mf = params.live_mf
+
+        # Update relevant sim_params for prediction model for initialization
+        sim_params = copy.deepcopy(self.fire._sim_params)
+        sim_params.cell_size = params.cell_size_m
+        sim_params.t_step_s = params.time_step_s
+        sim_params.duration_s = self.time_horizon_hr * 3600
+        sim_params.init_mf = params.dead_mf
+
+        # Set the currently burning cells as the initial ignition region
+        burning_cells = [cell for cell, _ in self.fire._burning_cells]
+
+        # Get the merged polygon representing burning cells
+        sim_params.map_params.scenario_data.initial_ign = UtilFuncs.get_cell_polygons(burning_cells)
+        burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+
+        if generate_cell_grid:
+            super().__init__(sim_params, burnt_region=burnt_region)
+
+    def run(self, visualize = False):
+        # Catch states of predcictor cells up with the fire sim
+        self._catch_up_with_fire()
+
+        self.output = {}
+
+        viz = None
+        if visualize:
+            viz = Visualizer(self)
         
-        # Define file paths
-        self.cell_filename = os.path.join(self.bin_folder, 'cells.dat')
-        self.action_filename = os.path.join(self.bin_folder, 'actions.dat')
-        self.output_path = os.path.join(self.bin_folder, 'prediction.bin')
-        self.control_output_path = os.path.join(self.bin_folder, 'control_prediction.bin')
+        # Perform the prediction
+        self._prediction_loop(viz)
 
-        if time_step_s is None:
-            time_step_s = orig_fire.time_step * 2
+        return self.output
+    
+    def _set_prediction_forecast(self, cell):
+        wind_col = int(np.floor(cell.x_pos/self._wind_res))
+        wind_row = int(np.floor(cell.y_pos/self._wind_res))
 
-        self._time_step = time_step_s
-        self._cell_size = cell_size_m
+        if wind_row > self.wind_forecast.shape[1] - 1:
+            wind_row = self.wind_forecast.shape[1] - 1
 
-        # TODO: Should we stick to single fuel type or use full fuel map?
-        # if not isinstance(fuel_type, int) or fuel_type <= 0 or fuel_type > 13:
-        #     if fuel_type != -1:
-        #         orig_fire.logger.log_message("Invalid fuel type passed to prediction model, defaulted to dominant fuel type in original map")
-        #         print("Invalid fuel type passed to prediction model, defaulted to dominant fuel type in original map")
+        if wind_col > self.wind_forecast.shape[2] - 1:
+            wind_col = self.wind_forecast.shape[2] - 1
 
-        #     fuel_type = UtilFuncs.get_dominant_fuel_type(orig_fire.base_fuel_map)
+        wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
+        wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
+        cell._set_wind_forecast(wind_speed, wind_dir)
 
-        fuel_map = orig_fire.fuel_map
-        fuel_res = orig_fire.fuel_res
+    def _init_iteration(self):
 
-        self.bias = bias
+        self._curr_time_s = (self._iters * self._time_step) + self.start_time_s
 
-        topography_map = orig_fire.base_topography
-        topography_res = orig_fire.topography_res
+        if self._iters == 0:
 
-        wind_forecast = self.generate_noisy_wind(orig_fire.wind_vec._forecast)
-        wind_t_step = orig_fire.wind_vec._time_step
+            self.weather_changed = True
+            self._new_ignitions = self.starting_ignitions
 
-        self.wind_forecast = wind_forecast
-        self.wind_t_step = wind_t_step
+            for cell, loc in self._new_ignitions:
+                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
+                cell._set_state(CellStates.FIRE)
 
-        self.wind_forecast_str = ' '.join(f"{u} {v}" for u, v in self.wind_forecast)
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
+                cell.r_ss = r_list
+                cell.I_ss = I_list
+                cell.has_steady_state = True
 
-        roads = orig_fire.roads
-        fire_breaks = orig_fire.fire_breaks
+                # Don't model fire acceleration in prediction model
+                cell.r_t = r_list
+                cell.I_t = I_list
 
-        self.time_horizon_hr = time_horizon_hr
+                self._updated_cells[cell.id] = cell
 
-        has_prescribed_burns = False
+                self._set_prediction_forecast(cell)
 
-        wildfires = []
-        prescribed_fires = []
+        else:
+            for cell, loc in self._new_ignitions:
+                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
 
-        for fire in orig_fire.curr_fires:
-            if fire.fire_type == FireTypes.WILD:
-                wildfires.append(fire)
-            else:
-                has_prescribed_burns = True
-                prescribed_fires.append(fire)
+                cell.r_ss = r_list
+                cell.I_ss = I_list
 
+                crown_fire(cell, self.fmc)
 
-        # extract initial ignition from curr_fires of orig_fire
-        initial_ignition = UtilFuncs.get_cell_polygons(wildfires)
+                if cell._break_width > 0:
+                    # Determine if fire will breach fireline contained within cell
+                    flame_len_ft = calc_flame_len(np.max(cell.I_ss))
+                    flame_len_m = ft_to_m(flame_len_ft)
+                    hold_prob = cell.calc_hold_prob(flame_len_m)
+                    rand = np.random.random()
+                    cell.breached = rand > hold_prob
+
+                else:
+                    cell.breached = True
+
+                cell.has_steady_state = True
+
+                if self.model_spotting:
+                    if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                        pass # TODO: implement simplified probabilistic spotting model
+
+                # Don't model fire acceleration in prediction model
+                cell.r_t = cell.r_ss
+                cell.I_t = cell.I_ss
+
+                if self.output.get(self._curr_time_s) is None:
+                    self.output[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
+
+                else:
+                    self.output[self._curr_time_s].append((cell.x_pos, cell.y_pos))
+
+                self._set_prediction_forecast(cell)
         
-        if has_prescribed_burns:
-            prescribed_ignition = UtilFuncs.get_cell_polygons(prescribed_fires)
+        if self._curr_time_s >= self._end_time:
+            return False
 
-        sim_size = orig_fire.size
-        burnt_cells = UtilFuncs.get_cell_polygons(orig_fire._burnt_cells)
+        # Check if weather has changed
+        self.weather_changed = self._update_weather()
 
+        # Add any new ignitions to the current set of burning cells
+        self._burning_cells.extend(self._new_ignitions)
+        # Reset new ignitions
+        self._new_ignitions = []
 
-        num_cols = int(np.floor(sim_size[0]/(np.sqrt(3)*cell_size_m)))
-        num_rows = int(np.floor(sim_size[1]/(1.5*cell_size_m)))
+        return True
 
-        self._shape = (num_rows, num_cols)
+    def _prediction_loop(self, viz):
 
-        self._cell_grid = np.zeros((num_rows, num_cols), dtype=cell_type)
+        self._iters = 0
 
-        # Populate cell_grid with cells
-        id = 0
-        for i in range(num_cols):
-            for j in range(num_rows):
-                # Initialize cell object
-                self._cell_grid[j, i]['id'] = id
-                
-                self._cell_grid[j, i]['state'] = CellStates.FUEL # TODO: define states in pyhton
-                self._cell_grid[j, i]['indices']['i'] = j
-                self._cell_grid[j, i]['indices']['j'] = i
+        while self._init_iteration():
 
-                if j % 2 == 0:
-                    x_pos = i * cell_size_m * np.sqrt(3)
-                else: 
-                    x_pos = (i + 0.5) * cell_size_m * np.sqrt(3)
+            for cell, loc in self._burning_cells:
 
-                y_pos = j * cell_size_m * 1.5
-
-                self._cell_grid[j, i]['position']['x'] = x_pos
-                self._cell_grid[j, i]['position']['y'] = y_pos
-                self._cell_grid[j, i]['fuelType'] = fuel_type
-                self._cell_grid[j, i]['fuelContent'] = 1.0
-                self._cell_grid[j, i]['changed'] = False
-
-                self._cell_grid[j, i]['moisture'] = 0.08
-
-                fuel_col = int(np.floor(x_pos/fuel_res))
-                fuel_row = int(np.floor(y_pos/fuel_res))
-
-                self._cell_grid[j, i]['fuelType'] = fuel_map[fuel_row, fuel_col]
-
-                # Set cell elevation from topography map
-                top_col = int(np.floor(x_pos/topography_res))
-                top_row = int(np.floor(y_pos/topography_res))
-                self._cell_grid[j, i]['position']['z'] = topography_map[top_row, top_col]
-
-                # increment id counter
-                id +=1
-
-        # Set initial ignitions
-        for polygon in initial_ignition:
-            minx, miny, maxx, maxy = polygon.bounds
-
-            # Get row and col indices for bounding box
-            min_row = int(miny // (cell_size_m * 1.5))
-            max_row = int(maxy // (cell_size_m * 1.5))
-            min_col = int(minx // (cell_size_m * np.sqrt(3)))
-            max_col = int(maxx // (cell_size_m * np.sqrt(3)))
-
-            for row in range(min_row, max_row + 1):
-                for col in range(min_col, max_col + 1):
-                    if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-
-                        x_pos = self._cell_grid[row, col]['position']['x']
-                        y_pos = self._cell_grid[row, col]['position']['y']
-
-                        if polygon.contains(Point(x_pos, y_pos)) and fuel_type <= 13:
-                            self._cell_grid[row, col]['state'] = CellStates.FIRE # TODO: define states in python
-
-        
-        # Set prescribed ignitions
-        if has_prescribed_burns:
-            for polygon in prescribed_ignition:
-                minx, miny, maxx, maxy = polygon.bounds
-
-                # Get row and col indices for bounding box
-                min_row = int(miny // (cell_size_m * 1.5))
-                max_row = int(maxy // (cell_size_m * 1.5))
-                min_col = int(minx // (cell_size_m * np.sqrt(3)))
-                max_col = int(maxx // (cell_size_m * np.sqrt(3)))
-
-                for row in range(min_row, max_row + 1):
-                    for col in range(min_col, max_col + 1):
-                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-
-                            x_pos = self._cell_grid[row, col]['position']['x']
-                            y_pos = self._cell_grid[row, col]['position']['y']
-
-                            if polygon.contains(Point(x_pos, y_pos)) and fuel_type <= 13:
-                                self._cell_grid[row, col]['state'] = 3 # TODO: define states in python
-
-        if burnt_cells is not None:
-            for polygon in burnt_cells:
-                minx, miny, maxx, maxy = polygon.bounds
-
-                # Get row and col indices for bounding box
-                min_row = int(miny // (cell_size_m * 1.5))
-                max_row = int(maxy // (cell_size_m * 1.5))
-                min_col = int(minx // (cell_size_m * np.sqrt(3)))
-                max_col = int(maxx // (cell_size_m * np.sqrt(3)))
-
-                for row in range(min_row, max_row + 1):
-                    for col in range(min_col, max_col + 1):
-                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-                            
-                            x_pos = self._cell_grid[row, col]['position']['x']
-                            y_pos = self._cell_grid[row, col]['position']['y']
-                            
-                            if polygon.contains(Point(x_pos, y_pos)):
-                                self._cell_grid[row, col]['state'] = CellStates.BURNT # TODO: define states in python
-
-        # Apply fire breaks
-        for fire_break in fire_breaks:
-            line = fire_break['geometry']
-            fuel_val = fire_break['fuel_value']
-            length = line.length
-
-            step_size = 0.5
-            num_steps = int(length/step_size) + 1
-
-            for i in range(num_steps):
-                point = line.interpolate(i * step_size)
-
-                cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
-
-                if cell is not None:
-                    cell['fuelContent'] = fuel_val/100.0
+                if self.weather_changed or not cell.has_steady_state:
                     
-        # Apply roads
-        if roads is not None:
-            for road in roads:
-                for point in road[0]:
-                    road_x, road_y = point[0], point[1]
+                    # TODO: Need weather for prediction model
+                    cell._update_weather(self._curr_weather_idx, self._weather_stream, True)
 
-                    road_cell = self.get_cell_from_xy(road_x, road_y, oob_ok = True)
+                    self.update_steady_state(cell)
 
-                    if road_cell is not None:
-                        
-                        if road_cell['state'] == CellStates.FIRE:
-                            road_cell['state'] = CellStates.FUEL
+                    cell.r_t = cell.r_ss
+                    cell.I_t = cell.I_ss
 
-                        road_cell['fuelContent'] = rc.road_fuel_vals[road[1]]
+                self.propagate_fire(cell)
+
+                self.remove_neighbors(cell)
+
+                if cell.fully_burning:
+                    self.set_state_at_cell(cell, CellStates.BURNT)
+
+                self.updated_cells[cell.id] = cell
+
+            if self.model_spotting and self._spot_ign_prob > 0:
+                pass # TODO: Add this model
+
+            self._iters += 1
+
+            if viz is not None:
+                time_since_last_update = self._curr_time_s - self.last_viz_update
+
+                if time_since_last_update >= 300:
+                    viz.update_grid(self)
+                    self.last_viz_update = self._curr_time_s
+
+    def _catch_up_with_fire(self):
+        # Set current time to fire sim time
+        self._curr_time_s = self.fire._curr_time_s
+        self.start_time_s = self._curr_time_s
+        self.last_viz_update = self._curr_time_s
+        self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+
+        # Set the burnt cells based on fire state
+        if self.fire._burnt_cells:
+            burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+            self._set_state_from_geometries(burnt_region, CellStates.BURNT)
+
+        # Set the burning cells based on fire state
+        burning_cells = [cell for cell, _ in self.fire._burning_cells]
+        burning_region = UtilFuncs.get_cell_polygons(burning_cells)
+        self._set_state_from_geometries(burning_region, CellStates.FIRE)
+
+        # Create a erroneous wind forecast 
+        self._predict_wind()
+
+    def _predict_wind(self):
+        new_weather_stream = copy.deepcopy(self.fire._weather_stream)
+        self.weather_t_step = new_weather_stream.time_step * 60
+
+        num_indices = int(np.ceil((self.time_horizon_hr * 3600) / self.weather_t_step))
+        curr_idx = self.fire._curr_weather_idx
+
+        self._curr_weather_idx = 0
+        self._last_weather_update = self.fire._last_weather_update
+
+        end_idx = num_indices + curr_idx
+
+        speed_error = 0
+        dir_error = 0
+
+        new_stream = []
+
+        for entry in new_weather_stream.stream[curr_idx:end_idx]:
+            
+            new_entry = copy.deepcopy(entry)
+
+            new_entry.wind_speed += speed_error
+            new_entry.wind_dir_deg += dir_error
+            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
+
+            new_stream.append(new_entry)
+
+            speed_error = self.beta_s * speed_error + np.random.normal(0, self.wnd_spd_uncertainty)
+            dir_error = self.beta_d * dir_error + np.random.normal(0, self.wnd_dir_uncertainty)
 
 
-        # Write cell data to binary file
-        file_size = self._cell_grid.nbytes
-
-        # Ensure the file is sized correctly
-        with open(self.cell_filename, 'wb') as f:
-            f.seek(file_size - 1)
-            f.write(b'\x00')
-
-        # Map the file and write data
-        with open(self.cell_filename, 'r+b') as f:
-            mm = mmap.mmap(f.fileno(), file_size, access=mmap.ACCESS_WRITE)
-            mm.write(self._cell_grid.tobytes())
-            mm.close()
-
-    def run_prediction_batch(self, batch_size, action_seq_batch = None, fire_start_time_h:float = 0.0, output_control_prediction:bool = False) -> dict:
-        if action_seq_batch is not None:
-            actions, total_actions = self.convert_to_action_type(action_seq_batch)
-
-            # Write actions to memory-mapped file
-            file_size = actions.nbytes
-
-            # Ensure the file is sized correctly
-            with open(self.action_filename, 'wb') as f:
-                f.seek(file_size - 1)
-                f.write(b'\x00')
-
-            # Map the file and write data
-            with open(self.action_filename, 'r+b') as f:
-                mm = mmap.mmap(f.fileno(), file_size, access=mmap.ACCESS_WRITE)
-                mm.write(actions.tobytes())
-                mm.close()
-        else:
-            total_actions = 0
-
-        # Pass in fire prediction settings
-        params = f"{fire_start_time_h} {batch_size} {total_actions} {self.bias} {self.time_horizon_hr} {self.time_step} {self.cell_size} {self.shape[0]} {self.shape[1]} {self.wind_t_step} {self.wind_forecast_str}"
-
-        current_script_dir = os.path.dirname(os.path.abspath(__file__))
-        executable_path = os.path.join(current_script_dir, '..', 'executable', 'fire_prediction')
-
-        if total_actions > 0:
-            result = subprocess.run([executable_path, self.cell_filename, self.action_filename], input=params, text=True, capture_output=True)
-        else:
-            result = subprocess.run([executable_path, self.cell_filename], input=params, text=True, capture_output=True)
-
-        if result.returncode != 0:
-            print("Executable terminated with the following errors: ")
-            print("Error output: ", result.stderr)
-
-        print(result.stdout)
- 
-        predictions = self.read_data(self.output_path)
-
-        if output_control_prediction:
-            control_predictions = self.read_data(self.control_output_path)
-            return predictions, control_predictions
-
-        else:
-            return predictions
-
-    def run_prediction(self, action_sequence:list = None, fire_start_time_h:float = 0.0 , output_control_prediction:bool = False) -> dict:
-        """Run a prediction
-
-        :param action_sequence: Action sequence that should be completed during the course of 
-                                the prediction run. Specify as a list of
-                                :class:`~utilities.action.Action` objects.
-        :return: Dictionary where each key is a time-step and each value is a list of predicted
-                 ignition locations (x, y) at that time-step. Time-steps start at the time-step the
-                 original fire when input to the prediction model.
-        :rtype: dict
-        """
-        batch_size = 1
-
-        if action_sequence is not None:
-            action_vec = [action_sequence]
-
-        else:
-            action_vec = None
-
-        if not output_control_prediction:
-            pred_vec = self.run_prediction_batch(batch_size, action_vec, fire_start_time_h, output_control_prediction)
-
-            return pred_vec[0]
-
-        else:
-            pred_vec, control_pred_vec = self.run_prediction_batch(batch_size, action_vec, fire_start_time_h, output_control_prediction)
-
-            return pred_vec[0], control_pred_vec[0]
-
-    def convert_to_action_type(self, batch_action_sequence):
-
-        total_actions = sum(len(seq) for seq in batch_action_sequence)
-
-        actions = np.zeros(total_actions + len(batch_action_sequence), dtype=action_type)
-        idx = 0
-
-        for action_seq in batch_action_sequence:
-            actions[idx]['time'] = len(action_seq)
-            idx += 1
-            for action in action_seq:
-                actions[idx]['time'] = action.time
-                actions[idx]['pos']['x'] = action.loc[0]
-                actions[idx]['pos']['y'] = action.loc[1]
-
-                if isinstance(action, SetFuelMoisture):
-                    actions[idx]['type'] = 0
-                    actions[idx]['value'] = action.moisture
-                
-                elif isinstance(action, SetFuelContent):
-                    actions[idx]['type'] = 1
-                    actions[idx]['value'] = action.content
-
-                elif isinstance(action, SetIgnition):
-                    fire_type = action.fire_type
-                    if fire_type == FireTypes.PRESCRIBED:
-                        actions[idx]['type'] = 2
-                    
-                    else:
-                        actions[idx]['type'] = 3
-
-                idx += 1
+        new_weather_stream.stream = new_stream
         
-        return actions, total_actions
+        self.wind_forecast = run_windninja(new_weather_stream, self.fire._sim_params.map_params)
+        self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
-    def read_data(self, filename):
-        # Open the file and memory-map it
-        with open(filename, 'rb') as f:
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        for layer in range(self.wind_forecast.shape[0]):
+            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
+            
+        self.wind_forecast = self.flipud_forecast
+        self._wind_res = self.fire._sim_params.weather_input.mesh_resolution
+        self._weather_stream = new_weather_stream
 
-            # Start reading from the beginning
-            offset = 0
-            num_maps = struct.unpack_from('i', mm, offset)[0]
-
-            offset += struct.calcsize('i')
-
-            all_predictions = []
-
-            for _ in range(num_maps):
-                # Read an integer for the number of time steps in this map
-                num_entries = struct.unpack_from('i', mm, offset)[0]
-
-                offset += struct.calcsize('i')
-
-                prediction_map = {}
-
-                for __ in range(num_entries):
-                    # Read a float for the time step
-                    time_step = struct.unpack_from('f', mm, offset)[0]
-                    offset += struct.calcsize('f')
-
-                    # Read an integer for the number of cells
-                    num_cells = struct.unpack_from('i', mm, offset)[0]
-                    offset += struct.calcsize('i')
-
-                    prediction_map[time_step] = []
-
-                    # Loop through the number of cells
-                    for ___ in range(num_cells):
-                        # Each cell consists of two floats (x, y)
-                        x, y = struct.unpack_from('ff', mm, offset)
-                        offset += struct.calcsize('ff')
-
-                        prediction_map[time_step].append((x, y))
-
-                all_predictions.append(prediction_map)
-
-            # Close the mmap
-            mm.close()
-
-        # Optionally remove the file after reading
-        os.remove(filename)
-
-        return all_predictions
-
-    def generate_noisy_wind(self, wind_forecast: list) -> list:
-        """Adds noise to the true wind forecast using a auto-regressive model.
-
-        :param wind_forecast: Wind forecast being used by the original fire simulation
-        :type wind_forecast: list
-        :return: New forecast with noise added
-        :rtype: list
-        """
-        phi = 0.8
-
-        new_forecast = []
-        speed_errors = np.zeros(len(wind_forecast))
-        dir_errors = np.zeros(len(wind_forecast))
-
-        for i, (speed, dir) in enumerate(wind_forecast):
-            if i != 0:
-                speed_errors[i] = speed_errors[i - 1] * phi + np.random.normal(0, 1)
-                dir_errors[i] = dir_errors[i - 1] * phi + np.random.normal(0, 2.5)
-
-            new_forecast.append((speed + speed_errors[i], dir + dir_errors[i]))
-
-        return new_forecast
