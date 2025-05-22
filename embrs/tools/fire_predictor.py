@@ -170,7 +170,7 @@ class FirePredictor(BaseFireSim):
 
         return True
 
-    def _prediction_loop(self, viz):
+    def _prediction_loop(self, viz: Visualizer):
 
         self._iters = 0
 

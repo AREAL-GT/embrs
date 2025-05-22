@@ -810,7 +810,7 @@ class BaseFireSim:
                             if road_cell._fuel.model_num == 91:
                                 self._overwrite_urban_fuel(road_cell)
 
-                        road_cell._break_width = road_width
+                        road_cell._break_width += road_width
                         
                         if road_cell.state == CellStates.FIRE:
                             road_cell._set_state(CellStates.FUEL)
@@ -920,16 +920,15 @@ class BaseFireSim:
                 min_col = int(minx // (self.cell_size * np.sqrt(3)))
                 max_col = int(maxx // (self.cell_size * np.sqrt(3)))
                 
-                for row in range(min_row, max_row + 1):
-                    for col in range(min_col, max_col + 1):
+                for row in range(min_row - 1, max_row + 2):
+                    for col in range(min_col - 1, max_col + 2):
 
                         # Check that row and col are in bounds
                         if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
                             cell = self._cell_grid[row, col]
 
                             # See if cell is within polygon
-                            if geom.contains(Point(cell.x_pos, cell.y_pos)):
-                                
+                            if geom.intersects(cell.polygon):                                
                                 if state == CellStates.BURNT:
                                     cell._set_state(state)
                                 
