@@ -20,12 +20,6 @@ class FirePredictor(BaseFireSim):
         self.fire = fire
         self.c_size = -1
 
-        self.beta_s = 0.5
-        self.beta_d = 0.5
-
-        self.wnd_spd_uncertainty = 2
-        self.wnd_dir_uncertainty = 5
-
         self.set_params(params)
         self.nom_ign_prob = self._calc_nominal_prob()
 
@@ -35,6 +29,19 @@ class FirePredictor(BaseFireSim):
 
         # How long the prediction will run for
         self.time_horizon_hr = params.time_horizon_hr
+
+        # Uncertainty parameters
+        self.wind_bias_factor = params.wind_bias_factor # [-1 , 1], systematic error
+        self.wind_uncertainty_factor = params.wind_uncertainty_factor # [0, 1], autoregression noise
+
+        # Compute constant bias terms
+        self.wind_speed_bias = self.wind_bias_factor * params.max_wind_speed_bias
+        self.wind_dir_bias   = self.wind_bias_factor * params.max_wind_dir_bias
+
+        # Compute auto-regressive parameters
+        self.beta = self.wind_uncertainty_factor * params.max_beta
+        self.wnd_spd_std = params.base_wind_spd_std * self.wind_uncertainty_factor
+        self.wnd_dir_std = params.base_wind_dir_std * self.wind_uncertainty_factor
 
         # If cell size has changed since last set params, regenerate cell grid
         cell_size = params.cell_size_m
@@ -180,7 +187,6 @@ class FirePredictor(BaseFireSim):
         self._iters = 0
 
         while self._init_iteration():
-
             for cell, loc in self._burning_cells:
 
                 if self.weather_changed or not cell.has_steady_state:
@@ -332,19 +338,18 @@ class FirePredictor(BaseFireSim):
 
         new_stream = []
 
-        for entry in new_weather_stream.stream[curr_idx:end_idx]:
+        for entry in new_weather_stream.stream[curr_idx:end_idx + 1]:
             
             new_entry = copy.deepcopy(entry)
 
-            new_entry.wind_speed += speed_error
-            new_entry.wind_dir_deg += dir_error
+            new_entry.wind_speed += speed_error + self.wind_speed_bias
+            new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
             new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
 
             new_stream.append(new_entry)
 
-            speed_error = self.beta_s * speed_error + np.random.normal(0, self.wnd_spd_uncertainty)
-            dir_error = self.beta_d * dir_error + np.random.normal(0, self.wnd_dir_uncertainty)
-
+            speed_error = self.beta * speed_error + np.random.normal(0, self.wnd_spd_std)
+            dir_error = self.beta * dir_error + np.random.normal(0, self.wnd_dir_std)
 
         new_weather_stream.stream = new_stream
         

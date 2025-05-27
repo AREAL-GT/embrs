@@ -150,13 +150,23 @@ class SimParams:
 
 @dataclass
 class PredictorParams:
-    time_horizon_hr: Optional[float] = 2.0
-    time_step_s: Optional[int] = 30
-    cell_size_m: Optional[float] = 30
-    dead_mf: Optional[float] = 0.08
-    live_mf: Optional[float] = 0.30
-    model_spotting: Optional[bool] = False
-    spot_delay_s: Optional[float] = 1200
+    time_horizon_hr: float = 2.0
+    time_step_s: int = 30
+    cell_size_m: float = 30
+    dead_mf: float = 0.08
+    live_mf: float = 0.30
+    model_spotting: bool = False
+    spot_delay_s: float = 1200
+    wind_bias_factor: float = 0
+    wind_uncertainty_factor: float = 0
+
+    # Advanced uncertainty settings
+    # TODO: see if we can find literature on the valeus
+    max_wind_speed_bias: float = 2.0 # m/s
+    max_wind_dir_bias: float = 15.0 # deg
+    base_wind_spd_std: float = 1.0 # m/s
+    base_wind_dir_std: float = 5.0 # deg
+    max_beta: float = 0.95
 
 @dataclass
 class WindNinjaTask:

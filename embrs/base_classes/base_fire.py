@@ -934,7 +934,7 @@ class BaseFireSim:
                             cell = self._cell_grid[row, col]
 
                             # See if cell is within polygon
-                            if geom.intersects(cell.polygon):                                
+                            if geom.intersection(cell.polygon).area > 1e-6:                                
                                 if state == CellStates.BURNT:
                                     cell._set_state(state)
                                 
