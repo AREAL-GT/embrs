@@ -239,7 +239,7 @@ class FireSim(BaseFireSim):
                 cell.has_steady_state = True
 
                 if self.model_spotting:
-                    if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
                         self.embers.loft(cell, self.curr_time_m)
 
                 cell.set_real_time_vals()

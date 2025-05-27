@@ -35,6 +35,8 @@ class Embers:
         self.embers = []
 
     def loft(self, cell: Cell, sim_time_m: float):
+        cell.lofted = True
+        
         self.plume(cell)
         crown_height_ft = m_to_ft(cell.canopy_height)
         z_0 = crown_height_ft

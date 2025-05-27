@@ -27,6 +27,7 @@ class FirePredictor(BaseFireSim):
         self.wnd_dir_uncertainty = 5
 
         self.set_params(params)
+        self.nom_ign_prob = self._calc_nominal_prob()
 
     def set_params(self, params: PredictorParams):
 
@@ -53,6 +54,8 @@ class FirePredictor(BaseFireSim):
         sim_params.t_step_s = params.time_step_s
         sim_params.duration_s = self.time_horizon_hr * 3600
         sim_params.init_mf = params.dead_mf
+        sim_params.spot_delay_s = params.spot_delay_s
+        sim_params.model_spotting = params.model_spotting
 
         # Set the currently burning cells as the initial ignition region
         burning_cells = [cell for cell, _ in self.fire._burning_cells]
@@ -63,9 +66,11 @@ class FirePredictor(BaseFireSim):
 
         if generate_cell_grid:
             super().__init__(sim_params, burnt_region=burnt_region)
+            self.orig_grid = copy.deepcopy(self._cell_grid)
+            self.orig_dict = copy.deepcopy(self._cell_dict)
 
     def run(self, visualize = False):
-        # Catch states of predcictor cells up with the fire sim
+        # Catch states of predictor cells up with the fire sim
         self._catch_up_with_fire()
 
         self.output = {}
@@ -73,7 +78,7 @@ class FirePredictor(BaseFireSim):
         viz = None
         if visualize:
             viz = Visualizer(self)
-        
+
         # Perform the prediction
         self._prediction_loop(viz)
 
@@ -103,6 +108,7 @@ class FirePredictor(BaseFireSim):
             self._new_ignitions = self.starting_ignitions
 
             for cell, loc in self._new_ignitions:
+                self._set_prediction_forecast(cell)
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
@@ -117,10 +123,10 @@ class FirePredictor(BaseFireSim):
 
                 self._updated_cells[cell.id] = cell
 
-                self._set_prediction_forecast(cell)
 
         else:
             for cell, loc in self._new_ignitions:
+                self._set_prediction_forecast(cell)
                 r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
 
                 cell.r_ss = r_list
@@ -142,8 +148,8 @@ class FirePredictor(BaseFireSim):
                 cell.has_steady_state = True
 
                 if self.model_spotting:
-                    if cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
-                        pass # TODO: implement simplified probabilistic spotting model
+                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                        self.embers.loft(cell)
 
                 # Don't model fire acceleration in prediction model
                 cell.r_t = cell.r_ss
@@ -155,7 +161,6 @@ class FirePredictor(BaseFireSim):
                 else:
                     self.output[self._curr_time_s].append((cell.x_pos, cell.y_pos))
 
-                self._set_prediction_forecast(cell)
         
         if self._curr_time_s >= self._end_time:
             return False
@@ -179,8 +184,6 @@ class FirePredictor(BaseFireSim):
             for cell, loc in self._burning_cells:
 
                 if self.weather_changed or not cell.has_steady_state:
-                    
-                    # TODO: Need weather for prediction model
                     cell._update_weather(self._curr_weather_idx, self._weather_stream, True)
 
                     self.update_steady_state(cell)
@@ -198,7 +201,7 @@ class FirePredictor(BaseFireSim):
                 self.updated_cells[cell.id] = cell
 
             if self.model_spotting and self._spot_ign_prob > 0:
-                pass # TODO: Add this model
+                self._ignite_spots()
 
             self._iters += 1
 
@@ -209,7 +212,90 @@ class FirePredictor(BaseFireSim):
                     viz.update_grid(self)
                     self.last_viz_update = self._curr_time_s
 
+
+    def _ignite_spots(self):
+        # Decay constant for ignition probability
+        lambda_s = 0.005
+
+        # Get all the lofted embers by the Perryman model
+        spot_fires = self.embers.embers
+
+        landings = {}
+        if spot_fires:
+            for spot in spot_fires:
+                x = spot['x']
+                y = spot['y']
+                d = spot['d']
+
+                # Get the cell the ember lands in
+                landing_cell = self.get_cell_from_xy(x, y, oob_ok=True)
+
+                if landing_cell is not None and landing_cell.fuel.burnable:
+                    # Compute the probability based on how far the ember travelled
+                    p_i = self.nom_ign_prob * np.exp(-lambda_s * d)
+
+                    # Add landing probability to dict or update its probability
+                    if landings.get(landing_cell.id) is None:
+                        landings[landing_cell.id] = 1 - p_i
+                    else:
+                        landings[landing_cell.id] *= (1 - p_i)
+
+            for cell_id in list(landings.keys()):
+                # Determine if the cell will ignite
+                rand = np.random.random()
+                if rand < (1 - landings[cell_id]):
+                    # Schedule ignition
+                    ign_time = self._curr_time_s + self._spot_delay_s
+                    
+                    if self._scheduled_spot_fires.get(ign_time) is None:
+                        self._scheduled_spot_fires[ign_time] = [self._cell_dict[cell_id]]
+                    else:
+                        self._scheduled_spot_fires[ign_time].append(self._cell_dict[cell_id])
+
+        # Clear the embers from the Perryman model
+        self.embers.embers = []
+        
+        # Ignite any scheduled spot fires
+        if self._scheduled_spot_fires:
+            pending_times = list(self._scheduled_spot_fires.keys())
+
+            # Check if there are any ignitions which take place this time step
+            for time in pending_times:
+                if time <= self.curr_time_s:
+                    # Ignite the fires scheduled for this time step
+                    new_spots = self._scheduled_spot_fires[time]
+                    for spot in new_spots:
+                        self._new_ignitions.append((spot, 0))
+                        spot.directions, spot.distances, spot.end_pts = UtilFuncs.get_ign_parameters(0, spot.cell_size)
+                        spot._set_state(CellStates.FIRE)
+                        self.updated_cells[spot.id] = spot
+
+                    # Delete entry from schedule if ignited
+                    del self._scheduled_spot_fires[time]
+
+                if time > self.curr_time_s:
+                    break
+    
+    def _calc_nominal_prob(self):
+        # Calculate P(I) in Perryman paper
+        # Method from "Ignition Probability" (Schroeder 1969)
+        Q_ig = 250 + 1116 * self.dead_mf
+        Q_ig_cal = BTU_lb_to_cal_g(Q_ig)
+
+        x = (400 - Q_ig_cal) / 10
+        p_i = (0.000048 * x ** 4.3)/50
+
+        return p_i
+
     def _catch_up_with_fire(self):
+        # Reset all data structures to the original
+        self._cell_grid = copy.deepcopy(self.orig_grid)
+        self._cell_dict = copy.deepcopy(self.orig_dict)
+        self._burnt_cells = []
+        self._burning_cells = []
+        self._updated_cells = {}
+        self._scheduled_spot_fires = {}
+
         # Set current time to fire sim time
         self._curr_time_s = self.fire._curr_time_s
         self.start_time_s = self._curr_time_s

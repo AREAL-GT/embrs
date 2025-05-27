@@ -78,6 +78,9 @@ class Cell:
         # Variable to track if fuel discontinuity within cell can be breached
         self.breached = True
 
+        # Track if firebrands have been lofted from cell
+        self.lofted = False
+
     def _set_cell_data(self, cell_data: CellData):
         """_summary_
 

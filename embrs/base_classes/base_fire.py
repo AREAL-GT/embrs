@@ -26,6 +26,8 @@ from embrs.base_classes.agent_base import AgentBase
 from embrs.utilities.weather import WeatherStream
 from embrs.utilities.burnup import Burnup
 from embrs.utilities.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
+from embrs.utilities.perryman_spot import PerrymanSpotting
+
 
 class BaseFireSim:
     def __init__(self, sim_params: SimParams, burnt_region: list = None):
@@ -123,15 +125,14 @@ class BaseFireSim:
             self.fmc = 100
 
         if self.model_spotting:
+            # Limits to pass into spotting models
+            limits = (self.x_lim, self.y_lim)
             if not prediction:
-                # Limits to pass into Embers
-                limits = (self.x_lim, self.y_lim)
                 # Spot fire modelling class
                 self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
 
             else:
-                # TODO: Add prediction model spotting
-                pass
+                self.embers = PerrymanSpotting(self._spot_delay_s, limits)
 
         # Load Duff loading lookup table from LANDFIRE FCCS
         base_dir = os.path.dirname(__file__)
@@ -456,6 +457,15 @@ class BaseFireSim:
             cell.I_ss = I_list
 
         cell.has_steady_state = True
+
+        if self.model_spotting:
+            if self.is_firesim() and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                if not cell.lofted:
+                    self.embers.loft(cell, self.curr_time_m)
+
+            elif self.is_prediction() and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                if not cell.lofted:
+                    self.embers.loft(cell)
 
     def propagate_fire(self, cell: Cell):
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
@@ -856,10 +866,6 @@ class BaseFireSim:
             - Modifies the fuel content of grid cells along firebreaks.
             - Updates the `_fire_break_cells` list with affected cells.
         """
-
-        # TODO: this should set the break_width field of the intersecting cells based on the width of the fire breaks
-        # TODO: If the width of the break is greater than the cell size, set fuel to non-burnable type
-
         for line, break_width in self.fire_breaks:
             length = line.length
 

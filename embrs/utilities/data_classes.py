@@ -140,7 +140,7 @@ class SimParams:
     dbh_cm: Optional[float] = 20.0
     spot_ign_prob: Optional[float] = 0.05
     min_spot_dist: Optional[float] = 50
-    spot_delay_s: Optional[float] = 30
+    spot_delay_s: Optional[float] = 1200
     duration_s: Optional[float] = None
     visualize: Optional[bool] = None
     num_runs: Optional[int] = None
@@ -155,6 +155,8 @@ class PredictorParams:
     cell_size_m: Optional[float] = 30
     dead_mf: Optional[float] = 0.08
     live_mf: Optional[float] = 0.30
+    model_spotting: Optional[bool] = False
+    spot_delay_s: Optional[float] = 1200
 
 @dataclass
 class WindNinjaTask:

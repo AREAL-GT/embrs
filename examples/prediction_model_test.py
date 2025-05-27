@@ -19,7 +19,9 @@ class TestPrediction(ControlClass):
                     time_step_s=fire._time_step*2,
                     cell_size_m=fire._cell_size * 2,
                     dead_mf=0.08,
-                    live_mf=0.3
+                    live_mf=0.3,
+                    spot_delay_s=1200,
+                    model_spotting=True
                 )
 
                 # Construct a predictor

@@ -183,3 +183,29 @@ def BTU_ft_min_to_kW_m(f_btu_ft_min: float) -> float:
     g = 0.05767
     f = f_btu_ft_min * g
     return f
+
+def cal_g_to_BTU_lb(f_cal_g: float) -> float:
+    """_summary_
+
+    Args:
+        f_cal_g (float): _description_
+
+    Returns:
+        float: _description_
+    """
+    g = 1.8
+    f = f_cal_g * g
+    return f
+
+def BTU_lb_to_cal_g(f_btu_lb: float) -> float:
+    """_summary_
+
+    Args:
+        f_btu_lb (float): _description_
+
+    Returns:
+        float: _description_
+    """
+    g = 0.555
+    f = f_btu_lb * g
+    return f
