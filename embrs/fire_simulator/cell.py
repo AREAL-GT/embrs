@@ -12,6 +12,7 @@ Classes:
 """
 import numpy as np
 from shapely.geometry import Polygon
+import weakref
 
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.data_classes import CellData
@@ -80,6 +81,17 @@ class Cell:
 
         # Track if firebrands have been lofted from cell
         self.lofted = False
+
+        # Weak reference to parent BaseFire object
+        self._parent = None
+
+    def set_parent(self, parent):
+        """Sets the parent BaseFire object for this cell.
+        
+        Args:
+            parent: The BaseFire object that owns this cell
+        """
+        self._parent = weakref.ref(parent)
 
     def _set_cell_data(self, cell_data: CellData):
         """_summary_
@@ -188,7 +200,7 @@ class Cell:
         self.curr_wind = (0,0)
 
         # Constant defining fire acceleration characteristics
-        self.a_a = 0.115 # TODO: find fuel type dependent values for this
+        self.a_a = 0.115
 
     def set_arrays(self):
         """_summary_
@@ -246,8 +258,6 @@ class Cell:
             - Updates `self.I_t` (current fireline intensity).
         """
 
-        # TODO: validate that this works correctly
-
         if self.r_h_ss < self.r_h_prev:
             # Allow for instant deceleration as in FARSITE
             self.r_t = self.r_ss
@@ -257,9 +267,14 @@ class Cell:
             self.I_h_t = self.I_h_ss
 
         else:
+            # Update acceleration constant if parent exists
+            if self._parent is not None:
+                parent = self._parent()
+                if parent is not None:  # Check if parent still exists
+                    parent.set_surface_accel_constant(self)
+
             self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
-
 
             self.r_h_t = self.r_h_ss - (self.r_h_ss - self.r_h_prev) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_h_t = (self.r_h_t / (self.r_h_ss + 1e-7)) * self.I_h_ss

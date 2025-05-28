@@ -161,9 +161,8 @@ class PredictorParams:
     wind_uncertainty_factor: float = 0
 
     # Advanced uncertainty settings
-    # TODO: see if we can find literature on the valeus
-    max_wind_speed_bias: float = 2.0 # m/s
-    max_wind_dir_bias: float = 15.0 # deg
+    max_wind_speed_bias: float = 1.5 # m/s
+    max_wind_dir_bias: float = 20.0 # deg
     base_wind_spd_std: float = 1.0 # m/s
     base_wind_dir_std: float = 5.0 # deg
     max_beta: float = 0.95

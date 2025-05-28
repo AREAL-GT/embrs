@@ -225,6 +225,8 @@ class BaseFireSim:
                     # Add cell to the backing array
                     self._cell_grid[j,i] = new_cell
                     self._cell_dict[id] = new_cell
+
+                    new_cell.set_parent(self)
                     id +=1
                     pbar.update(1)
 
@@ -449,9 +451,8 @@ class BaseFireSim:
         crown_fire(cell, self.fmc)
 
         if cell._crown_status != CrownStatus.ACTIVE:
-            # Update values for cells that are not active crown fires
-            cell.a_a = 0.115 # reset acceleration constant # TODO: make this a function that checks for line fires
             # TODO: can we make this "surface_fire()" and set cell values in the function to make everythign a bit clearer
+            # Update values for cells that are not active crown fires
             r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
             cell.I_ss = I_list
@@ -1367,6 +1368,24 @@ class BaseFireSim:
         # Add cell to update dictionary
         self._updated_cells[cell.id] = cell
         self._soaked.append(cell.to_log_format())
+
+    def set_surface_accel_constant(self, cell: Cell):
+        """Sets the surface acceleration constant for a cell based on the state of its neighbors.
+
+        Args:
+            cell (Cell): Cell object to set the surface acceleration constant for
+        """
+        if cell._crown_status != CrownStatus.ACTIVE: # Only set for non-active crown fires, active crown fire acceleration handled in crown model
+
+            for n_id in cell.neighbors.keys():
+                neighbor = self._cell_dict[n_id]
+                if neighbor.state == CellStates.FIRE:
+                    # Model as a line fire
+                    cell.a_a = 0.3
+                    return
+            
+            # Model as a point fire
+            cell.a_a = 0.115
 
     def is_firesim(self) -> bool:
         return self.__class__.__name__ == "FireSim"
