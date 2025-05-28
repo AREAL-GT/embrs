@@ -39,6 +39,7 @@ def initialize(sim_params: SimParams) -> Tuple[FireSim, bool, Visualizer]:
     # Initialize the visualizer, if visualization is selected
     if sim_params.visualize:
         viz = Visualizer(fire)
+        fire.set_visualizer(viz)
     else:
         viz = None
 

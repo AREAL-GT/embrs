@@ -42,12 +42,15 @@ class FireSim(BaseFireSim):
         _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
         _agent_list (list): Tracks agents (e.g., firefighters, sensors) interacting with the fire.
         _agents_added (bool): Indicates whether agents have been added to the simulation.
+        _visualizer (Optional[Visualizer]): Reference to the visualizer for visualization.
 
     Methods:
         iterate(): Advances the simulation by one time step.
         ignite_neighbors(): Attempts to ignite neighboring cells based on spread conditions.
         _init_iteration(): Resets and updates key variables at the start of each time step.
         log_changes(): Records simulation updates for logging and visualization.
+        set_visualizer(): Sets the visualizer reference for this simulation.
+        visualize_prediction(): Visualizes a prediction grid on top of the current simulation visualization.
 
     Notes:
         - The fire simulation operates on a **point-up hexagonal grid** managed by BaseFire.
@@ -85,6 +88,9 @@ class FireSim(BaseFireSim):
 
         # Boolean indicating if sim is finished
         self._finished = False
+
+        # Reference to visualizer
+        self._visualizer = None
 
         super().__init__(sim_params)
         
@@ -311,6 +317,24 @@ class FireSim(BaseFireSim):
             agent_data.append(agent.to_log_format())
 
         return agent_data
+
+    def set_visualizer(self, visualizer):
+        """Sets the visualizer reference for this simulation.
+        
+        Args:
+            visualizer: The Visualizer instance to use for visualization
+        """
+        self._visualizer = visualizer
+
+    def visualize_prediction(self, prediction_grid):
+        """Visualizes a prediction grid on top of the current simulation visualization.
+        
+        Args:
+            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
+                                  representing predicted fire spread
+        """
+        if self._visualizer is not None:
+            self._visualizer.visualize_prediction(prediction_grid)
 
     @property
     def updated_cells(self) -> dict:

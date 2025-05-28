@@ -1,4 +1,3 @@
-
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
 from embrs.fire_simulator.cell import Cell
@@ -82,12 +81,11 @@ class FirePredictor(BaseFireSim):
 
         self.output = {}
 
-        viz = None
-        if visualize:
-            viz = Visualizer(self)
-
         # Perform the prediction
-        self._prediction_loop(viz)
+        self._prediction_loop()
+
+        if visualize:
+            self.fire.visualize_prediction(self.output)
 
         return self.output
     
@@ -182,7 +180,7 @@ class FirePredictor(BaseFireSim):
 
         return True
 
-    def _prediction_loop(self, viz: Visualizer):
+    def _prediction_loop(self):
 
         self._iters = 0
 
@@ -210,13 +208,6 @@ class FirePredictor(BaseFireSim):
                 self._ignite_spots()
 
             self._iters += 1
-
-            if viz is not None:
-                time_since_last_update = self._curr_time_s - self.last_viz_update
-
-                if time_since_last_update >= 300:
-                    viz.update_grid(self)
-                    self.last_viz_update = self._curr_time_s
 
 
     def _ignite_spots(self):

@@ -460,19 +460,38 @@ class Visualizer:
             self.__init__(self.sim, self.artists,
                           self.collections, self.legend_elements)
 
-    def visualize_prediction(self, prediction_grid):
-        print("visualzing prediction...")
+    def visualize_prediction(self, prediction):
+        """Visualizes a prediction grid on top of the current simulation visualization.
+        
+        Args:
+            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
+                                  representing predicted fire spread
+        """
+        # Clear any existing prediction visualization
+        if hasattr(self, 'prediction_scatter'):
+            self.prediction_scatter.remove()
+            delattr(self, 'prediction_scatter')
 
-        time_steps = sorted(prediction_grid.keys())
+        time_steps = sorted(prediction.keys())
+        if not time_steps:
+            return
 
-        cmap = mpl.colormaps["viridis"]
+        cmap = mpl.cm.get_cmap("Oranges_r")
         norm = plt.Normalize(time_steps[0], time_steps[-1])
 
-        for time in prediction_grid.keys():
-            x,y = zip(*prediction_grid[time])
-            self.h_ax.scatter(x,y, c=[cmap(norm(time))])
+        # Collect all points and their corresponding times
+        all_points = []
+        all_times = []
+        for time in time_steps:
+            points = prediction[time]
+            all_points.extend(points)
+            all_times.extend([time] * len(points))
 
-        print("Finished visualizing....")
+        if all_points:
+            x, y = zip(*all_points)
+            self.prediction_scatter = self.h_ax.scatter(x, y, c=all_times, cmap=cmap, norm=norm, 
+                                                      alpha=0.3, zorder=1)
+            self.fig.canvas.draw()
 
     def meters_to_points(self, meters):
         fig_width_inch, _ = self.fig.get_size_inches()
