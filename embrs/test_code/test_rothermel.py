@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from embrs.utilities.rothermel import (
+from embrs.models.rothermel import (
     calc_propagation_in_cell,
     calc_r_0,
     get_characteristic_moistures,
@@ -16,10 +16,14 @@ from embrs.utilities.rothermel import (
     calc_mineral_damping,
     calc_effective_wind_factor,
     calc_effective_wind_speed,
-    calc_eccentricity
+    calc_eccentricity,
+    calc_flame_len,
+    calc_r_h
 )
-from embrs.utilities.fuel_models import Fuel, Anderson13, ScottBurgan40
+from embrs.models.fuel_models import Fuel, Anderson13, ScottBurgan40
 from embrs.fire_simulator.cell import Cell
+from embrs.utilities.data_classes import CellData
+from embrs.utilities.unit_conversions import *
 
 class TestRothermelModel(unittest.TestCase):
     def test_get_characteristic_moistures(self):
@@ -31,8 +35,6 @@ class TestRothermelModel(unittest.TestCase):
         self.assertEqual(result, expected)
 
         fuel = Anderson13(13)
-
-        print(f"w_n_lice: {fuel.w_n_live}")
 
         m_f = np.array([0.08, 0.10, 0.12, 0.35, 0.6])
         result = get_characteristic_moistures(fuel, m_f)
@@ -134,6 +136,29 @@ class TestRothermelModel(unittest.TestCase):
         expected = 16.0
         self.assertAlmostEqual(result, expected, delta=0.05)
 
+    def test_flame_length(self):
+
+        fuel = Anderson13(4)
+        
+        cell_data = CellData(fuel, 0, 0, 0, 0, 0, 0, 0, 0)
+        cell = Cell(0, 0, 0, 30)
+        cell._set_cell_data(cell_data)
+        wind_speed_mph = 0
+        wind_speed_ft_min = mph_to_ft_min(wind_speed_mph)
+        cell.curr_wind = (wind_speed_ft_min, 0)
+
+        # According to RMRS-GTR-371 p. 47
+        cell.fmois = np.array([0.06, 0.07, 0.08, 0.60, 0.90])
+
+        R_h, R_0, I_r, _ = calc_r_h(cell)
+
+        e = calc_eccentricity(fuel, R_h, R_0)
+
+        R_h, I_h = calc_r_and_i_along_dir(cell, 0.0, R_h, I_r, 0.0, e)
+
+        result = calc_flame_len(I_h)
+        expected = 5.3
+        self.assertAlmostEqual(result, expected, delta=0.05)
 
     def test_calc_moisture_damping(self):
         # Dead tests
@@ -199,13 +224,6 @@ class TestRothermelModel(unittest.TestCase):
     #     m_f = 0.0
     #     live_mf = 0.0
     #     result = calc_I_r(fuel, m_f, live_mf)
-    #     expected = 0.0  # Replace with expected output
-    #     self.assertEqual(result, expected)
-
-    # def test_calc_flux_ratio(self):
-    #     # Fill in with appropriate inputs and expected outputs
-    #     fuel = Fuel()
-    #     result = calc_flux_ratio(fuel)
     #     expected = 0.0  # Replace with expected output
     #     self.assertEqual(result, expected)
 

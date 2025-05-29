@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pyproj import Transformer
 from timezonefinder import TimezoneFinder
 
-from embrs.utilities.fuel_models import Fuel
+from embrs.models.fuel_models import Fuel
 
 # TODO: Add comments/docstrings for dataclasses
 

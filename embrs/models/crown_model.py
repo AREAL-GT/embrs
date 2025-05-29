@@ -1,5 +1,5 @@
-from embrs.utilities.rothermel import *
-from embrs.utilities.fuel_models import Anderson13
+from embrs.models.rothermel import *
+from embrs.models.fuel_models import Anderson13
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
 

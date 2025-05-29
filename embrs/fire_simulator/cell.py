@@ -16,9 +16,9 @@ import weakref
 
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.data_classes import CellData
-from embrs.utilities.fuel_models import Fuel, Anderson13
-from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
-from embrs.utilities.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
+from embrs.models.fuel_models import Fuel, Anderson13
+from embrs.models.dead_fuel_moisture import DeadFuelMoisture
+from embrs.models.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.

@@ -1,4 +1,4 @@
-from embrs.utilities.fuel_models import Fuel
+from embrs.models.fuel_models import Fuel
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
 import numpy as np

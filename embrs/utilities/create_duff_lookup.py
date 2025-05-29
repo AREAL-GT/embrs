@@ -26,7 +26,7 @@ def save_dict_json(data, filename):
         json.dump(data, f)
 
 if __name__ == '__main__':
-    csv_filename = '/Users/rui/Documents/Research/Code/embrs/FCCS_test/fccs_table.csv'         # CSV file containing your data
+    csv_filename = '/Users/rjdp3/Research/Code/embrs/FCCS_test/fccs_table.csv'         # CSV file containing your data
     pickle_filename = 'duff_loading.pkl' # File to store the dictionary as a pickle
         
     # Create the lookup dictionary from the CSV file

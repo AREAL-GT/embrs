@@ -21,8 +21,8 @@ from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
 from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
 
-from embrs.utilities.rothermel import *
-from embrs.utilities.crown_model import crown_fire
+from embrs.models.rothermel import *
+from embrs.models.crown_model import crown_fire
 
 class FireSim(BaseFireSim):
     """A hexagonal grid-based wildfire simulation model.

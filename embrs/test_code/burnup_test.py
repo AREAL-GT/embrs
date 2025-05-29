@@ -1,7 +1,7 @@
 
 from embrs.fire_simulator.cell import Cell
-from embrs.utilities.fuel_models import Anderson13
-from embrs.utilities.burnup import Burnup
+from embrs.models.fuel_models import Anderson13
+from embrs.models.burnup import Burnup
 
 new_ignitions = []
 

@@ -1,13 +1,13 @@
 import pvlib
 import numpy as np
 import pickle
-from embrs.utilities.dead_fuel_moisture import DeadFuelMoisture
+from embrs.models.dead_fuel_moisture import DeadFuelMoisture
 from embrs.fire_simulator.cell import Cell
 
 import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
-from embrs.utilities.weather import WeatherStream
+from embrs.models.weather import WeatherStream
 from embrs.utilities.data_classes import WeatherParams
 from matplotlib.colors import Normalize
 import matplotlib as mpl

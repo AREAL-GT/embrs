@@ -14,19 +14,19 @@ from tqdm import tqdm
 import pickle
 import os
 
-from embrs.utilities.embers import Embers
+from embrs.models.embers import Embers
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
 from embrs.utilities.data_classes import SimParams, CellData
 from embrs.fire_simulator.cell import Cell
-from embrs.utilities.crown_model import crown_fire
-from embrs.utilities.rothermel import *
-from embrs.utilities.fuel_models import Anderson13
+from embrs.models.crown_model import crown_fire
+from embrs.models.rothermel import *
+from embrs.models.fuel_models import Anderson13
 from embrs.base_classes.agent_base import AgentBase
-from embrs.utilities.weather import WeatherStream
-from embrs.utilities.burnup import Burnup
-from embrs.utilities.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
-from embrs.utilities.perryman_spot import PerrymanSpotting
+from embrs.models.weather import WeatherStream
+from embrs.models.burnup import Burnup
+from embrs.models.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
+from embrs.models.perryman_spot import PerrymanSpotting
 
 
 class BaseFireSim:

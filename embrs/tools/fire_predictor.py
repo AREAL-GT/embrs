@@ -4,10 +4,10 @@ from embrs.fire_simulator.cell import Cell
 from embrs.fire_simulator.visualizer import Visualizer
 from embrs.utilities.data_classes import PredictorParams, CellData
 from embrs.utilities.fire_util import UtilFuncs, CellStates
-from embrs.utilities.fuel_models import Anderson13
-from embrs.utilities.rothermel import *
-from embrs.utilities.crown_model import *
-from embrs.utilities.wind_forecast import run_windninja
+from embrs.models.fuel_models import Anderson13
+from embrs.models.rothermel import *
+from embrs.models.crown_model import *
+from embrs.models.wind_forecast import run_windninja
 
 import copy
 import numpy as np

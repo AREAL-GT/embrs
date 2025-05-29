@@ -72,7 +72,6 @@ class Logger:
         if fire_obj.roads is not None:
             fire['roads'] = fire_obj.roads
 
-
         filename = f"{self.session_folder}/init_fire_state.pkl"
         with open(filename, 'wb') as f:
             pickle.dump(fire, f)

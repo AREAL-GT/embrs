@@ -14,7 +14,7 @@ import argparse
 import configparser
 from datetime import datetime, timedelta
 from embrs.fire_simulator.visualizer import Visualizer
-from embrs.fire_simulator.logger import Logger
+from embrs.utilities.logger import Logger
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
 from embrs.utilities.fire_util import UtilFuncs
