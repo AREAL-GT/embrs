@@ -19,6 +19,8 @@ from embrs.utilities.data_classes import CellData
 from embrs.models.fuel_models import Fuel, Anderson13
 from embrs.models.dead_fuel_moisture import DeadFuelMoisture
 from embrs.models.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
+from embrs.utilities.logger_schemas import CellLogEntry
+
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
@@ -179,17 +181,16 @@ class Cell:
 
         # Heading rate of spread and fireline intensity
         self.r_h_ss = None
-        self.r_h_t = None
         self.I_h_ss = None
         self.I_h_t = None
 
         # Variables that keep track of elliptical spread within cell
-        self.r_t = None
+        self.r_t = [0]
         self.fire_spread = np.array([])
         self.r_prev_list = np.array([])
         self.t_elapsed_min = 0
         self.r_ss = np.array([])
-        self.I_ss = np.array([])
+        self.I_ss = np.array([0])
         
         # Boolean defining the cell already has a steady-state ROS
         self.has_steady_state = False
@@ -263,9 +264,6 @@ class Cell:
             self.r_t = self.r_ss
             self.I_t = self.I_ss
 
-            self.r_h_t = self.r_h_ss
-            self.I_h_t = self.I_h_ss
-
         else:
             # Update acceleration constant if parent exists
             if self._parent is not None:
@@ -275,9 +273,6 @@ class Cell:
 
             self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
-
-            self.r_h_t = self.r_h_ss - (self.r_h_ss - self.r_h_prev) * np.exp(-self.a_a * self.t_elapsed_min)
-            self.I_h_t = (self.r_h_t / (self.r_h_ss + 1e-7)) * self.I_h_ss
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
         """Stores the local forecasted wind speed and direction for the cell.
@@ -586,24 +581,50 @@ class Cell:
         ]
 
         return Polygon(hex_coords)
+    
+    def to_log_entry(self, time: float) -> CellLogEntry:
+        """_summary_
 
-    def to_log_format(self):
-        """Returns a dictionary of cell data at the current simulation state.
-
-        This dictionary captures changes in the cell's state over time, making it useful 
-        for visualization and post-processing.
+        Args:
+            time (float): _description_
 
         Returns:
-            dict: A dictionary with the following keys:
-                - `"id"` (int): The unique ID of the cell.
-                - `"state"` (CellStates): The current state of the cell.
+            CellLogEntry: _description_
         """
-        cell_data = {
-            "id": self.id,
-            "state": self._state,
-        }
 
-        return cell_data
+        if self.fuel.burnable:
+            w_n_dead = self.fuel.w_n_dead
+            w_n_live = self.fuel.w_n_live
+            dfm_1hr = self.fmois[0]
+            dfm_10hr = self.fmois[1]
+            dfm_100hr = self.fmois[2]
+        else:
+            w_n_dead = 0
+            w_n_live = 0
+            dfm_1hr = 0
+            dfm_10hr = 0
+            dfm_100hr = 0
+
+        entry = CellLogEntry(
+            timestamp=time,
+            id=self.id,
+            x=self.x_pos,
+            y=self.y_pos,
+            fuel=self.fuel.model_num,
+            state=self.state,
+            crown_state=self._crown_status,
+            w_n_dead=w_n_dead,
+            w_n_live=w_n_live,
+            dfm_1hr=dfm_1hr,
+            dfm_10hr=dfm_10hr,
+            dfm_100hr=dfm_100hr,
+            ros=np.max(self.r_t),
+            I_ss=np.max(self.I_ss),
+            wind_speed=self.curr_wind[0],
+            wind_dir=self.curr_wind[1]
+        )
+
+        return entry
 
     def get_spread_directions(self, ignited_pos):
         return self.DIRECTION_MAP.get(ignited_pos)

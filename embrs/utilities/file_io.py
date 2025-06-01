@@ -17,7 +17,7 @@ import json
 import sys
 import os
 
-from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, UniformMapParams
+from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, UniformMapParams, PlaybackVisualizerParams
 from embrs.utilities.fire_util import FuelConstants, CanopySpecies
 from embrs.base_classes.control_base import ControlClass
 
@@ -879,31 +879,31 @@ class VizFolderSelector(FileSelectBase):
         self.create_folder_selector(frame, "Log folder:    ", self.viz_folder)
 
         run_selection_frame = tk.Frame(frame)
-        run_selection_frame.pack(padx=10,pady=5)
+        run_selection_frame.grid(padx=10,pady=5)
         tk.Label(run_selection_frame, text="Run to Visualize:",
-                 anchor="center").grid(row=0, column=0)
+                 anchor="center").grid(row=1, column=0)
 
         self.run_options = tk.OptionMenu(run_selection_frame, self.run_folder,
                       *self.run_folders)
 
-        self.run_options.grid(row=0, column=1)
+        self.run_options.grid(row=1, column=1)
 
         # Create a frame to select sim time per frame
         self.create_spinbox_with_two_labels(frame, "Update Frequency:", np.inf,
-                                            self.viz_freq, "seconds")
+                                            self.viz_freq, "seconds", row=2, column=0)
 
         # Create a frame to select scale bar size
-        self.create_spinbox_with_two_labels(frame, "Scale bar size:        ", 100, self.scale_km, "km")
+        self.create_spinbox_with_two_labels(frame, "Scale bar size:        ", 100, self.scale_km, "km", row=2, column=1)
 
         # Create a frame to choose legend display
         legend_frame = tk.Frame(frame)
-        legend_frame.pack(padx=10, pady=5)
+        legend_frame.grid(padx=10, pady=5)
         tk.Checkbutton(legend_frame, text="Display fuel legend",
-                       variable=self.legend).grid(row=0,column=0)
+                       variable=self.legend).grid(row=2,column=2)
 
         self.submit_button = tk.Button(frame, text='Submit', command = self.submit,
                                        state='disabled')
-        self.submit_button.pack(pady=10)
+        self.submit_button.grid(pady=10)
 
     def viz_folder_changed(self, *args):
         """Callback function for selecting the log file to be displayed. Checks the file selected
@@ -927,15 +927,15 @@ class VizFolderSelector(FileSelectBase):
         run_foldername = self.run_folder.get()
         run_folderpath = os.path.join(self.viz_folder.get(), run_foldername)
 
-        if os.path.exists(os.path.join(run_folderpath, 'agents.msgpack')):
+        if os.path.exists(os.path.join(run_folderpath, 'agent_logs.parquet')):
             self.has_agents = True
-            self.agent_file = os.path.join(run_folderpath, 'agents.msgpack')
+            self.agent_file = os.path.join(run_folderpath, 'agent_logs.parquet')
 
         else:
             self.has_agents = False
 
-        if os.path.exists(os.path.join(run_folderpath, 'log.msgpack')):
-            self.viz_file = os.path.join(run_folderpath, 'log.msgpack')
+        if os.path.exists(os.path.join(run_folderpath, 'cell_logs.parquet')):
+            self.viz_file = os.path.join(run_folderpath, 'cell_logs.parquet')
 
         else:
             window = tk.Tk()
@@ -960,7 +960,7 @@ class VizFolderSelector(FileSelectBase):
         if not os.path.exists(folderpath):
             return []
 
-        if not os.path.exists(os.path.join(folderpath, 'init_fire_state.pkl')):
+        if not os.path.exists(os.path.join(folderpath, 'init_state.parquet')):
             window = tk.Tk()
             window.withdraw()
             tk.messagebox.showwarning("Error",
@@ -981,17 +981,18 @@ class VizFolderSelector(FileSelectBase):
         """Callback when the submit button is pressed. Stores all the relevant data in the result
         variable so it can be retrieved
         """
-        self.result = {
-            "file": self.viz_file,
-            "freq": self.viz_freq.get(),
-            "scale_km": self.scale_km.get(),
-            "legend": self.legend.get(),
-            "init_location": self.init_location,
-            "has_agents": self.has_agents
-        }
+
+        self.result = PlaybackVisualizerParams(
+            file= self.viz_file,
+            freq=self.viz_freq.get(),
+            scale_km=self.scale_km.get(),
+            legend=self.legend.get(),
+            init_location=self.init_location,
+            has_agents=self.has_agents
+        )
 
         if self.has_agents:
-            self.result["agent_file"] = self.agent_file
+            self.result.agent_file = self.agent_file
 
         self.submit_callback(self.result)
 

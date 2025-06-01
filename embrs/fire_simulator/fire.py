@@ -94,6 +94,9 @@ class FireSim(BaseFireSim):
 
         super().__init__(sim_params)
         
+        # Log frequency
+        self._log_freq = int(np.floor(3600 / self._time_step))
+
         self._init_iteration()
 
     def iterate(self):
@@ -180,7 +183,21 @@ class FireSim(BaseFireSim):
         if self.model_spotting and self._spot_ign_prob > 0:
             self.propagate_embers()
 
+        if self.logger:
+            self._log_changes()
+
+            if self._iters % self._log_freq == 0: # TODO: adjust this or make it settable
+                self.logger.flush()
+
         self._iters += 1
+
+    def _log_changes(self):
+        # TODO: add a mechanism for treated cells to be added to updates
+
+        self.logger.cache_cell_updates(self._get_cell_updates())
+
+        if self.agents_added:
+            self.logger.cache_agent_updates(self._get_agent_updates())
 
     def _init_iteration(self) -> bool:
         """Initialize or update the simulation state for the current iteration.
@@ -254,9 +271,6 @@ class FireSim(BaseFireSim):
         self._curr_time_s = self.time_step * self._iters
         if self.progress_bar:
             self.progress_bar.update()
-
-        # Update wind if necessary
-        self.weather_changed = self._update_weather()
         
         # Compute the fuel consumption over time for each new ignition
         self.compute_burn_histories(self._new_ignitions)
@@ -271,6 +285,9 @@ class FireSim(BaseFireSim):
                 self.progress_bar.close()
 
             return True
+
+        # Update wind if necessary
+        self.weather_changed = self._update_weather()
 
         return False
 
@@ -311,12 +328,12 @@ class FireSim(BaseFireSim):
                  display preferences
         :rtype: list
         """
-        agent_data = []
-
-        for agent in self.agent_list:
-            agent_data.append(agent.to_log_format())
-
+        agent_data = [agent.to_log_entry(self.curr_time_s) for agent in self.agent_list]
         return agent_data
+    
+    def _get_cell_updates(self):
+        cell_data = [cell.to_log_entry(self.curr_time_s) for cell in list(self._updated_cells.values())]
+        return cell_data
 
     def set_visualizer(self, visualizer):
         """Sets the visualizer reference for this simulation.

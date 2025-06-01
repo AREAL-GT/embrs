@@ -208,6 +208,9 @@ class BaseFireSim:
                         self._urban_cells.append(new_cell)
 
                     # Set wind forecast in cell
+
+                    # TODO: use xpad and ypad to properly calculate col and row
+
                     wind_col = int(np.floor(cell_x/self._wind_res))
                     wind_row = int(np.floor(cell_y/self._wind_res))
 
@@ -348,6 +351,9 @@ class BaseFireSim:
                 # Get wind data
                 self._wind_res = sim_params.weather_input.mesh_resolution
                 self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+
+                self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
+
                 self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
             # Iterate over each layer (time step or vertical level, depending on the dataset structure)
@@ -451,7 +457,7 @@ class BaseFireSim:
         crown_fire(cell, self.fmc)
 
         if cell._crown_status != CrownStatus.ACTIVE:
-            # TODO: can we make this "surface_fire()" and set cell values in the function to make everythign a bit clearer
+            # TODO: can we make this "surface_fire()" and set cell values in the function to make everything a bit clearer
             # Update values for cells that are not active crown fires
             r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
             cell.r_ss = r_list
@@ -804,6 +810,19 @@ class BaseFireSim:
                 entry = self.generate_burn_history_entry(cell, fuel_loads)
                 cell.burn_history = [entry]
 
+
+    def calc_wind_padding(self, forecast: np.ndarray):
+
+        forecast_rows = forecast[0, :, :, 0].shape[0]
+        forecast_cols = forecast[0, :, :, 1].shape[1]
+
+        forecast_height = (forecast_rows-1) * self._wind_res
+        forecast_width = (forecast_cols-1) * self._wind_res
+
+        xpad = (self.size[0] - forecast_width)/2
+        ypad = (self.size[1] - forecast_height)/2
+        
+        return xpad, ypad
 
     def _set_roads(self):
         """_summary_

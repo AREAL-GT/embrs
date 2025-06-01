@@ -106,6 +106,35 @@ class MapParams:
         return (rows, cols)
 
 @dataclass
+class PlaybackVisualizerParams:
+    file: str
+    freq: float
+    scale_km: float
+    legend: bool
+    init_location: bool
+    has_agents: bool
+    agent_file: Optional[str] = None
+
+@dataclass
+class VisualizerInputs:
+    cell_size: float
+    sim_shape: Tuple[int, int]
+    sim_size: Tuple[float, float]
+    start_datetime: datetime
+    north_dir_deg: float
+    scale_bar_km: float
+    show_legend: bool
+    wind_forecast: np.ndarray
+    wind_resolution: float
+    wind_t_step: float
+    wind_xpad: float
+    wind_ypad: float
+    elevation: np.ndarray
+    roads: list
+    fire_breaks: list
+    init_entries: list
+
+@dataclass
 class WeatherEntry:
     wind_speed: float
     wind_dir_deg: float

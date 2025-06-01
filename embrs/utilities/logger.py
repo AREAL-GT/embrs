@@ -1,41 +1,134 @@
-"""Logger for saving sim data and creating log files
-
-.. autoclass:: Logger
-    :members:
-"""
-
-import datetime
-import pickle
-import json
-import sys
 import os
-import msgpack
-
+from typing import List
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
+from embrs.utilities.parquet_writer import ParquetWriter
+import pyarrow as pa
+import pyarrow.parquet as pq
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.data_classes import SimParams
+import datetime
+import numpy as np
+import json
+import pandas as pd
+import glob
+import shutil
+import sys
+import io
+import zlib
+import base64
+
+# TODO: Write results to status log
+# TODO: Update the messages that are logged by the fire sim / should we establish a debug output or errors only?
 
 class Logger:
-    """Logger class used to generate log files from sim data
-
-    :param log_folder: String representing the path to the folder where the logger instance will
-                       write log files.
-    :type log_folder: str
-    """
     def __init__(self, log_folder: str):
-        """Constructor method that saves input data and creates a logger instance.
-        """
-        self.time = 0
+        
         self.log_ctr = 0
-        self.cache = {}
-        self.agent_cache = {}
-        self.messages = []
-        self.agent_data = False
-        self._log_folder = log_folder
-        self._session_folder = self.generate_session_folder()
-        os.makedirs(self.session_folder, exist_ok=True)
 
-        self.data = None
-        self.metadata = None
+        self.log_folder = log_folder
+        os.makedirs(self.log_folder, exist_ok=True)
+        
+        self._session_folder = self.generate_session_folder()
+
+        self.cell_writer = ParquetWriter(
+            os.path.join(self._session_folder, "cell_logs"), schema=CellLogEntry
+        )
+
+        self.agent_writer = ParquetWriter(
+            os.path.join(self._session_folder, "agent_logs"), schema=AgentLogEntry
+        )
+
+        self._cell_cache = []
+        self._agent_cache = []
+        
+        self._status_log = {
+            "sim_start": datetime.datetime.now().isoformat(),
+            "messages": [],
+            "latest_flush": None,
+            "results": None
+        }
+
+    def cache_cell_updates(self, entries):
+        self._cell_cache.extend(entries)
+
+    def cache_agent_updates(self, entries):
+        self._agent_cache.extend(entries)
+
+    def flush(self):
+        self.cell_writer.write_batch(self._cell_cache)
+        self._cell_cache.clear() 
+
+        self.agent_writer.write_batch(self._agent_cache)
+        self._agent_cache.clear()
+
+        self._status_log["latest_flush"] = datetime.datetime.now().isoformat()
+        self._write_status_log()
+
+    def finish(self, fire: FireSim, on_interrupt: bool = False):
+        self.flush()
+
+        cell_log_path = os.path.join(self._session_folder, "cell_logs")
+        agent_log_path = os.path.join(self._session_folder, "agent_logs")
+
+        self._merge_parquet_files(
+            cell_log_path,
+            os.path.join(self._run_folder, "cell_logs.parquet")
+        )
+
+        self._merge_parquet_files(
+            agent_log_path,
+            os.path.join(self._run_folder, "agent_logs.parquet")
+        )
+
+        # Delete the temporary folders after merging
+        shutil.rmtree(cell_log_path)
+        shutil.rmtree(agent_log_path)
+
+        if on_interrupt:
+            sys.exit(0)
+
+
+        self.log_ctr += 1
+        
+
+        # TODO: re-implement results
+
+        # old implemenation below:
+
+        # if fire is not None:
+        #     # log results of simulation run
+        #     burnt_cells = len(fire.burnt_cells)
+        #     fire_extinguished = len(fire._burning_cells) == 0
+
+        #     self.data["results"] = {
+        #         "user interrupted": on_interrupt,
+        #         "cells burnt": burnt_cells,
+        #         "burnt area (m^2)": burnt_cells * fire.cell_dict[0].cell_area,
+        #         "fire extinguished": fire_extinguished,
+        #     }
+
+        #     if not fire_extinguished:
+        #         self.data["results"]["burning cells remaining"] = len(fire._burning_cells)
+        #         self.data["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0].cell_area
+
+        # else:
+        #     self.log_message("Unable to publish results due to early termination")
+        #     self.data["results"] = None
+
+
+    def _merge_parquet_files(self, folder_path: str, output_file: str):
+
+        parquet_files = sorted(glob.glob(os.path.join(folder_path, "part-*.parquet")))
+
+        if not parquet_files:
+            print(f"No parquet files found in {folder_path}")
+            return
+        
+        dfs = [pd.read_parquet(f) for f in parquet_files]
+        combined_df = pd.concat(dfs, ignore_index=True)
+
+        table = pa.Table.from_pandas(combined_df)
+        pq.write_table(table, output_file, compression='snappy')
 
     def generate_session_folder(self) -> str:
         """Generates the path for the current sim's log files based on current datetime
@@ -44,113 +137,35 @@ class Logger:
         :rtype: str
         """
         date_time_str = datetime.datetime.now().strftime('%d-%b-%Y-%H-%M-%S')
-        return os.path.join(self._log_folder, f"log_{date_time_str}")
+        return os.path.join(self.log_folder, f"log_{date_time_str}")
+    
+    def start_new_run(self):
+        self._run_folder = f"{self._session_folder}/run_{self.log_ctr}"
+        os.makedirs(self._run_folder, exist_ok=True)
 
-    def store_init_fire_obj(self, fire_obj: FireSim):
-        """Store the initial state of the fire in a .pkl within the log folder.
-        
-        This is done to speed up the post-processing of log data significantly.
+        self.log_ctr += 1
 
-        :param fire_obj: :class:`~fire_simulator.fire.FireSim` object just after being initialized.
-        :type fire_obj: :class:`~fire_simulator.fire.FireSim`
-        """
-        fire = {
-            'cell_size': fire_obj.cell_size,
-            'grid_width': fire_obj.grid_width,
-            'grid_height': fire_obj.grid_height,
-            'time_step': fire_obj.time_step,
-            'cell_dict': fire_obj.cell_dict,
-            'cell_grid': fire_obj.cell_grid,
-            'fire_breaks': fire_obj.fire_breaks,
-            'elevation_map': fire_obj.elevation_map,
-            'coarse_elevation': fire_obj.coarse_elevation,
-            'fuel_map': fire_obj.fuel_map,
-            'wind_forecast': fire_obj.wind_forecast,
-            'wind_forecast_time_step': fire_obj.wind_forecast_t_step
-        }
-
-        if fire_obj.roads is not None:
-            fire['roads'] = fire_obj.roads
-
-        filename = f"{self.session_folder}/init_fire_state.pkl"
-        with open(filename, 'wb') as f:
-            pickle.dump(fire, f)
-
-    def add_to_cache(self, updated_cells: list, time: int):
-        """Add the list of updated cells from the previous iteration of the sim to the logger's
-        cache to be stored in a log file later on.
-
-        :param updated_cells: list of :class:`~fire_simulator.cell.Cell` objects that were changed
-                              in the last iteration in their log format. See
-                              :func:`~fire_simulator.cell.Cell.to_log_format()` for more info.
-        :type updated_cells: list
-        :param time: sim time (in seconds) when these cells were updated and stored.
-        :type time: int
-        """
-        self.cache[time] = updated_cells
-
-    def add_to_agent_cache(self, agents: list, time: int):
-        """Add list of agents' state from the previous iteration of the sim to the logger's agent
-        cache to be stored in a log file later on.
-
-        :param agents: list of :class:`~agent_base.AgentBase` instances in their log format see the
-                       :class:`~agent_base.AgentBase`:func:`~agent_base.AgentBase.to_log_format()`
-                       function for more info.
-        :type agents: list
-        :param time: sim time (in seconds) when agents' were stored.
-        :type time: int
-        """
-        self.agent_data = True
-        self.agent_cache[time] = agents
-
-    def _dump_cache(self):
-        """Dump the logger's cache in a .msgpack file in the specified file location to be used
-        later in post-processing.
-        """
-
-        if not self.cache:
-            return
-
-        run_folder = f"{self.session_folder}/run_{self.log_ctr}"
-        os.makedirs(run_folder, exist_ok=True)
-
-        file_name = f"{run_folder}/log.msgpack"
-
-        if self.agent_data:
-            agent_filename = f"{run_folder}/agents.msgpack"
-
-        try:
-            with open(file_name, 'wb') as f:
-                msgpack.pack(self.cache, f)
-
-            if self.agent_data:
-                with open(agent_filename, 'wb') as f:
-                    msgpack.pack(self.agent_cache, f)
-
-            self.log_message("Log data saved successfully!")
-
-        except Exception as e:
-            self.log_message(f"Exception {e} occurred while attempting to save data.")
-
-    # ~~~ STATUS LOGGING ~~~ #
-    def store_metadata(self, sim_params: SimParams, fire: FireSim):
-        """Store metadata for the status log describing the parameters used to run a simulation.
-        
-        Resulting metadata will be used in all status logs generated with a given simulation
-        setup.
-
-        :param params: dictionary containing input parameters for the simulation.
-        :type params: dict
-        :param fire: :class:`~fire_simulator.fire.FireSim` instance for which metadata is being
-                     stored.
-        :type fire: :class:`~fire_simulator.fire.FireSim`
-        """
+    def log_metadata(self, sim_params: SimParams, fire: FireSim):
         # inputs
-        cell_size = params['cell_size']
-        time_step = params['t_step'] # seconds
-        duration = params['sim_time']
-        wind_file = params['wind']
-        import_roads = fire.roads is not None
+        cell_size = sim_params.cell_size
+        time_step = sim_params.t_step_s
+        duration = sim_params.duration_s
+        import_roads = sim_params.map_params.import_roads
+        init_mf = sim_params.init_mf
+        spotting = sim_params.model_spotting
+
+        if spotting:
+            canopy_species = sim_params.canopy_species
+            dbh_cm = sim_params.dbh_cm
+            min_spot_dist = sim_params.min_spot_dist
+            spot_delay_s = sim_params.spot_delay_s
+
+        # Weather inputs
+        weather_input_type = sim_params.weather_input.input_type
+        weather_file = sim_params.weather_input.file
+        wind_mesh_resolution = sim_params.weather_input.mesh_resolution
+        start_datetime = sim_params.weather_input.start_datetime
+        end_datetime = sim_params.weather_input.end_datetime
 
         # sim size
         rows = fire.shape[0]
@@ -159,132 +174,130 @@ class Logger:
         width_m = fire.size[0]
         height_m = fire.size[1]
 
-        # Load map file
-        map_folder = params['input']
-        foldername =  os.path.basename(map_folder)
+        # load map file
+        map_folder = sim_params.map_params.folder
+        foldername = os.path.basename(map_folder)
         map_file_path = os.path.join(map_folder, foldername + ".json")
         with open(map_file_path, 'r') as f:
             map_data = json.load(f)
 
-        user_code_path = params['user_path']
-        user_code_class = params['class_name']
+        # imported code
+        user_path = sim_params.user_path
+        user_class = sim_params.user_class
 
         metadata = {
-                "inputs": {
-                    "cell size": cell_size,
-                    "time step (sec)": time_step,
-                    "duration (sec)": duration,
-                    "roads imported": import_roads
-                },
+            "inputs": {
+                "cell size": cell_size,
+                "time step (sec)": time_step,
+                "duration (sec)": duration,
+                "init dead moisture": init_mf,
+                "roads imported": import_roads,
+                "spotting modeled": spotting
+            },
 
-                "sim size": {
-                    "rows": rows,
-                    "cols": cols,
-                    "total cells": total_cells,
-                    "width (m)": width_m,
-                    "height (m)": height_m  
-                },
+            "sim size": {
+                "rows": rows,
+                "cols": cols,
+                "total cells": total_cells,
+                "width (m)": width_m,
+                "height (m)": height_m
+            },
 
-                "wind forecast": {
-                    "file location": wind_file
-                },
+            "weather": {
+                "input type": weather_input_type,
+                "weather file": weather_file,
+                "wind mesh resolution": wind_mesh_resolution,
+                "start datetime": start_datetime,
+                "end datetime": end_datetime
+            },
 
-                "imported_code": {
-                    "imported module location": user_code_path,
-                    "imported class name": user_code_class
-                },
+            "imported code": {
+                "imported module location": user_path,
+                "imported class name": user_class
+            },
 
-                "map": {
-                    "map file location": map_file_path,
-                    "map contents": map_data
-                }
+            "map": {
+                "map file": map_file_path,
+                "map contents": map_data
+            }
         }
 
-        self.metadata = metadata
+        if spotting:
 
-    def start_status_log(self):
-        """Start a status log by loading the relevant metadata and creating a dictionary to store
-        all relevant status data.
-        """
-        # loads metadata and creates a dictionary to store status data
-        self.data = {}
-        self.data["sim start"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.data["metadata"] = self.metadata
-        self.messages = []
-        self.log_message("Initialization successful, simulation started.")
-
-    def log_message(self, message: str):
-        """Log a custom message in the current status log.
-
-        :param message: Message to be logged
-        :type message: str
-        """
-        # log a time-stamped message
-        timestamp = self.create_timestamp()
-        status = f"[{timestamp}]:{message} "
-
-        self.messages.append(status)
-
-    def _write_status_log(self, fire: FireSim, on_interrupt: bool = False):
-        """Writes the status log after a simulation has been completed.
-        
-        :param fire: :class:`~fire_simulator.fire.FireSim` instance to write status log for.
-        :type fire: :class:`~fire_simulator.fire.FireSim`
-        """
-        self.data["messages"] = self.messages
-
-        if fire is not None:
-            # log results of simulation run
-            burnt_cells = len(fire.burnt_cells)
-            fire_extinguished = len(fire._burning_cells) == 0
-
-            self.data["results"] = {
-                "user interrupted": on_interrupt,
-                "cells burnt": burnt_cells,
-                "burnt area (m^2)": burnt_cells * fire.cell_dict[0].cell_area,
-                "fire extinguished": fire_extinguished,
+            metadata["spotting inputs"] = {
+                "canopy species": canopy_species,
+                "dbh (cm)": dbh_cm,
+                "min. spot dist": min_spot_dist,
+                "spot delay (s)": spot_delay_s
             }
 
-            if not fire_extinguished:
-                self.data["results"]["burning cells remaining"] = len(fire._burning_cells)
-                self.data["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0].cell_area
 
-        else:
-            self.log_message("Unable to publish results due to early termination")
-            self.data["results"] = None
+        safe_dict = make_json_serializable(metadata)
 
-        filename = f"{self.session_folder}/run_{self.log_ctr}/status_log.json"
+        metadata_path = os.path.join(self._session_folder, "metadata.json")
+        with open(metadata_path, 'w') as f:
+            json.dump(safe_dict, f, indent=2)
 
-        with open(filename, 'w') as f:
-            json.dump(self.data, f, indent=4)
+    def save_initial_state(self, fire_obj: FireSim):
 
-        self.log_ctr += 1
+        init_cells = [cell.to_log_entry(0) for cell in fire_obj.cell_dict.values()]
 
-    def finish(self, fire: FireSim, on_interrupt=False):
-        """Finish logging all data, write to a .msgpack log file and a .json status log.
+        df = pd.DataFrame(init_cells)
 
-        :param fire: :class:`~fire_simulator.fire.FireSim` instance to write logs for.
-        :type fire: :class:`~fire_simulator.fire.FireSim`
-        :param on_interrupt: set to `True` when writing final log file, if `True` program will
-                             terminate when finished logging, defaults to `False`.
-        :type on_interrupt: bool, optional
-        """
-        self._dump_cache()
-        self._write_status_log(fire, on_interrupt)
+        encoded_wind = serialize_array(fire_obj.wind_forecast)
 
-        if on_interrupt:
-            sys.exit(0)
+        dict = {
+            'cell_size': fire_obj.cell_size,
+            'cols': fire_obj.shape[1],
+            'rows': fire_obj.shape[0],
+            'width_m': fire_obj.size[0],
+            'height_m': fire_obj.size[1],
+            'time_step': fire_obj.time_step,
+            'fire_breaks': fire_obj.fire_breaks,
+            'roads': fire_obj.roads,
+            'wind_time_step': fire_obj.weather_t_step,
+            'wind_xpad': fire_obj.wind_xpad,
+            'wind_ypad': fire_obj.wind_ypad,
+            'wind_forecast': encoded_wind,
+            'wind_resolution': fire_obj._wind_res,
+            'elevation': fire_obj.coarse_elevation,
+            'start_datetime': fire_obj._start_datetime,
+            'north_dir_deg': fire_obj._north_dir_deg
+        }
 
-    @property
-    def session_folder(self) -> str:
-        """Path to the folder the logger is writing to
-        """
-        return self._session_folder
+        table = pa.Table.from_pandas(df)
+        meta_json = json.dumps(make_json_serializable(dict))
+        table = table.replace_schema_metadata({"init_metadata": meta_json})
 
-    def create_timestamp(self) -> str:
-        """Function that creates a timestamp string based on the current datetime and returns it.
+        pq.write_table(table, os.path.join(self._session_folder, "init_state.parquet"), compression='snappy')
 
-        :return: Timestamp string representing the current date and time.
-        :rtype: str
-        """
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def log_message(self, message: str):
+        timestamp = datetime.datetime.now().isoformat()
+        entry = f"[{timestamp}]: {message}"
+        self._status_log["messages"].append(entry)
+
+    def _write_status_log(self):
+        status_path = os.path.join(self._run_folder, "status_log.json")
+        with open(status_path, 'w') as f:
+            json.dump(self._status_log, f, indent = 2)
+
+def serialize_array(array: np.ndarray) -> str:
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    compressed = zlib.compress(buffer.getvalue())
+    encoded = base64.b64encode(compressed).decode('utf-8')
+    return encoded
+        
+def make_json_serializable(d: dict):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            make_json_serializable(v)
+        elif isinstance(v, datetime.datetime):
+            d[k] = v.isoformat()
+        elif isinstance(v, np.ndarray):
+            d[k] = v.tolist()
+        elif hasattr(v, '__dict__'):
+            # fallback if nested object was not handled by asdict (rare)
+            d[k] = str(v)  # or raise warning
+    return d
