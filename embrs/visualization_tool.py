@@ -15,9 +15,6 @@ import base64
 from datetime import datetime
 import numpy as np
 
-# TODO: implement looping like old tool
-# TODO: This should stop itself on its own
-
 class PlaybackVisualizer(BaseVisualizer):
     def __init__(self, params: PlaybackVisualizerParams):
 
@@ -106,7 +103,9 @@ class PlaybackVisualizer(BaseVisualizer):
             
             t+=self.update_freq_s
 
-            self.update_grid(t, entries, agents)        
+            self.update_grid(t, entries, agents)     
+
+        self.close()
 
     def get_entries_between(self, start_time: float, end_time: float):
         agents = []

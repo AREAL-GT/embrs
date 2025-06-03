@@ -401,6 +401,12 @@ class BaseVisualizer:
         self.fig.canvas.blit(self.h_ax.bbox)
         self.fig.canvas.flush_events()
     
+    def close(self):
+        """Closes the visualizer window and cleans up the figure."""
+        if self.fig and plt.fignum_exists(self.fig.number):
+            plt.close(self.fig)
+            self.fig = None
+
     def meters_to_points(self, meters):
         fig_width_inch, _ = self.fig.get_size_inches()
         meters_per_inch = self.width_m / fig_width_inch
