@@ -271,7 +271,7 @@ class FireSim(BaseFireSim):
         self._curr_time_s = self.time_step * self._iters
         if self.progress_bar:
             self.progress_bar.update()
-        
+
         # Compute the fuel consumption over time for each new ignition
         self.compute_burn_histories(self._new_ignitions)
 
@@ -305,7 +305,7 @@ class FireSim(BaseFireSim):
             if cell.fuel.w_n_dead < self.burnout_thresh:
                 # if not set to burnt
                 self.set_state_at_cell(cell, CellStates.BURNT)
-                self._burnt_cells.append(cell)
+                self._burnt_cells.add(cell)
             else:
                 self.set_state_at_cell(cell, CellStates.FUEL)
                                 

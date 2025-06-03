@@ -1,5 +1,4 @@
 import os
-from typing import List
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
 from embrs.utilities.parquet_writer import ParquetWriter
 import pyarrow as pa
@@ -16,9 +15,6 @@ import sys
 import io
 import zlib
 import base64
-
-# TODO: Write results to status log
-# TODO: Update the messages that are logged by the fire sim / should we establish a debug output or errors only?
 
 class Logger:
     def __init__(self, log_folder: str):
@@ -64,7 +60,26 @@ class Logger:
         self._status_log["latest_flush"] = datetime.datetime.now().isoformat()
         self._write_status_log()
 
-    def finish(self, fire: FireSim, on_interrupt: bool = False):
+    def write_results(self, fire: FireSim, on_interrupt: bool = False):
+        if fire is not None:
+            # Log results
+            burnt_cells = len(fire._burnt_cells)
+            fire_extinguised = len(fire._burning_cells) == 0
+
+            self._status_log["results"] = {
+                "user interrupted": on_interrupt,
+                "cells burnt": burnt_cells,
+                "burnt area (m^2)": burnt_cells * fire.cell_dict[0]._cell_area,
+                "fire extinguished": fire_extinguised
+            }
+
+            if not fire_extinguised:
+                self._status_log["results"]["burning cells remaining"] = len(fire._burning_cells)
+                self._status_log["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0]._cell_area
+
+
+    def finish(self, fire: FireSim, on_interrupt: bool = False):  
+        self.write_results(fire)
         self.flush()
 
         cell_log_path = os.path.join(self._session_folder, "cell_logs")
@@ -87,34 +102,7 @@ class Logger:
         if on_interrupt:
             sys.exit(0)
 
-
         self.log_ctr += 1
-        
-
-        # TODO: re-implement results
-
-        # old implemenation below:
-
-        # if fire is not None:
-        #     # log results of simulation run
-        #     burnt_cells = len(fire.burnt_cells)
-        #     fire_extinguished = len(fire._burning_cells) == 0
-
-        #     self.data["results"] = {
-        #         "user interrupted": on_interrupt,
-        #         "cells burnt": burnt_cells,
-        #         "burnt area (m^2)": burnt_cells * fire.cell_dict[0].cell_area,
-        #         "fire extinguished": fire_extinguished,
-        #     }
-
-        #     if not fire_extinguished:
-        #         self.data["results"]["burning cells remaining"] = len(fire._burning_cells)
-        #         self.data["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0].cell_area
-
-        # else:
-        #     self.log_message("Unable to publish results due to early termination")
-        #     self.data["results"] = None
-
 
     def _merge_parquet_files(self, folder_path: str, output_file: str):
 

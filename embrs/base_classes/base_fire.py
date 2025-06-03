@@ -100,7 +100,7 @@ class BaseFireSim:
         self._soaked = []
         self._burning_cells = []
         self._new_ignitions = []
-        self._burnt_cells = []
+        self._burnt_cells = set()
         self._frontier = set()
         self._fire_break_cells = []
         self.starting_ignitions = []
