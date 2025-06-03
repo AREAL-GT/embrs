@@ -107,13 +107,18 @@ class MapParams:
 
 @dataclass
 class PlaybackVisualizerParams:
-    file: str
-    freq: float
-    scale_km: float
-    legend: bool
+    cell_file: str
     init_location: bool
     has_agents: bool
     agent_file: Optional[str] = None
+
+    # Visualization Preferences
+    freq: Optional[float] = 300
+    scale_km: Optional[float] = 1.0
+    show_legend: Optional[bool] = True
+    show_wind_cbar: Optional[bool] = True
+    show_wind_field: Optional[bool] = True
+    show_compass: Optional[bool] = True
 
 @dataclass
 class VisualizerInputs:
@@ -122,8 +127,6 @@ class VisualizerInputs:
     sim_size: Tuple[float, float]
     start_datetime: datetime
     north_dir_deg: float
-    scale_bar_km: float
-    show_legend: bool
     wind_forecast: np.ndarray
     wind_resolution: float
     wind_t_step: float
@@ -133,6 +136,13 @@ class VisualizerInputs:
     roads: list
     fire_breaks: list
     init_entries: list
+
+    # Visualization Preferences
+    scale_bar_km: Optional[float] = 1.0
+    show_legend: Optional[bool] = True
+    show_wind_cbar: Optional[bool] = True
+    show_wind_field: Optional[bool] = True
+    show_compass: Optional[bool] = True
 
 @dataclass
 class WeatherEntry:

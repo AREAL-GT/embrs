@@ -2,7 +2,6 @@ from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.data_classes import VisualizerInputs
 
-
 class RealTimeVisualizer(BaseVisualizer):
 
     def __init__(self, sim: FireSim):
@@ -18,7 +17,8 @@ class RealTimeVisualizer(BaseVisualizer):
 
     def update(self):
         entries = [cell.to_log_entry(self.sim._curr_time_s) for cell in self.sim._updated_cells.values()]
-        self.update_grid(self.sim._curr_time_s, entries)
+        agents = [agent.to_log_entry(self.sim._curr_time_s) for agent in self.sim.agent_list]
+        self.update_grid(self.sim._curr_time_s, entries, agents)
         self.sim._updated_cells.clear()
 
     def get_input_params(self):
@@ -28,8 +28,6 @@ class RealTimeVisualizer(BaseVisualizer):
             sim_size=self.sim.size,
             start_datetime=self.sim._start_datetime,
             north_dir_deg=self.sim._north_dir_deg,
-            scale_bar_km=1.0,
-            show_legend=True,
             wind_forecast=self.sim.wind_forecast,
             wind_resolution=self.sim._wind_res,
             wind_t_step=self.sim.weather_t_step,

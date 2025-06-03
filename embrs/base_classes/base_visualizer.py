@@ -9,6 +9,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
+from matplotlib.cm import ScalarMappable
 from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
 from matplotlib.lines import Line2D
 
@@ -28,7 +29,6 @@ class BaseVisualizer:
         self.grid_height = params.sim_shape[0]
         self.grid_width = params.sim_shape[1]
 
-
         self.cell_size = params.cell_size
         self.coarse_elevation = params.elevation
         self.width_m = params.sim_size[0]
@@ -45,12 +45,15 @@ class BaseVisualizer:
         self.wind_xpad = params.wind_xpad
         self.wind_ypad = params.wind_ypad
 
-        self._start_datetime = params.start_datetime
-        self.scale_bar_km = params.scale_bar_km
-
-        self.show_legend = params.show_legend
-
         self.north_dir_deg = params.north_dir_deg
+        self._start_datetime = params.start_datetime
+
+        self.scale_bar_km = params.scale_bar_km
+        self.show_legend = params.show_legend
+        self.show_wind_cbar = params.show_wind_cbar
+        self.show_wind_field = params.show_wind_field
+
+        self.show_compass = params.show_compass
 
         init_entries = params.init_entries
 
@@ -64,10 +67,11 @@ class BaseVisualizer:
         plt.pause(1)
 
     def _process_wind(self):
-        all_speeds = [forecast[:, :, 0] for forecast in self.wind_forecast]
-        self.global_max_speed = max(np.max(s) for s in all_speeds)
+        if self.show_wind_field:
+            all_speeds = [forecast[:, :, 0] for forecast in self.wind_forecast]
+            self.global_max_speed = max(np.max(s) for s in all_speeds)
 
-        self.wind_norm = mcolors.Normalize(vmin=0, vmax=self.global_max_speed)
+            self.wind_norm = mcolors.Normalize(vmin=0, vmax=self.global_max_speed)
 
     def _setup_figure(self):
         
@@ -93,27 +97,28 @@ class BaseVisualizer:
                                 self.coarse_elevation, colors='k')
         self.h_ax.clabel(cont, inline=True, fontsize=10, zorder=2)
 
-        # === Compass ===
-        self.compass_box = mpatches.FancyBboxPatch((0.02, 0.84), 0.06, 0.06,
-                                                transform=self.h_ax.transAxes,
-                                                boxstyle='square,pad=0.02',
-                                                facecolor='white', edgecolor='black',
-                                                linewidth=1, zorder=3, alpha=0.75)
-        self.h_ax.add_patch(self.compass_box)
-
-        # Compass arrow
-        cx, cy = 0.02 + 0.03, 0.84 + 0.03  # center of box
-        arrow_len = 0.025
-        dx = np.sin(np.deg2rad(self.north_dir_deg)) * arrow_len
-        dy = np.cos(np.deg2rad(self.north_dir_deg)) * arrow_len
-        self.arrow_obj = self.h_ax.arrow(cx, cy - 0.035, dx, dy,
-                                        transform=self.h_ax.transAxes,
-                                        width=0.004, head_width=0.015,
-                                        color='red', zorder=4)
-        self.compassheader = self.h_ax.text(cx, cy + 0.03, 'N',
+        if self.show_compass:
+            # === Compass ===
+            self.compass_box = mpatches.FancyBboxPatch((0.02, 0.84), 0.06, 0.06,
+                                                    transform=self.h_ax.transAxes,
+                                                    boxstyle='square,pad=0.02',
+                                                    facecolor='white', edgecolor='black',
+                                                    linewidth=1, zorder=3, alpha=0.75)
+            self.h_ax.add_patch(self.compass_box)
+            cx, cy = 0.02 + 0.03, 0.84 + 0.03  # center of box
+        
+            # Compass arrow
+            arrow_len = 0.025
+            dx = np.sin(np.deg2rad(self.north_dir_deg)) * arrow_len
+            dy = np.cos(np.deg2rad(self.north_dir_deg)) * arrow_len
+            self.arrow_obj = self.h_ax.arrow(cx, cy - 0.035, dx, dy,
                                             transform=self.h_ax.transAxes,
-                                            ha='center', va='center',
-                                            fontsize=10, weight='bold', color='red')
+                                            width=0.004, head_width=0.015,
+                                            color='red', zorder=4)
+            self.compassheader = self.h_ax.text(cx, cy + 0.03, 'N',
+                                                transform=self.h_ax.transAxes,
+                                                ha='center', va='center',
+                                                fontsize=10, weight='bold', color='red')
 
         self.datetime_box = mpatches.FancyBboxPatch((0.02, 0.98), 0.2, 0.0000125/2, transform=self.h_ax.transAxes,
                                                     boxstyle='square,pad=0.02',
@@ -166,8 +171,6 @@ class BaseVisualizer:
         if self.legend_elements and self.show_legend:
             self.h_ax.legend(handles=self.legend_elements, loc='upper right', borderaxespad=0)
 
-
-
         # === Scale bar ===
         bar_length = self.scale_bar_km * 1000  # meters
         if self.scale_bar_km < 1:
@@ -198,16 +201,15 @@ class BaseVisualizer:
 
         self.h_ax.add_artist(scalebar_box)
 
-        from matplotlib.cm import ScalarMappable
-        sm = ScalarMappable(norm=self.wind_norm, cmap='jet')
-        sm.set_array([])
+        if self.show_wind_field and self.show_wind_cbar:
+            sm = ScalarMappable(norm=self.wind_norm, cmap='jet')
+            sm.set_array([])
+            self.wind_cbar = self.fig.colorbar(
+                sm, ax=self.h_ax, orientation='vertical', shrink=0.7,
+                pad=0.02, label='Wind speed (m/s)'
+            )
 
-        self.wind_cbar = self.fig.colorbar(
-            sm, ax=self.h_ax, orientation='vertical', shrink=0.7,
-            pad=0.02, label='Wind speed (m/s)'
-        )
-
-        self.wind_cbar.ax.tick_params(labelsize=8)
+            self.wind_cbar.ax.tick_params(labelsize=8)
 
     def _setup_grid(self, init_entries: list[CellLogEntry]) -> None:
 
@@ -264,7 +266,7 @@ class BaseVisualizer:
         self._init_static_elements()
 
     
-    def update_grid(self, sim_time_s: float, entries: list[CellLogEntry], agents: list[AgentLogEntry] = None) -> None:
+    def update_grid(self, sim_time_s: float, entries: list[CellLogEntry], agents: list[AgentLogEntry] = []) -> None:
         """_summary_
 
         Args:
@@ -283,7 +285,7 @@ class BaseVisualizer:
 
         wind_idx = int(np.floor((sim_time_s / self.wind_t_step)))
 
-        if wind_idx != self.wind_idx and wind_idx < len(self.wind_forecast):
+        if self.show_wind_field and wind_idx != self.wind_idx and wind_idx < len(self.wind_forecast):
             self.wind_idx = wind_idx
 
             if self.wind_grid is not None:
@@ -294,8 +296,7 @@ class BaseVisualizer:
             # Determine number of samples in each dimension based on desired spacing
             n_rows, n_cols = curr_forecast.shape[:2]
 
-            # TODO: Make this user configurable (optional)
-            # TODO: Decide if we would like to downsample the wind grid or not
+            # TODO: Decide if we would like to downsample the wind grid or make it user configurable
             # desired_spacing = self.width_m / 6
             # desired_num_rows = max(int(np.round(n_rows * self.wind_res / desired_spacing)), 2)
             # desired_num_cols = max(int(np.round(n_cols * self.wind_res / desired_spacing)), 2)
@@ -378,7 +379,7 @@ class BaseVisualizer:
         self.elapsed_text.set_text(time_str)
 
         # Plot agents at current time if they exist
-        if agents is not None:
+        if agents:
             if self.agent_art is not None:
                 for a in self.agent_art:
                     a.remove()

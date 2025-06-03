@@ -865,6 +865,15 @@ class VizFolderSelector(FileSelectBase):
         self.scale_km.set(1.0)
         self.legend = tk.BooleanVar()
         self.legend.set(True)
+        self.show_wind_cbar = tk.BooleanVar()
+        self.show_wind_cbar.set(True)
+        self.show_wind_field = tk.BooleanVar()
+        self.show_wind_field.set(True)
+        self.show_wind_field.trace_add("write", self.wind_field_toggled)
+        self.show_compass = tk.BooleanVar()
+        self.show_compass.set(True)
+
+
         self.has_agents = False
         self.run_folders = ["No runs available, select a folder"]
 
@@ -875,35 +884,40 @@ class VizFolderSelector(FileSelectBase):
 
         frame = self.create_frame(self.root)
 
-        # # Create a frame to select log file
-        self.create_folder_selector(frame, "Log folder:    ", self.viz_folder)
+        # === Folder Selection Frame ===
+        folder_frame = tk.LabelFrame(frame, text="Folder Selection", padx=10, pady=5)
+        folder_frame.grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
 
-        run_selection_frame = tk.Frame(frame)
-        run_selection_frame.grid(padx=10,pady=5)
-        tk.Label(run_selection_frame, text="Run to Visualize:",
-                 anchor="center").grid(row=1, column=0)
+        self.create_folder_selector(folder_frame, "Log folder:    ", self.viz_folder)
 
-        self.run_options = tk.OptionMenu(run_selection_frame, self.run_folder,
-                      *self.run_folders)
+        run_selection_frame = tk.Frame(folder_frame)
+        run_selection_frame.grid(padx=10, pady=5)
+        tk.Label(run_selection_frame, text="Run to Visualize:").grid(row=0, column=0)
+        self.run_options = tk.OptionMenu(run_selection_frame, self.run_folder, *self.run_folders)
+        self.run_options.grid(row=0, column=1)
 
-        self.run_options.grid(row=1, column=1)
+        # === Visualization Settings Frame ===
+        settings_frame = tk.LabelFrame(frame, text="Visualization Settings", padx=10, pady=5)
+        settings_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
 
-        # Create a frame to select sim time per frame
-        self.create_spinbox_with_two_labels(frame, "Update Frequency:", np.inf,
-                                            self.viz_freq, "seconds", row=2, column=0)
+        self.create_spinbox_with_two_labels(settings_frame, "Update Frequency:", np.inf, self.viz_freq, "seconds", row=0, column=0)
+        self.create_spinbox_with_two_labels(settings_frame, "Scale bar size:        ", 100, self.scale_km, "km", row=0, column=1)
 
-        # Create a frame to select scale bar size
-        self.create_spinbox_with_two_labels(frame, "Scale bar size:        ", 100, self.scale_km, "km", row=2, column=1)
+        # === Display Options Frame ===
+        display_frame = tk.LabelFrame(frame, text="Display Options", padx=10, pady=5)
+        display_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
 
-        # Create a frame to choose legend display
-        legend_frame = tk.Frame(frame)
-        legend_frame.grid(padx=10, pady=5)
-        tk.Checkbutton(legend_frame, text="Display fuel legend",
-                       variable=self.legend).grid(row=2,column=2)
+        tk.Checkbutton(display_frame, text="Display fuel legend", variable=self.legend).grid(row=0, column=0, sticky='w')
+        self.wind_cbar_checkbox = tk.Checkbutton(display_frame, text="Show wind colorbar", variable=self.show_wind_cbar)
+        self.wind_cbar_checkbox.grid(row=0, column=1, sticky='w')
 
-        self.submit_button = tk.Button(frame, text='Submit', command = self.submit,
-                                       state='disabled')
-        self.submit_button.grid(pady=10)
+        tk.Checkbutton(display_frame, text="Show wind field", variable=self.show_wind_field).grid(row=1, column=0, sticky='w')
+        tk.Checkbutton(display_frame, text="Show compass", variable=self.show_compass).grid(row=1, column=1, sticky='w')
+
+        # === Submit Button ===
+        self.submit_button = tk.Button(frame, text='Submit', command=self.submit, state='disabled')
+        self.submit_button.grid(row=3, column=0, columnspan=3, pady=10)
+
 
     def viz_folder_changed(self, *args):
         """Callback function for selecting the log file to be displayed. Checks the file selected
@@ -947,6 +961,16 @@ class VizFolderSelector(FileSelectBase):
 
             self.run_folder.set("")
 
+    def wind_field_toggled(self, *args):
+        """Ensures wind colorbar is only shown if wind field is shown."""
+        if not self.show_wind_field.get():
+            self.show_wind_cbar.set(False)
+            self.wind_cbar_checkbox.config(state='disabled')
+        else:
+            self.show_wind_cbar.set(True)
+            self.wind_cbar_checkbox.config(state='normal')
+
+
     def get_run_sub_folders(self, folderpath: str) -> list:
         """Function that retrieves all the runs contained within a log folder. Returns a list of
         the folders to populate the option menu
@@ -983,12 +1007,15 @@ class VizFolderSelector(FileSelectBase):
         """
 
         self.result = PlaybackVisualizerParams(
-            file= self.viz_file,
+            cell_file= self.viz_file,
+            init_location=self.init_location,
+            has_agents=self.has_agents,
             freq=self.viz_freq.get(),
             scale_km=self.scale_km.get(),
-            legend=self.legend.get(),
-            init_location=self.init_location,
-            has_agents=self.has_agents
+            show_legend=self.legend.get(),
+            show_wind_cbar=self.show_wind_cbar.get(),
+            show_wind_field=self.show_wind_field.get(),
+            show_compass=self.show_compass.get()
         )
 
         if self.has_agents:
@@ -1065,7 +1092,6 @@ class WindForecastGen(FileSelectBase):
         self.duration_entry = tk.Spinbox(time_step_frame, from_=0.0166666, to=1000, increment=0.5, textvariable=self.duration, width=10)
         self.duration_entry.grid(row=0, column=5)
         tk.Label(time_step_frame, text="hours", anchor="center").grid(row=0, column=6)
-
 
         # spacer
         tk.Label(entry_frame, text="").grid(row=0, column=3, padx=20)

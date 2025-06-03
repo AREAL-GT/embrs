@@ -1,7 +1,7 @@
 
 from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInputs
-from embrs.utilities.logger_schemas import CellLogEntry
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
 from embrs.utilities.file_io import VizFolderSelector
 
 import pyarrow.parquet as pq
@@ -17,8 +17,6 @@ import numpy as np
 
 # TODO: implement looping like old tool
 # TODO: This should stop itself on its own
-# TODO: Agent visualization
-# TODO: Make wind colorbar optional
 
 class PlaybackVisualizer(BaseVisualizer):
     def __init__(self, params: PlaybackVisualizerParams):
@@ -28,14 +26,14 @@ class PlaybackVisualizer(BaseVisualizer):
         
         self.config_params = params
 
-        self.log_file = params.file
+        self.log_file = params.cell_file
         self.update_freq_s = params.freq
-        self.show_legend = params.legend
+        self.show_legend = params.show_legend
         init_location = params.init_location
         self.has_agents = params.has_agents
 
         if self.has_agents:
-            agent_file = params.agent_file
+            self.agent_file = params.agent_file
 
         run_folder = os.path.dirname(self.log_file)
         log_folder = os.path.dirname(run_folder)
@@ -66,8 +64,6 @@ class PlaybackVisualizer(BaseVisualizer):
             sim_size=(meta_dict['width_m'], meta_dict['height_m']),
             start_datetime=datetime.fromisoformat(meta_dict['start_datetime']),
             north_dir_deg=meta_dict['north_dir_deg'],
-            scale_bar_km=self.config_params.scale_km,
-            show_legend=self.show_legend,
             wind_forecast=decoded_wind,
             wind_resolution=meta_dict['wind_resolution'],
             wind_t_step=meta_dict['wind_time_step'],
@@ -76,7 +72,12 @@ class PlaybackVisualizer(BaseVisualizer):
             elevation=meta_dict['elevation'],
             roads=meta_dict['roads'],
             fire_breaks=meta_dict['fire_breaks'],
-            init_entries=self.get_init_entries(init_path)     
+            init_entries=self.get_init_entries(init_path),     
+            scale_bar_km=self.config_params.scale_km,
+            show_legend=self.show_legend,
+            show_wind_cbar=self.config_params.show_wind_cbar,
+            show_wind_field=self.config_params.show_wind_field,
+            show_compass=self.config_params.show_compass
         )
 
         return params
@@ -97,7 +98,7 @@ class PlaybackVisualizer(BaseVisualizer):
         done = False
 
         while not done:
-            entries = self.get_entries_between(t, t+self.update_freq_s)
+            entries, agents = self.get_entries_between(t, t+self.update_freq_s)
 
             if len(entries) == 0:
                 done = True
@@ -105,9 +106,10 @@ class PlaybackVisualizer(BaseVisualizer):
             
             t+=self.update_freq_s
 
-            self.update_grid(t, entries)        
+            self.update_grid(t, entries, agents)        
 
     def get_entries_between(self, start_time: float, end_time: float):
+        agents = []
 
         df = pd.read_parquet(self.log_file)
 
@@ -115,8 +117,13 @@ class PlaybackVisualizer(BaseVisualizer):
         filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
         
         entries = [CellLogEntry(**row.to_dict()) for _, row in filtered.iterrows()]
+
+        if self.has_agents:
+            df = pd.read_parquet(self.agent_file)
+            filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
+            agents = [AgentLogEntry(**row.to_dict()) for _, row in filtered.iterrows()]
         
-        return entries
+        return entries, agents
 
 def run(params: PlaybackVisualizerParams):
     viz = PlaybackVisualizer(params)
