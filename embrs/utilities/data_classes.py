@@ -100,8 +100,8 @@ class MapParams:
         return (self.lcp_data.width_m, self.lcp_data.height_m)
     
     def shape(self, cell_size: int) -> Tuple[int, int]:
-        rows = int(np.floor(self.lcp_data.height_m/(1.5*cell_size))) 
-        cols = int(np.floor(self.lcp_data.width_m/(np.sqrt(3)*cell_size)))
+        rows = int(np.floor(self.lcp_data.height_m/(1.5*cell_size))) + 1
+        cols = int(np.floor(self.lcp_data.width_m/(np.sqrt(3)*cell_size))) + 1
 
         return (rows, cols)
 

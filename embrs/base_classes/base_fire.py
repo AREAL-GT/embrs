@@ -165,6 +165,9 @@ class BaseFireSim:
                     data_col = int(np.floor(cell_x/self._data_res))
                     data_row = int(np.floor(cell_y/self._data_res))
                     
+                    data_col = min(data_col, sim_params.map_params.lcp_data.cols-1)
+                    data_row = min(data_row, sim_params.map_params.lcp_data.rows-1)
+
                     # Get fuel type
                     fuel_key = self._fuel_map[data_row, data_col]
                     fuel = Anderson13(fuel_key)
@@ -208,11 +211,11 @@ class BaseFireSim:
                         self._urban_cells.append(new_cell)
 
                     # Set wind forecast in cell
+                    x_wind = max(cell_x - self.wind_xpad, 0)
+                    y_wind = max(cell_y - self.wind_ypad, 0)
 
-                    # TODO: use xpad and ypad to properly calculate col and row
-
-                    wind_col = int(np.floor(cell_x/self._wind_res))
-                    wind_row = int(np.floor(cell_y/self._wind_res))
+                    wind_col = int(np.floor(x_wind/self._wind_res))
+                    wind_row = int(np.floor(y_wind/self._wind_res))
 
                     # Account for WindNinja differences in mesh_resolution
                     if wind_row > self.wind_forecast.shape[1] - 1:
@@ -816,8 +819,8 @@ class BaseFireSim:
         forecast_rows = forecast[0, :, :, 0].shape[0]
         forecast_cols = forecast[0, :, :, 1].shape[1]
 
-        forecast_height = (forecast_rows-1) * self._wind_res
-        forecast_width = (forecast_cols-1) * self._wind_res
+        forecast_height = forecast_rows * self._wind_res
+        forecast_width = forecast_cols * self._wind_res
 
         xpad = (self.size[0] - forecast_width)/2
         ypad = (self.size[1] - forecast_height)/2

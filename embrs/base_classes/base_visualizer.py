@@ -76,7 +76,7 @@ class BaseVisualizer:
         self.h_ax = self.fig.add_axes([0.05, 0.05, 0.9, 0.9])
 
         self.h_ax.set_aspect('equal')
-        self.h_ax.axis([0, self.width_m - self.cell_size * (np.sqrt(3)/2), 0, self.height_m-(self.cell_size*1.5)])
+        self.h_ax.axis([0, self.width_m, 0, self.height_m])
         self._scale_factor_x = self.cell_size * np.sqrt(3)
         self._scale_factor_y = self.cell_size * 1.5
 
@@ -283,7 +283,7 @@ class BaseVisualizer:
 
         wind_idx = int(np.floor((sim_time_s / self.wind_t_step)))
 
-        if wind_idx != self.wind_idx:
+        if wind_idx != self.wind_idx and wind_idx < len(self.wind_forecast):
             self.wind_idx = wind_idx
 
             if self.wind_grid is not None:
@@ -291,16 +291,27 @@ class BaseVisualizer:
 
             curr_forecast = self.wind_forecast[self.wind_idx]
 
-            # Downsample the wind data for plotting # TODO: should make down-sampling user configurable (at least for playback)
-            des_resolution = self.width_m / 6
-            downsample_factor = max(int(np.floor(des_resolution / self.wind_res)), 1)
+            # Determine number of samples in each dimension based on desired spacing
+            n_rows, n_cols = curr_forecast.shape[:2]
 
-            wind_speed = curr_forecast[::downsample_factor, ::downsample_factor, 0]
-            wind_dir_deg = curr_forecast[::downsample_factor, ::downsample_factor, 1]
-            
-            X, Y = np.meshgrid(np.arange(0, wind_speed.shape[1]) * self.wind_res * downsample_factor,
-                                np.arange(0, wind_speed.shape[0]) * self.wind_res * downsample_factor)
-            
+            # TODO: Make this user configurable (optional)
+            # TODO: Decide if we would like to downsample the wind grid or not
+            # desired_spacing = self.width_m / 6
+            # desired_num_rows = max(int(np.round(n_rows * self.wind_res / desired_spacing)), 2)
+            # desired_num_cols = max(int(np.round(n_cols * self.wind_res / desired_spacing)), 2)
+
+            row_indices = np.linspace(0, n_rows - 1, n_rows, dtype=int)
+            col_indices = np.linspace(0, n_cols - 1, n_cols, dtype=int)
+
+            # Index wind fields
+            wind_speed = curr_forecast[np.ix_(row_indices, col_indices, [0])][:, :, 0]
+            wind_dir_deg = curr_forecast[np.ix_(row_indices, col_indices, [1])][:, :, 0]
+
+            X, Y = np.meshgrid(
+                (col_indices + 0.5) * self.wind_res,
+                (row_indices + 0.5) * self.wind_res
+            )
+
             # Convert wind speed and direction to u and v components
             U = np.sin(np.deg2rad(wind_dir_deg))
             V = np.cos(np.deg2rad(wind_dir_deg))
@@ -313,8 +324,8 @@ class BaseVisualizer:
             # Plot the wind vectors
             self.wind_grid = self.h_ax.quiver(
                 X + self.wind_xpad, Y + self.wind_ypad, U_norm, V_norm, wind_speed,
-                scale=15, cmap='jet', norm=self.wind_norm,
-                width=0.003, zorder=3)
+                scale=20, cmap='jet', norm=self.wind_norm,
+                width=0.003, zorder=2, alpha=0.5)
 
         for entry in entries:
             polygon = mpatches.RegularPolygon((entry.x, entry.y), numVertices=6,
