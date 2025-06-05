@@ -111,6 +111,7 @@ class PlaybackVisualizer(BaseVisualizer):
             FFMpegWriter = animation.writers['ffmpeg']
             writer = FFMpegWriter(fps=self.video_fps, metadata=dict(artist='EMBRS'), bitrate=1800)
             writer.setup(self.fig, self.save_path, dpi=100)
+            writer.grab_frame()
 
         df = pd.read_parquet(self.log_file)
         max_time = df["timestamp"].max()
@@ -130,6 +131,7 @@ class PlaybackVisualizer(BaseVisualizer):
 
             if writer:
                 writer.grab_frame()
+            
             pbar.update(1)
         
         if writer:
@@ -145,6 +147,9 @@ class PlaybackVisualizer(BaseVisualizer):
         # Filter entries where timestamp is in [start_time, end_time)
         filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
         
+        # Get only the most recent entry for each cell
+        filtered = filtered.sort_values("timestamp").groupby("id", as_index=False).tail(1)
+
         entries = [CellLogEntry(**row.to_dict()) for _, row in filtered.iterrows()]
 
         if self.has_agents:
