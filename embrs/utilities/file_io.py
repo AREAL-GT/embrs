@@ -141,6 +141,7 @@ class FileSelectBase:
         if right_label is not None:
             tk.Label(new_frame, text=right_label).grid(row=0, column=2, sticky='w')
 
+        return spinbox
 
     def select_file(self, text_var: any, file_type: list):
         """Function that opens a filedialog window and prompts user to select a file from their
@@ -872,7 +873,12 @@ class VizFolderSelector(FileSelectBase):
         self.show_wind_field.trace_add("write", self.wind_field_toggled)
         self.show_compass = tk.BooleanVar()
         self.show_compass.set(True)
-
+        self.save_video = tk.BooleanVar()
+        self.save_video.set(False)
+        self.save_video.trace_add("write", self.toggle_video_options)
+        self.video_folder = tk.StringVar()
+        self.video_fps = tk.IntVar()
+        self.video_fps.set(10)
 
         self.has_agents = False
         self.run_folders = ["No runs available, select a folder"]
@@ -903,9 +909,20 @@ class VizFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(settings_frame, "Update Frequency:", np.inf, self.viz_freq, "seconds", row=0, column=0)
         self.create_spinbox_with_two_labels(settings_frame, "Scale bar size:        ", 100, self.scale_km, "km", row=0, column=1)
 
+        # === Video Recording Options Frame ===
+        video_frame = tk.LabelFrame(frame, text="Video Recording Options", padx=10, pady=5)
+        video_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
+
+        self.save_video_checkbox = tk.Checkbutton(video_frame, text="Save visualization as MP4", variable=self.save_video)
+        self.save_video_checkbox.grid(row=0, column=0, columnspan=2, sticky='w')
+
+        _, self.video_path_field, self.vid_path_button, _ = self.create_folder_selector(video_frame, "Video Save Folder: ", self.video_folder)
+        
+        self.frame_rate_spin = self.create_spinbox_with_two_labels(video_frame, "Video Frame Rate:", np.inf, self.video_fps, "FPS", row=2, column=0)
+
         # === Display Options Frame ===
         display_frame = tk.LabelFrame(frame, text="Display Options", padx=10, pady=5)
-        display_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
+        display_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
 
         tk.Checkbutton(display_frame, text="Display fuel legend", variable=self.legend).grid(row=0, column=0, sticky='w')
         self.wind_cbar_checkbox = tk.Checkbutton(display_frame, text="Show wind colorbar", variable=self.show_wind_cbar)
@@ -916,8 +933,9 @@ class VizFolderSelector(FileSelectBase):
 
         # === Submit Button ===
         self.submit_button = tk.Button(frame, text='Submit', command=self.submit, state='disabled')
-        self.submit_button.grid(row=3, column=0, columnspan=3, pady=10)
+        self.submit_button.grid(row=4, column=0, columnspan=3, pady=10)
 
+        self.toggle_video_options()
 
     def viz_folder_changed(self, *args):
         """Callback function for selecting the log file to be displayed. Checks the file selected
@@ -960,6 +978,17 @@ class VizFolderSelector(FileSelectBase):
             window.destroy()
 
             self.run_folder.set("")
+
+    def toggle_video_options(self, *args):
+        """Enable or disable video path and FPS fields based on the save_video checkbox."""
+        if self.save_video.get():
+            self.video_path_field.config(state='normal')
+            self.vid_path_button.config(state='normal')
+            self.frame_rate_spin.config(state='normal')
+        else:
+            self.video_path_field.config(state='disabled')
+            self.vid_path_button.config(state='disabled')
+            self.frame_rate_spin.config(state='disabled')
 
     def wind_field_toggled(self, *args):
         """Ensures wind colorbar is only shown if wind field is shown."""
@@ -1009,7 +1038,10 @@ class VizFolderSelector(FileSelectBase):
         self.result = PlaybackVisualizerParams(
             cell_file= self.viz_file,
             init_location=self.init_location,
+            save_video=self.save_video.get(),
+            video_path=self.video_folder.get(),
             has_agents=self.has_agents,
+            video_fps=self.video_fps.get(),
             freq=self.viz_freq.get(),
             scale_km=self.scale_km.get(),
             show_legend=self.legend.get(),

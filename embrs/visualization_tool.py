@@ -4,6 +4,7 @@ from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInp
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
 from embrs.utilities.file_io import VizFolderSelector
 
+import matplotlib.animation as animation
 import pyarrow.parquet as pq
 import pandas as pd
 import json
@@ -32,8 +33,17 @@ class PlaybackVisualizer(BaseVisualizer):
         if self.has_agents:
             self.agent_file = params.agent_file
 
+        self.save_video = params.save_video
+        
         run_folder = os.path.dirname(self.log_file)
         log_folder = os.path.dirname(run_folder)
+
+        if self.save_video:
+            self.video_fps = params.video_fps
+            self.save_folder = params.video_path
+            session_name = os.path.basename(os.path.normpath(log_folder))
+            run_name = os.path.basename(os.path.normpath(run_folder))
+            self.save_path = os.path.join(self.save_folder, f"{session_name}_{run_name}.mp4")
 
         if init_location:
             init_path = f"{log_folder}/init_state.parquet"
@@ -94,6 +104,12 @@ class PlaybackVisualizer(BaseVisualizer):
         t = 0
         done = False
 
+        writer = None
+        if self.save_video:
+            FFMpegWriter = animation.writers['ffmpeg']
+            writer = FFMpegWriter(fps=self.video_fps, metadata=dict(artist='EMBRS'), bitrate=1800)
+            writer.setup(self.fig, self.save_path, dpi=100)
+
         while not done:
             entries, agents = self.get_entries_between(t, t+self.update_freq_s)
 
@@ -104,6 +120,12 @@ class PlaybackVisualizer(BaseVisualizer):
             t+=self.update_freq_s
 
             self.update_grid(t, entries, agents)     
+
+            if writer:
+                writer.grab_frame()
+
+        if writer:
+            writer.finish()
 
         self.close()
 

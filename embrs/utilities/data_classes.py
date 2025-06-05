@@ -109,9 +109,12 @@ class MapParams:
 class PlaybackVisualizerParams:
     cell_file: str
     init_location: bool
+    save_video: bool
+    video_path: str
     has_agents: bool
+    video_fps: Optional[int] = 10 
     agent_file: Optional[str] = None
-
+    
     # Visualization Preferences
     freq: Optional[float] = 300
     scale_km: Optional[float] = 1.0
