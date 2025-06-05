@@ -14,6 +14,8 @@ class ParquetWriter:
     def write_batch(self, entries: List):
         if not entries:
             return
+        if not os.path.exists(self.folder):
+            os.makedirs(self.folder)
 
         df = pd.DataFrame([entry.to_dict() for entry in entries])
         file_path = os.path.join(self.folder, f"part-{self.counter:05d}.parquet")

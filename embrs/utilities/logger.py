@@ -102,8 +102,6 @@ class Logger:
         if on_interrupt:
             sys.exit(0)
 
-        self.log_ctr += 1
-
     def _merge_parquet_files(self, folder_path: str, output_file: str):
 
         parquet_files = sorted(glob.glob(os.path.join(folder_path, "part-*.parquet")))

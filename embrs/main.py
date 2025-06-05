@@ -182,10 +182,18 @@ def sim_loop(sim_params: SimParams):
 
     for i in range(num_runs):
         if num_runs > 1:
-            curr_fire = copy.deepcopy(fire)
-
+            try:
+                fire.progress_bar = None
+                fire._visualizer = None
+                curr_fire = copy.deepcopy(fire)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
         else:
             curr_fire = fire
+
+        curr_fire.set_visualizer(viz)
+        viz.set_sim(curr_fire)
 
         # Register the signal handler
         signal.signal(signal.SIGINT, lambda signum, frame: handle_interrupt(logger, curr_fire))
@@ -195,9 +203,8 @@ def sim_loop(sim_params: SimParams):
         run_sim(curr_fire, viz, progress_bar, loader_window, viz_on, user_code_path,
                 user_code_class, i, num_runs)
 
-        # TODO: Re-implement resetting visualization
-        # if viz_on:
-        #     viz.reset_figure(done = i==num_runs-1)
+        if viz_on:
+            viz.reset_figure(done = i==num_runs-1)
 
     progress_bar.close()
     loader_window.set_text(f"Finished running {num_runs} simulations(s)")

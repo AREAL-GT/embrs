@@ -407,6 +407,34 @@ class BaseVisualizer:
             plt.close(self.fig)
             self.fig = None
 
+    def reset_figure(self, done=False):
+        """Resets the visualizer to its initial state, optionally closing if simulation is done."""
+        if done:
+            self.close()
+            return
+
+        # Clear current figure
+        self.h_ax.clear()
+
+        # Re-set up axes and elements
+        self._setup_figure()
+        self._init_static_elements()
+
+        # Re-add all initial patches stored in self.collections
+        for coll in self.collections:
+            self.h_ax.add_collection(copy.copy(coll))
+
+        # Reset wind field
+        self.wind_grid = None
+        self.wind_idx = -1
+        self._process_wind()
+
+        # Redraw canvas from initial background
+        self.fig.canvas.draw()
+        self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
+        self.fig.canvas.blit(self.h_ax.bbox)
+        self.fig.canvas.flush_events()
+ 
     def meters_to_points(self, meters):
         fig_width_inch, _ = self.fig.get_size_inches()
         meters_per_inch = self.width_m / fig_width_inch

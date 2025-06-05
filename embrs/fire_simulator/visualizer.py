@@ -11,6 +11,9 @@ class RealTimeVisualizer(BaseVisualizer):
 
         super().__init__(input_params)
 
+    def set_sim(self, sim: FireSim):
+        self.sim = sim
+
     def get_init_entries(self):
         entries = [cell.to_log_entry(self.sim._curr_time_s) for cell in self.sim.cell_dict.values()]
         return entries
