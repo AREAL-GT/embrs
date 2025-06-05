@@ -25,7 +25,12 @@ import copy
 # TODO: Worth adding temperature and other weather conditions?
 
 class BaseVisualizer:
-    def __init__(self, params: VisualizerInputs):
+    def __init__(self, params: VisualizerInputs, render=True):
+        self.render = render
+
+        if not self.render:
+            mpl.use('Agg')  # Use a non-interactive backend if not rendering
+        
         self.grid_height = params.sim_shape[0]
         self.grid_width = params.sim_shape[1]
 
@@ -61,10 +66,11 @@ class BaseVisualizer:
         self._setup_figure()
         self._setup_grid(init_entries)
 
-        self.fig.canvas.draw()
-        self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
+        if render:
+            self.fig.canvas.draw()
+            plt.pause(1)
 
-        plt.pause(1)
+        self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
 
     def _process_wind(self):
         if self.show_wind_field:
@@ -74,8 +80,9 @@ class BaseVisualizer:
             self.wind_norm = mcolors.Normalize(vmin=0, vmax=self.global_max_speed)
 
     def _setup_figure(self):
-        
-        plt.ion()
+        if self.render:
+            plt.ion()
+
         self.fig = plt.figure(figsize=(9, 8))
         self.h_ax = self.fig.add_axes([0.05, 0.05, 0.9, 0.9])
 
@@ -398,8 +405,9 @@ class BaseVisualizer:
                     label = self.h_ax.annotate(agent_entry.label, (agent_entry.x, agent_entry.y))
                     self.agent_labels.append(label)
 
-        self.fig.canvas.blit(self.h_ax.bbox)
-        self.fig.canvas.flush_events()
+        if self.render:
+            self.fig.canvas.blit(self.h_ax.bbox)
+            self.fig.canvas.flush_events()
     
     def close(self):
         """Closes the visualizer window and cleans up the figure."""

@@ -877,8 +877,11 @@ class VizFolderSelector(FileSelectBase):
         self.save_video.set(False)
         self.save_video.trace_add("write", self.toggle_video_options)
         self.video_folder = tk.StringVar()
+        self.video_name = tk.StringVar()
         self.video_fps = tk.IntVar()
         self.video_fps.set(10)
+        self.render_visualization = tk.BooleanVar()
+        self.render_visualization.set(True)
 
         self.has_agents = False
         self.run_folders = ["No runs available, select a folder"]
@@ -912,13 +915,20 @@ class VizFolderSelector(FileSelectBase):
         # === Video Recording Options Frame ===
         video_frame = tk.LabelFrame(frame, text="Video Recording Options", padx=10, pady=5)
         video_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
+        video_frame.columnconfigure(1, weight=1)
 
         self.save_video_checkbox = tk.Checkbutton(video_frame, text="Save visualization as MP4", variable=self.save_video)
         self.save_video_checkbox.grid(row=0, column=0, columnspan=2, sticky='w')
 
         _, self.video_path_field, self.vid_path_button, _ = self.create_folder_selector(video_frame, "Video Save Folder: ", self.video_folder)
-        
-        self.frame_rate_spin = self.create_spinbox_with_two_labels(video_frame, "Video Frame Rate:", np.inf, self.video_fps, "FPS", row=2, column=0)
+        _, self.videoname_field, self.videoname_button, _ = self.create_file_selector(video_frame,   "Video filename:       ", self.video_name)
+
+        self.videoname_button.grid_remove()
+
+        self.frame_rate_spin = self.create_spinbox_with_two_labels(video_frame, "Video Frame Rate:", np.inf, self.video_fps, "FPS", row=3, column=0)
+
+        self.show_viz_checkbox = tk.Checkbutton(video_frame, text="Show Visualization while saving video", variable=self.render_visualization)
+        self.show_viz_checkbox.grid(row=4, column=0, sticky='w')
 
         # === Display Options Frame ===
         display_frame = tk.LabelFrame(frame, text="Display Options", padx=10, pady=5)
@@ -984,11 +994,15 @@ class VizFolderSelector(FileSelectBase):
         if self.save_video.get():
             self.video_path_field.config(state='normal')
             self.vid_path_button.config(state='normal')
+            self.videoname_field.config(state='normal')
             self.frame_rate_spin.config(state='normal')
+            self.show_viz_checkbox.config(state='normal')
         else:
             self.video_path_field.config(state='disabled')
             self.vid_path_button.config(state='disabled')
+            self.videoname_field.config(state='disabled')
             self.frame_rate_spin.config(state='disabled')
+            self.show_viz_checkbox.config(state='disabled')
 
     def wind_field_toggled(self, *args):
         """Ensures wind colorbar is only shown if wind field is shown."""
@@ -1035,11 +1049,34 @@ class VizFolderSelector(FileSelectBase):
         variable so it can be retrieved
         """
 
+        if self.save_video.get():
+            video_filename = self.video_name.get().strip()
+
+            if not video_filename.lower().endswith(".mp4"):
+                video_filename += ".mp4"
+
+
+
+            video_path = os.path.join(self.video_folder.get(), video_filename)
+
+            if os.path.exists(video_path):
+                result = tk.messagebox.askyesno(
+                    "File Exists",
+                    f"A video named '{video_filename}' already exists.\nDo you want to overwrite it?"
+                )
+                if not result:
+                    return  # Cancel and return to GUI without submitting
+
+
+        else:
+            self.render_visualization.set(True)
+
         self.result = PlaybackVisualizerParams(
             cell_file= self.viz_file,
             init_location=self.init_location,
             save_video=self.save_video.get(),
-            video_path=self.video_folder.get(),
+            video_folder=self.video_folder.get(),
+            video_name=video_filename,
             has_agents=self.has_agents,
             video_fps=self.video_fps.get(),
             freq=self.viz_freq.get(),
@@ -1047,7 +1084,8 @@ class VizFolderSelector(FileSelectBase):
             show_legend=self.legend.get(),
             show_wind_cbar=self.show_wind_cbar.get(),
             show_wind_field=self.show_wind_field.get(),
-            show_compass=self.show_compass.get()
+            show_compass=self.show_compass.get(),
+            show_visualization=self.render_visualization.get()
         )
 
         if self.has_agents:

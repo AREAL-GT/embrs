@@ -110,7 +110,8 @@ class PlaybackVisualizerParams:
     cell_file: str
     init_location: bool
     save_video: bool
-    video_path: str
+    video_folder: str
+    video_name: str
     has_agents: bool
     video_fps: Optional[int] = 10 
     agent_file: Optional[str] = None
@@ -122,6 +123,7 @@ class PlaybackVisualizerParams:
     show_wind_cbar: Optional[bool] = True
     show_wind_field: Optional[bool] = True
     show_compass: Optional[bool] = True
+    show_visualization: Optional[bool] = True
 
 @dataclass
 class VisualizerInputs:

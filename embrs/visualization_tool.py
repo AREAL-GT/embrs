@@ -7,6 +7,7 @@ from embrs.utilities.file_io import VizFolderSelector
 import matplotlib.animation as animation
 import pyarrow.parquet as pq
 import pandas as pd
+from tqdm import tqdm
 import json
 import sys
 import os
@@ -39,11 +40,12 @@ class PlaybackVisualizer(BaseVisualizer):
         log_folder = os.path.dirname(run_folder)
 
         if self.save_video:
+            self.video_name = params.video_name
             self.video_fps = params.video_fps
-            self.save_folder = params.video_path
-            session_name = os.path.basename(os.path.normpath(log_folder))
-            run_name = os.path.basename(os.path.normpath(run_folder))
-            self.save_path = os.path.join(self.save_folder, f"{session_name}_{run_name}.mp4")
+            self.save_folder = params.video_folder
+            self.save_path = os.path.join(self.save_folder, f"{self.video_name}")
+        
+        self.show_viz = params.show_visualization
 
         if init_location:
             init_path = f"{log_folder}/init_state.parquet"
@@ -52,7 +54,7 @@ class PlaybackVisualizer(BaseVisualizer):
 
         input_params = self.get_input_params(init_path)
 
-        super().__init__(input_params)
+        super().__init__(input_params, render=self.show_viz)
 
     def get_input_params(self, init_path: str):
         table = pq.read_table(init_path)
@@ -110,6 +112,11 @@ class PlaybackVisualizer(BaseVisualizer):
             writer = FFMpegWriter(fps=self.video_fps, metadata=dict(artist='EMBRS'), bitrate=1800)
             writer.setup(self.fig, self.save_path, dpi=100)
 
+        df = pd.read_parquet(self.log_file)
+        max_time = df["timestamp"].max()
+        total_steps = int(np.ceil(max_time / self.update_freq_s))
+        
+        pbar = tqdm(total=total_steps, desc="Playback Progress:", unit="step")
         while not done:
             entries, agents = self.get_entries_between(t, t+self.update_freq_s)
 
@@ -123,7 +130,8 @@ class PlaybackVisualizer(BaseVisualizer):
 
             if writer:
                 writer.grab_frame()
-
+            pbar.update(1)
+        
         if writer:
             writer.finish()
 
