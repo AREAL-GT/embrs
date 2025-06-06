@@ -100,9 +100,6 @@ class Fuel:
             self.w_n_dead_nominal = self.w_n_dead
 
             self.s = s
-            # TODO: this should include dead herb for dynamic and use the g values instead
-            self.sigma_dead = np.dot(self.f_dead_arr, self.s[0:3])
-            self.sigma_live = np.dot(self.f_live_arr, self.s[4:])
 
             self.sav_ratio = s_total
 
@@ -116,12 +113,14 @@ class Fuel:
             self.rel_packing_ratio = rel_packing_ratio
             self.rho_b = rho_b
 
-            # TODO: this means live fuels included in Burnup. Is that what we want?
             for i in range(6):
                 if self.w_0[i] > 0:
                     self.rel_indices.append(i)
 
-            self.num_classes = len(self.rel_indices)
+            self.rel_indices = np.array(self.rel_indices)
+            self.burnup_indices = self.rel_indices
+            # self.burnup_indices = self.rel_indices[self.rel_indices <= 3] # Don't include live fuels in Burnup (TODO: decide if we want to include live fuels in burnup or not)
+            self.num_classes = len(self.burnup_indices)
 
     def set_fuel_loading(self, w_n):
         self.w_n = w_n
@@ -139,7 +138,7 @@ class Fuel:
             num += w[i] * np.exp(-138/s[i])
 
         den = 0
-        for i in range(3, 5):
+        for i in range(4, 6):
             if s[i] != 0:
                 den += w[i] * np.exp(-500/s[i])
 

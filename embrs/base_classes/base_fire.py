@@ -709,7 +709,7 @@ class BaseFireSim:
         entry = [0] * len(cell.fuel.w_0)
         j = 0
         for i in range(len(cell.fuel.w_0)):
-            if i in cell.fuel.rel_indices:
+            if i in cell.fuel.burnup_indices:
                 entry[i] = fuel_loads[j]
                 j += 1
 

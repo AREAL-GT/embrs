@@ -208,11 +208,11 @@ class Cell:
         """
         indices = self._fuel.rel_indices
 
-        self.wdry = self._fuel.w_n[indices]
-        self.sigma = self._fuel.s[indices]
+        self.wdry = self._fuel.w_n[self._fuel.burnup_indices]
+        self.sigma = self._fuel.s[self._fuel.burnup_indices]
 
         self.dfms = []
-        fmois = np.zeros(5)
+        fmois = np.zeros(6)
 
         if 0 in indices:
             self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
@@ -227,11 +227,12 @@ class Cell:
             self.dfms.append(self.dfm100)
             fmois[2] = self.init_dead_mf
         if 3 in indices:
-            pass # TODO: handle this for dyanmic models
+            fmois[3] = 0
+            # TODO: handle this for dyanmic models
         if 4 in indices:
-            fmois[3] = self.init_live_h_mf
+            fmois[4] = self.init_live_h_mf
         if 5 in indices:
-            fmois[4] = self.init_live_w_mf
+            fmois[5] = self.init_live_w_mf
 
         self.fmois = np.array(fmois)
 

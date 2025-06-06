@@ -1,5 +1,6 @@
 import numpy as np
 from embrs.utilities.unit_conversions import *
+from embrs.fire_simulator.cell import Cell
 
 MAXNO = 20
 MAXKL = int((MAXNO * ( MAXNO + 1 ) / 2 + MAXNO ))
@@ -11,7 +12,7 @@ t_big = 1e6
 FintSwitch = 15.0
 
 class Burnup():
-    def __init__(self, cell):
+    def __init__(self, cell: Cell):
         self.gd_Fudge1 = 0.0
         self.gd_Fudge2 = 0.0
 

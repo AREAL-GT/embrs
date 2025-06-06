@@ -154,8 +154,7 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
 def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
 
     dead_mf = np.dot(fuel.f_dead_arr, m_f[0:3]) # TODO: for dynamic, consider dead herb to have the 1-hr fuel moisture value
-
-    live_mf = np.dot(fuel.f_live_arr, m_f[3:])
+    live_mf = np.dot(fuel.f_live_arr, m_f[4:])
 
     return dead_mf, live_mf
 
@@ -168,6 +167,7 @@ def calc_live_mx(fuel: Fuel, m_f: float):
 
     num = 0
 
+    # TODO: account for dynamic
     for i in range(3):
         num += m_f * fuel.w_0[i] * np.exp(-138/fuel.s[i])
 
@@ -177,7 +177,7 @@ def calc_live_mx(fuel: Fuel, m_f: float):
 
     mf_dead = num/den
 
-    mx = 2.9 * fuel.W * (1 - mf_dead / fuel.dead_mx) - 0.226
+    mx = 2.9 * W * (1 - mf_dead / fuel.dead_mx) - 0.226
 
     return max(mx, fuel.dead_mx)
 
@@ -256,8 +256,8 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
 
     live_sum = 0
     for j in range(2):
-        if fuel.s[j] != 0:
-            live_sum += fuel.f_live_arr[j] * np.exp(-138/fuel.s[j]) * Q_ig[j]
+        if fuel.s[4+j] != 0:
+            live_sum += fuel.f_live_arr[j] * np.exp(-138/fuel.s[4+j]) * Q_ig[4+j]
         
     heat_sink += fuel.f_i[1] * live_sum
     heat_sink *= rho_b
