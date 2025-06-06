@@ -227,8 +227,7 @@ class Cell:
             self.dfms.append(self.dfm100)
             fmois[2] = self.init_dead_mf
         if 3 in indices:
-            fmois[3] = 0
-            # TODO: handle this for dyanmic models
+            fmois[3] = self.init_dead_mf
         if 4 in indices:
             fmois[4] = self.init_live_h_mf
         if 5 in indices:
@@ -349,6 +348,10 @@ class Cell:
 
         self.moist_update = idx
         self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
+
+        if self.fuel.dynamic:
+            # Set dead herbaceous moisture to 1-hr value
+            self.fmois[3] = self.fmois[0]
 
     def _update_weather(self, idx: int, weather_stream: WeatherStream, ignore_moisture: bool):
         if not ignore_moisture:

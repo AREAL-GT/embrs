@@ -13,8 +13,6 @@ References:
       USDA Forest Service General Technical Report INT-122.
 
 """
-
-# TODO: implement Scott Burgan fuel models
 import numpy as np
 import os
 import json
@@ -47,7 +45,7 @@ class Fuel:
         - set_net_fuel_load(): Computes the net fuel load based on the fuel properties.
         - set_fuel_moisture(moisture): Placeholder for updating fuel moisture dynamically.
     """
-    def __init__(self, name: str, model_num: int, burnable, f_i: np.ndarray, f_ij: np.ndarray, w_0: np.ndarray,
+    def __init__(self, name: str, model_num: int, burnable: bool, dynamic: bool, f_i: np.ndarray, f_ij: np.ndarray, g_ij: np.ndarray, w_0: np.ndarray,
                  s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float,
                  rho_b: float, rel_packing_ratio: float):
         """Initializes a generic fuel model with its physical and combustion properties.
@@ -80,6 +78,7 @@ class Fuel:
         self.name = name
         self.model_num = model_num
         self.burnable = burnable
+        self.dynamic = dynamic
         self.rel_indices = []
 
         if self.burnable:
@@ -89,9 +88,13 @@ class Fuel:
 
             self.f_i = f_i
             self.f_ij = f_ij
+            self.g_ij = g_ij
 
-            self.f_dead_arr = self.f_ij[0, 0:3] # TODO: this should be 0:4 for dynamic (index 3 is dead_herb)
+            self.f_dead_arr = self.f_ij[0, 0:4]
             self.f_live_arr = self.f_ij[1, 4:]
+
+            self.g_dead_arr = self.g_ij[0, 0:4]
+            self.g_live_arr = self.g_ij[1, 4:]
 
             self.w_0 = TPA_to_Lbsft2(w_0) # convert to lbs/ft^2 
             w_n = self.w_0 * (1 - self.s_T)
@@ -124,8 +127,8 @@ class Fuel:
 
     def set_fuel_loading(self, w_n):
         self.w_n = w_n
-        self.w_n_dead = np.dot(self.f_dead_arr, self.w_n[0:3]) # TODO: this should be 0:4 for dynamic
-        self.w_n_live = np.dot(self.f_live_arr, self.w_n[4:])
+        self.w_n_dead = np.dot(self.g_dead_arr, self.w_n[0:4])
+        self.w_n_live = np.dot(self.g_live_arr, self.w_n[4:])
 
     def calc_W(self):
 
@@ -171,10 +174,12 @@ class Anderson13(Fuel):
         
         burnable = model_number <= 13
         name = self._fuel_models["names"][model_id]
+        dynamic = False
 
         if not burnable:
             f_i = None
             f_ij = None
+            g_ij = None
             w_0 = None
             s = None
             s_total = None
@@ -186,6 +191,7 @@ class Anderson13(Fuel):
         else:
             f_i = np.array(self._fuel_models["f_i"][model_id])
             f_ij = np.array(self._fuel_models["f_ij"][model_id])
+            g_ij = f_ij
             w_0 = np.array(self._fuel_models["w_0"][model_id])
             s = np.array(self._fuel_models["s"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
@@ -194,7 +200,7 @@ class Anderson13(Fuel):
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, dynamic, f_i, f_ij, g_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
 
 class ScottBurgan40(Fuel):
     _fuel_models = None # class-level cache
@@ -206,7 +212,7 @@ class ScottBurgan40(Fuel):
             with open(json_path, "r") as f:
                 cls._fuel_models = json.load(f)
 
-    def __init__(self, model_number: int):
+    def __init__(self, model_number: int, live_h_mf: float):
         self.load_fuel_models()
 
         model_number = int(model_number)
@@ -217,6 +223,7 @@ class ScottBurgan40(Fuel):
         
         burnable = model_number >= 101
         name = self._fuel_models["names"][model_id]
+        dynamic = self._fuel_models["dynamic"][model_id]
 
         if not burnable: 
             f_i = None
@@ -230,14 +237,57 @@ class ScottBurgan40(Fuel):
             rel_packing_ratio = None
 
         else:
-            f_i = np.array(self._fuel_models["f_i"][model_id])
-            f_ij = np.array(self._fuel_models["f_ij"][model_id]) # TODO: need to parse this differently
-            w_0 = np.array(self._fuel_models["w_0"][model_id])
+            if not dynamic:
+                f_ij = np.array(self._fuel_models["f_ij"][model_id])
+                g_ij = f_ij
+                w_0 = np.array(self._fuel_models["w_0"][model_id])
+            else:
+                T = self.calc_curing_level(live_h_mf)
+                f_ij_by_curing = self._fuel_models["f_ij"][model_id]
+                f_ij = self.get_dynamic_weights(f_ij_by_curing, T)
+                g_ij_by_curing = self._fuel_models["g_ij"][model_id]
+                g_ij = self.get_dynamic_weights(g_ij_by_curing, T)
+                w_0 = np.array(self._fuel_models["w_0"][model_id])
+
+                dead_herb_new = T * w_0[4]
+                live_h_new = w_0[4] - dead_herb_new
+
+                w_0[3] = dead_herb_new
+                w_0[4] = live_h_new 
+
             s = np.array(self._fuel_models["s"][model_id])
+            f_i = np.array(self._fuel_models["f_i"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
             mx_dead = self._fuel_models["mx_dead"][model_id]
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
             rho_b = self._fuel_models["rho_b"][model_id]
             rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
 
-        super().__init__(name, model_number, burnable, f_i, f_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, dynamic, f_i, f_ij, g_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+
+
+    # TODO: Validate the two function below
+
+    def calc_curing_level(self, live_h_mf: float):
+        T = -1.11 * live_h_mf + 1.33
+        T = min(max(T, 0), 1)
+        return T
+    
+    def get_dynamic_weights(self, weights_by_curing: dict, T: float) -> np.ndarray:
+        curing = T * 100
+
+        levels = sorted(map(int, weights_by_curing.keys()))
+
+        if int(curing) in levels:
+            key = str(int(curing))
+            return np.array(weights_by_curing[key])
+
+        lower = max(l for l in levels if l <= curing)
+        upper = min(l for l in levels if l >= curing)
+
+        f_lower = np.array(weights_by_curing[str(lower)])
+        f_upper = np.array(weights_by_curing[str(upper)])
+        alpha = (curing - lower) / (upper - lower)
+
+        return (1 - alpha) * f_lower + alpha * f_upper
+
