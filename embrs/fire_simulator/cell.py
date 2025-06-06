@@ -227,8 +227,10 @@ class Cell:
             self.dfms.append(self.dfm100)
             fmois[2] = self.init_dead_mf
         if 3 in indices:
-            fmois[3] = self.init_live_h_mf
+            pass # TODO: handle this for dyanmic models
         if 4 in indices:
+            fmois[3] = self.init_live_h_mf
+        if 5 in indices:
             fmois[4] = self.init_live_w_mf
 
         self.fmois = np.array(fmois)

@@ -299,7 +299,7 @@ class FireSim(BaseFireSim):
         if cell.burn_idx == len(cell.burn_history):
 
             # Set static fuel load to new value
-            cell.fuel.set_new_fuel_loading(cell.dynamic_fuel_load)
+            cell.fuel.set_fuel_loading(cell.dynamic_fuel_load)
 
             # Check if there is enough fuel remaining to set back to fuel
             if cell.fuel.w_n_dead < self.burnout_thresh:

@@ -90,16 +90,19 @@ class Fuel:
             self.f_i = f_i
             self.f_ij = f_ij
 
-            self.w_0 =  TPA_to_Lbsft2(w_0) # convert to lbs/ft^2 
-            self.w_n = self.w_0 * (1 - self.s_T)
-            self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
-            self.w_n_live = self.w_n[3] + self.w_n[4]
+            self.f_dead_arr = self.f_ij[0, 0:3] # TODO: this should be 0:4 for dynamic (index 3 is dead_herb)
+            self.f_live_arr = self.f_ij[1, 4:]
+
+            self.w_0 = TPA_to_Lbsft2(w_0) # convert to lbs/ft^2 
+            w_n = self.w_0 * (1 - self.s_T)
+            self.set_fuel_loading(w_n)
 
             self.w_n_dead_nominal = self.w_n_dead
 
             self.s = s
-            self.sigma_dead = np.dot(self.f_ij[0:3], self.s[0:3])
-            self.sigma_live = np.dot(self.f_ij[3:4], self.s[3:4])
+            # TODO: this should include dead herb for dynamic and use the g values instead
+            self.sigma_dead = np.dot(self.f_dead_arr, self.s[0:3])
+            self.sigma_live = np.dot(self.f_live_arr, self.s[4:])
 
             self.sav_ratio = s_total
 
@@ -114,17 +117,16 @@ class Fuel:
             self.rho_b = rho_b
 
             # TODO: this means live fuels included in Burnup. Is that what we want?
-            for i in range(5):
+            for i in range(6):
                 if self.w_0[i] > 0:
                     self.rel_indices.append(i)
 
             self.num_classes = len(self.rel_indices)
 
-
-    def set_new_fuel_loading(self, new_w_n):
-        self.w_n = new_w_n
-        self.w_n_dead = np.dot(self.f_ij[0:3], self.w_n[0:3])
-        self.w_n_live = self.w_n[3] + self.w_n[4]
+    def set_fuel_loading(self, w_n):
+        self.w_n = w_n
+        self.w_n_dead = np.dot(self.f_dead_arr, self.w_n[0:3]) # TODO: this should be 0:4 for dynamic
+        self.w_n_live = np.dot(self.f_live_arr, self.w_n[4:])
 
     def calc_W(self):
 
@@ -230,7 +232,7 @@ class ScottBurgan40(Fuel):
 
         else:
             f_i = np.array(self._fuel_models["f_i"][model_id])
-            f_ij = np.array(self._fuel_models["f_ij"][model_id])
+            f_ij = np.array(self._fuel_models["f_ij"][model_id]) # TODO: need to parse this differently
             w_0 = np.array(self._fuel_models["w_0"][model_id])
             s = np.array(self._fuel_models["s"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
