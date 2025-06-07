@@ -21,7 +21,7 @@ from embrs.utilities.data_classes import SimParams, CellData
 from embrs.fire_simulator.cell import Cell
 from embrs.models.crown_model import crown_fire
 from embrs.models.rothermel import *
-from embrs.models.fuel_models import Anderson13
+from embrs.models.fuel_models import Anderson13, ScottBurgan40
 from embrs.base_classes.agent_base import AgentBase
 from embrs.models.weather import WeatherStream
 from embrs.models.burnup import Burnup
@@ -170,7 +170,7 @@ class BaseFireSim:
 
                     # Get fuel type
                     fuel_key = self._fuel_map[data_row, data_col]
-                    fuel = Anderson13(fuel_key)
+                    fuel = self.FuelClass(fuel_key)
                     cell_data.fuel_type = fuel
 
                     # Get cell elevation from elevation map
@@ -307,6 +307,16 @@ class BaseFireSim:
         self._roads = map_params.roads
         self.coarse_elevation = np.empty(self._shape)
 
+        fbfm_type = map_params.fbfm_type
+        if fbfm_type == "Anderson":
+            self.FuelClass = Anderson13
+
+        elif fbfm_type == "ScottBurgan":
+            self.FuelClass = ScottBurgan40
+
+        else:
+            raise ValueError(f"FBFM Type {fbfm_type} not supported")
+
         # Load DataProductParams for each data product
         lcp_data = map_params.lcp_data
 
@@ -345,6 +355,9 @@ class BaseFireSim:
                 self.wind_forecast = np.zeros((1, 1, 1, 2))
                 self.flipud_forecast = self.wind_forecast
                 self._wind_res = 10e10
+
+                self.wind_xpad = 0
+                self.wind_ypad = 0
 
             # Generate a weather stream
             else:
@@ -838,7 +851,7 @@ class BaseFireSim:
                     if road_cell is not None:
                         if road_width > self._cell_size:
                             # Set to urban fuel type
-                            road_cell._set_fuel_type(Anderson13(91))
+                            road_cell._set_fuel_type(self.FuelClass(91))
                         else:
                             if road_cell._fuel.model_num == 91:
                                 self._overwrite_urban_fuel(road_cell)
@@ -865,7 +878,7 @@ class BaseFireSim:
             counts = np.bincount(fuel_types)
             new_fuel_num = np.argmax(counts)
 
-            cell._set_fuel_type(Anderson13(new_fuel_num))
+            cell._set_fuel_type(self.FuelClass(new_fuel_num))
 
     def _set_firebreaks(self):
         """Updates the simulation grid to incorporate firebreaks.
@@ -905,7 +918,7 @@ class BaseFireSim:
                         self._fire_break_cells.append(cell)
 
                     if break_width > self._cell_size:
-                        cell._set_fuel_type(Anderson13(91))
+                        cell._set_fuel_type(self.FuelClass(91))
 
                     cell._break_width = break_width
 

@@ -408,6 +408,39 @@ class BaseVisualizer:
         if self.render:
             self.fig.canvas.blit(self.h_ax.bbox)
             self.fig.canvas.flush_events()
+
+    def visualize_prediction(self, prediction):
+        """Visualizes a prediction grid on top of the current simulation visualization.
+        
+        Args:
+            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
+                                  representing predicted fire spread
+        """
+        # Clear any existing prediction visualization
+        if hasattr(self, 'prediction_scatter'):
+            self.prediction_scatter.remove()
+            delattr(self, 'prediction_scatter')
+
+        time_steps = sorted(prediction.keys())
+        if not time_steps:
+            return
+
+        cmap = mpl.cm.get_cmap("Oranges_r")
+        norm = plt.Normalize(time_steps[0], time_steps[-1])
+
+        # Collect all points and their corresponding times
+        all_points = []
+        all_times = []
+        for time in time_steps:
+            points = prediction[time]
+            all_points.extend(points)
+            all_times.extend([time] * len(points))
+
+        if all_points:
+            x, y = zip(*all_points)
+            self.prediction_scatter = self.h_ax.scatter(x, y, c=all_times, cmap=cmap, norm=norm, 
+                                                      alpha=0.3, zorder=1)
+            self.fig.canvas.draw()
     
     def close(self):
         """Closes the visualizer window and cleans up the figure."""

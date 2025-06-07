@@ -404,7 +404,8 @@ def save_to_file(map_params: MapParams, user_data: MapDrawerData):
         'cols': lcp_data.cols,
         'resolution': lcp_data.resolution,
         'width_m': lcp_data.width_m,
-        'height_m': lcp_data.height_m
+        'height_m': lcp_data.height_m,
+        'fbfm_type': map_params.fbfm_type
     }
 
     # Save the roads data
@@ -606,6 +607,13 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         crs = src.crs
 
     )
+    
+    # Auto-detect the FBFM used in the input map
+    fuel_values = np.unique(resampled_array[3])
+    if np.any(fuel_values >= 101):
+        map_params.fbfm_type = "ScottBurgan"
+    else:
+        map_params.fbfm_type = "Anderson"
 
     return src.bounds
 

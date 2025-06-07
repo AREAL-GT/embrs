@@ -95,6 +95,7 @@ class MapParams:
     roads: Optional[List] = field(default_factory=list)
     geo_info: Optional[GeoInfo] = None
     scenario_data: Optional[MapDrawerData] = None
+    fbfm_type: Optional[str] = "Anderson"
 
     def size(self) -> Tuple[float, float]:
         return (self.lcp_data.width_m, self.lcp_data.height_m)

@@ -94,7 +94,6 @@ class CropTiffTool:
         return self.coords
 
 
-# TODO: this class needs to be fixed
 class PolygonDrawer:
     """Class used for drawing polygons on top of sim map for specifying locations of initial
     ignitions and fire-breaks.

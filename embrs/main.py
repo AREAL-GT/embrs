@@ -73,7 +73,8 @@ def run_sim(fire: FireSim, viz: RealTimeVisualizer, progress_bar: tqdm, loader_w
     """
     start = time()
 
-    fire.logger.start_new_run()
+    if fire.logger:
+        fire.logger.start_new_run()
 
     time_since_last_update = 20
     last_update = 0

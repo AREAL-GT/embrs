@@ -1,10 +1,7 @@
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
-from embrs.fire_simulator.cell import Cell
-from embrs.fire_simulator.visualizer import Visualizer
-from embrs.utilities.data_classes import PredictorParams, CellData
+from embrs.utilities.data_classes import PredictorParams
 from embrs.utilities.fire_util import UtilFuncs, CellStates
-from embrs.models.fuel_models import Anderson13
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
 from embrs.models.wind_forecast import run_windninja
@@ -90,8 +87,11 @@ class FirePredictor(BaseFireSim):
         return self.output
     
     def _set_prediction_forecast(self, cell):
-        wind_col = int(np.floor(cell.x_pos/self._wind_res))
-        wind_row = int(np.floor(cell.y_pos/self._wind_res))
+        x_wind = max(cell.x_pos - self.wind_xpad, 0)
+        y_wind = max(cell.y_pos - self.wind_ypad, 0)
+
+        wind_col = int(np.floor(x_wind/self._wind_res))
+        wind_row = int(np.floor(y_wind/self._wind_res))
 
         if wind_row > self.wind_forecast.shape[1] - 1:
             wind_row = self.wind_forecast.shape[1] - 1
@@ -354,3 +354,4 @@ class FirePredictor(BaseFireSim):
         self._wind_res = self.fire._sim_params.weather_input.mesh_resolution
         self._weather_stream = new_weather_stream
 
+        self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)

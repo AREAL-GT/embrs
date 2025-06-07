@@ -126,10 +126,10 @@ class FuelConstants:
         - **fuel_color_mapping** (dict): dictionary mapping each fuel type to the display color for visualizations.
 
     """
-    burnout_thresh = 0.01
+    burnout_thresh = 0.01 # TODO: this is not the place for this to be defined
 
-    # Valid keys for the FBFM 13 fuel model
-    fbfm_13_keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 91, 92, 93, 98, 99]
+
+    # TODO: add ScottBurgan to these dictionaries
 
     # Dictionary of fuel number to name
     fuel_names = {1: "Short grass", 2: "Timber grass", 3: "Tall grass", 4: "Chaparral",
@@ -143,11 +143,6 @@ class FuelConstants:
                 "Hardwood litter": 9, "Timber litter": 10, "Light logging slash": 11,
                 "Medium logging slash": 12, "Heavy logging slash": 13, 'Urban': 91, 'Snow/ice': 92,
                 'Agriculture': 93, 'Water': 98, 'Barren': 99}
-
-    # based on the values in the Anderson Fuel model
-    dead_fuel_moisture_ext_table = {1: 0.12, 2: 0.15, 3: 0.25, 4: 0.20, 5: 0.20, 6: 0.25, 7: 0.40,
-                                    8: 0.30, 9: 0.25, 10: 0.25, 11: 0.15, 12: 0.20, 13: 0.25,
-                                    91: 0.1, 92: 1, 93: 1, 98: 1, 99: 1}
 
     # Color mapping for each fuel type
     fuel_color_mapping = {1: 'xkcd:pale green', 2:'xkcd:lime', 3: 'xkcd:bright green',
