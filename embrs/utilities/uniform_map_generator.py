@@ -49,7 +49,9 @@ def generate_uniform_map(map_params: MapParams):
     cmap = ListedColormap(colors)
 
     # Create a norm object to map your data points to the colormap
-    norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
+    keys = sorted(fc.fuel_color_mapping.keys())
+    boundaries = keys + [keys[-1] + 1]
+    norm = BoundaryNorm(boundaries, cmap.N)
 
     display_fuel_map = np.zeros((1, 1), dtype=np.uint8)
     display_fuel_map[0, 0] = map_params.uniform_data.fuel

@@ -77,8 +77,9 @@ def generate_map_from_file(map_params: MapParams):
     cmap = ListedColormap(colors)
 
     # Create a norm object to map your data points to the colormap
-    norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
-
+    keys = sorted(fc.fuel_color_mapping.keys())
+    boundaries = keys + [keys[-1] + 1]
+    norm = BoundaryNorm(boundaries, cmap.N)
 
     with rasterio.open(map_params.cropped_lcp_path) as src:
         display_fuel_map = src.read(4)

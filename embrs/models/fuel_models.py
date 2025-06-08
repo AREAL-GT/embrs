@@ -163,7 +163,7 @@ class Anderson13(Fuel):
             with open(json_path, "r") as f:
                 cls._fuel_models = json.load(f)
 
-    def __init__(self, model_number: int):
+    def __init__(self, model_number: int, live_h_mf: float = 0):
         self.load_fuel_models()
 
         model_number = int(model_number)
@@ -212,7 +212,7 @@ class ScottBurgan40(Fuel):
             with open(json_path, "r") as f:
                 cls._fuel_models = json.load(f)
 
-    def __init__(self, model_number: int, live_h_mf: float):
+    def __init__(self, model_number: int, live_h_mf: float = 0):
         self.load_fuel_models()
 
         model_number = int(model_number)
@@ -223,11 +223,11 @@ class ScottBurgan40(Fuel):
         
         burnable = model_number >= 101
         name = self._fuel_models["names"][model_id]
-        dynamic = self._fuel_models["dynamic"][model_id]
 
         if not burnable: 
             f_i = None
             f_ij = None
+            g_ij = None
             w_0 = None
             s = None
             s_total = None
@@ -235,8 +235,10 @@ class ScottBurgan40(Fuel):
             fuel_bed_depth = None
             rho_b = None
             rel_packing_ratio = None
+            dynamic = False
 
         else:
+            dynamic = self._fuel_models["dynamic"][model_id]
             if not dynamic:
                 f_ij = np.array(self._fuel_models["f_ij"][model_id])
                 g_ij = f_ij
@@ -290,4 +292,3 @@ class ScottBurgan40(Fuel):
         alpha = (curing - lower) / (upper - lower)
 
         return (1 - alpha) * f_lower + alpha * f_upper
-

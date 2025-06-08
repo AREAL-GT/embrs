@@ -64,7 +64,9 @@ class CropTiffTool:
         cmap = ListedColormap(colors)
 
         # Create a norm object to map your data points to the colormap
-        norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
+        keys = sorted(fc.fuel_color_mapping.keys())
+        boundaries = keys + [keys[-1] + 1]
+        norm = BoundaryNorm(boundaries, cmap.N)
 
         self.ax.imshow(self.fuel_data, extent=self.extent, cmap=cmap, norm=norm)
         self.ax.set_title("Draw a bounding box to crop the TIFF file")

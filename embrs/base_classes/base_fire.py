@@ -170,7 +170,7 @@ class BaseFireSim:
 
                     # Get fuel type
                     fuel_key = self._fuel_map[data_row, data_col]
-                    fuel = self.FuelClass(fuel_key)
+                    fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
                     cell_data.fuel_type = fuel
 
                     # Get cell elevation from elevation map
