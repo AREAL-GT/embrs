@@ -1055,6 +1055,7 @@ class VizFolderSelector(FileSelectBase):
             if not video_filename.lower().endswith(".mp4"):
                 video_filename += ".mp4"
 
+        
 
 
             video_path = os.path.join(self.video_folder.get(), video_filename)
@@ -1070,6 +1071,7 @@ class VizFolderSelector(FileSelectBase):
 
         else:
             self.render_visualization.set(True)
+            video_filename = ""
 
         self.result = PlaybackVisualizerParams(
             cell_file= self.viz_file,
