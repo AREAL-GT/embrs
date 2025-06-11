@@ -96,8 +96,11 @@ class Logger:
         )
 
         # Delete the temporary folders after merging
-        shutil.rmtree(cell_log_path)
-        shutil.rmtree(agent_log_path)
+        if os.path.exists(cell_log_path):
+            shutil.rmtree(cell_log_path)
+        
+        if os.path.exists(agent_log_path):
+            shutil.rmtree(agent_log_path)
 
         if on_interrupt:
             sys.exit(0)

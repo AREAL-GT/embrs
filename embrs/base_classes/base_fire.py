@@ -98,12 +98,13 @@ class BaseFireSim:
         # Containers for cells
         self._cell_dict = {}
         self._soaked = []
+        self._long_term_retardants = set()
         self._burning_cells = []
         self._new_ignitions = []
         self._burnt_cells = set()
         self._frontier = set()
         self._fire_break_cells = []
-        self.starting_ignitions = []
+        self.starting_ignitions = set()
         self._urban_cells = []
 
         # Crown fire containers
@@ -565,6 +566,10 @@ class BaseFireSim:
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 
+                    if neighbor._retardant:
+                        r_ign *= neighbor._retardant_factor
+                        r_0 *= neighbor._retardant_factor
+
                     # Check that ignition ros is greater than no wind no slope ros
                     if 0 < r_0 < r_ign:
                         self._new_ignitions.append((neighbor, n_loc))
@@ -714,6 +719,16 @@ class BaseFireSim:
                 if time > self.curr_time_s:
                     break
     
+    def update_long_term_retardants(self):
+        for cell in self._long_term_retardants.copy():
+            if cell.retardant_expiration_s <= self._curr_time_s:
+                cell._retardant = False
+                cell._retardant_factor = 1.0
+                cell.retardant_expiration_s = -1.0
+
+                self._updated_cells[cell.id] = cell
+
+                self._long_term_retardants.remove(cell)
 
     def generate_burn_history_entry(self, cell, fuel_loads):
         # TODO: this assumes that any live fuel will be totally consumed
@@ -975,7 +990,7 @@ class BaseFireSim:
                                     cell._set_state(state)
                                 
                                 elif state == CellStates.FIRE and cell._fuel.burnable:
-                                    self.starting_ignitions.append((cell, 0))
+                                    self.starting_ignitions.add((cell, 0))
             
             elif isinstance(geom, LineString):
                 length = geom.length
@@ -993,8 +1008,8 @@ class BaseFireSim:
                         if state == CellStates.BURNT:
                             cell._set_state(state)
                         
-                        elif state == CellStates.FIRE and cell._fuel.burnable and cell not in self.starting_ignitions:
-                            self.starting_ignitions.append((cell, 0))
+                        elif state == CellStates.FIRE and cell._fuel.burnable and (cell, 0) not in self.starting_ignitions:
+                            self.starting_ignitions.add((cell, 0))
 
             elif isinstance(geom, Point):
                 x, y = geom.x, geom.y
@@ -1005,12 +1020,14 @@ class BaseFireSim:
                     if state == CellStates.BURNT:
                         cell._set_state(state)
                     
-                    elif state == CellStates.FIRE and cell._fuel.burnable and cell not in self.starting_ignitions:
-                        self.starting_ignitions.append((cell, 0))
+                    elif state == CellStates.FIRE and cell._fuel.burnable and (cell, 0) not in self.starting_ignitions:
+                        self.starting_ignitions.add((cell, 0))
 
             else:
                 raise ValueError(f"Unknown geometry type: {type(geom)}")
 
+
+    # TODO: need to re-implement this functionality
     @property
     def frontier(self) -> list:
         """List of cells on the frontier of the fire.
@@ -1047,8 +1064,8 @@ class BaseFireSim:
         :rtype: Tuple[float, float]
         """
 
-        x_coords = np.array([cell.x_pos for cell in self._burning_cells])
-        y_coords = np.array([cell.y_pos for cell in self._burning_cells])
+        x_coords = np.array([cell.x_pos for cell, _ in self._burning_cells])
+        y_coords = np.array([cell.y_pos for cell, _ in self._burning_cells])
 
         return np.mean(x_coords), np.mean(y_coords)
 
@@ -1238,6 +1255,7 @@ class BaseFireSim:
         # Set new state
         cell._set_state(state)
 
+    # TODO: should we log messages when get_cell_from_xy fails here?
     # Functions for setting wild fires
     def set_ignition_at_xy(self, x_m: float, y_m: float):
         """Set a wild fire in the cell at position (x_m, y_m) in the Cartesian plane.
@@ -1246,8 +1264,9 @@ class BaseFireSim:
             x_m (float): x position of the desired wildfire ignition point in meters
             y_m (float): y position of the desired wildfire ignition point in meters
         """
-        cell = self.get_cell_from_xy(x_m, y_m)
-        self.set_ignition_at_cell(cell)
+        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
+        if cell is not None:
+            self.set_ignition_at_cell(cell)
 
     def set_ignition_at_indices(self, row: int, col: int):
         """Set a wild fire in the cell at indices [row, col] in the cell_grid
@@ -1267,142 +1286,41 @@ class BaseFireSim:
         """
         self.set_state_at_cell(cell, CellStates.FIRE)
 
-    # Functions for setting fuel content
-    def set_fuel_content_at_xy(self, x_m: float, y_m: float, fuel_content: float):
-        """Set the fraction of fuel remaining at a point (x_m, y_m) in the Cartesian plane between
-        0 and 1.
-
-        Args:
-            x_m (float): x position in meters of the point where fuel content should be changed
-            y_m (float): y position in meters of the point where fuel content should be changed
-            fuel_content (float): desired fuel content at point (x_m, y_m) between 0 and 1
-        """
-        cell = self.get_cell_from_xy(x_m, y_m, oob_ok = True)
-        self.set_fuel_content_at_cell(cell, fuel_content)
-
-    def set_fuel_content_at_indices(self, row: int, col: int, fuel_content: float):
-        """Set the fraction of fuel remanining in the cell at indices [row, col] in 
-        the cell_grid between 0 and 1.
-
-        Args:
-            row (int): row index of the cell where fuel content should be changed
-            col (int): col index of the cell where fuel content should be changed
-            fuel_content (float): desired fuel content at indices [row, col} between 0 and 1
-        """
-        cell = self.get_cell_from_indices(row, col)
-        self.set_fuel_content_at_cell(cell, fuel_content)
-
-    def set_fuel_content_at_cell(self, cell: Cell, fuel_content: float):
-        """Set the fraction of fuel remaining in a cell between 0 and 1
-
-        Args:
-            cell (Cell): Cell object to set fuel content in
-            fuel_content (float): desired fuel content at cell between 0 and 1
-
-        Raises:
-            TypeError: if 'cell' is not of type Cell
-            ValueError: if 'cell' is not a valid Cell in the current sim
-            ValueError: if 'fuel_content' is not between 0 and 1
-        """
-        if not isinstance(cell, Cell):
-            msg = f"'cell' must be of type Cell not {type(cell)}"
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_content_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise TypeError(msg)
-
-        if cell.id not in self._cell_dict:
-            msg = f"{cell} is not a valid cell in the current fire Sim"
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_content_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise ValueError(msg)
-
-        if fuel_content < 0 or fuel_content > 1:
-            msg = (f"'fuel_content' must be a float between 0 and 1. "
-                f"{fuel_content} was provided as input")
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_content_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise ValueError(msg)
-
-        cell._set_fuel_content(fuel_content)
-
-        # Add cell to update dictionary
-        self._updated_cells[cell.id] = cell
-
-    # Functions for setting fuel moisture
-    def set_fuel_moisture_at_xy(self, x_m: float, y_m: float, fuel_moisture: float):
-        """Set the fuel moisture at the point (x_m, y_m) in the Cartesian plane.
-
-        Args:
-            x_m (float): x position in meters of the point where fuel moisture is set
-            y_m (float): y position in meters of the point where fuel moisture is set
-            fuel_moisture (float): desired fuel moisture at point (x_m, y_m), between 0 and 1
-        """
+    # Functions for suppression
+    def add_retardant_at_xy(self, x_m: float, y_m: float, duration_hr: float, effectiveness: float):
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
-        self.set_fuel_moisture_at_cell(cell, fuel_moisture)
+        if cell is not None:
+            self.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
-    def set_fuel_moisture_at_indices(self, row: int, col: int, fuel_moisture: float):
-        """Set the fuel moisture at the cell at indices [row, col] in the sim's backing array.
-
-        Args:
-            row (int): row index of the cell where fuel moisture is set
-            col (int): col index of the cell where fuel moisture is set
-            fuel_moisture (float): desired fuel moisture at indices [row, col], between 0 and 1
-        """
+    def add_retardant_at_indices(self, row: int, col: int, duration_hr: float, effectiveness: float):
         cell = self.get_cell_from_indices(row, col)
-        self.set_fuel_moisture_at_cell(cell, fuel_moisture)
+        self.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
-    def set_fuel_moisture_at_cell(self, cell: Cell, fuel_moisture: float):
-        """Set the fuel mositure at a cell
+    def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float):
 
-        Args:
-            cell (Cell): cell where fuel moisture is set
-            fuel_moisture (float): desired fuel mositure at cell, between 0 and 1
+        # Ensure that effectiveness is between 0 and 1
+        effectiveness = min(max(effectiveness, 0), 1)
 
-        Raises:
-            TypeError: if 'cell' is not of type Cell
-            ValueError: if 'cell' is not a valid Cell in the current sim
-            ValueError: if 'fuel_moisture' is not between 0 and 1
-        """
-        if not isinstance(cell, Cell):
-            msg = f"'cell' must be of type Cell not {type(cell)}"
+        cell.add_retardant(duration_hr, effectiveness)
+        self._long_term_retardants.add(cell)
 
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_moisture_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise TypeError(msg)
-
-        if cell.id not in self._cell_dict:
-            msg = f"{cell} is not a valid cell in the current fire Sim"
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_moisture_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise ValueError(msg)
-
-        if fuel_moisture < 0 or fuel_moisture > 1:
-            msg = (f"'fuel_moisture' must be a float between 0 and 1. "
-                f"{fuel_moisture} was provided as input")
-            
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.set_fuel_moisture_at_cell(): "
-                                        f"{msg} Program terminated.")
-            
-            raise ValueError(msg)
-
-        # Add cell to update dictionary
         self._updated_cells[cell.id] = cell
-        self._soaked.append(cell.to_log_format())
+
+    # TODO: Add short-term (water) suppression functions
+        # TODO: Both a rain option and a increase of outer layer fuel moisture    
+
+    # Functions for fireline construction
+
+    # TODO: Add functions that allow user to input a lineString object defining a fireline along with its width
+        # TODO: Take in construction rate and form the fireline using that rate over time
+            # TODO: Have user specify which end it should be constructed from
+            # TODO: if possible allow for line to be constructed from both ends
+
+
+
+    # TODO: Write function that gets cells along lineString or any shapely geometry
+        # TODO: This will be useful for users to use as a way to get cells to set states or interact with
+
 
     def set_surface_accel_constant(self, cell: Cell):
         """Sets the surface acceleration constant for a cell based on the state of its neighbors.
@@ -1527,6 +1445,7 @@ class BaseFireSim:
         """Max y coordinate in the sim's map in meters
         """
         return self.grid_height * 1.5 * self.cell_size
+
     @property
     def cell_size(self) -> float:
         """Size of each cell in the simulation.
@@ -1551,13 +1470,10 @@ class BaseFireSim:
 
     @property
     def roads(self) -> list:
-        """List of points that define the roads for the simulation.
-        
-        Format for each element in list: ((x,y), fuel_content). 
-        
-        - (x,y) is the spatial position in the sim measured in meters
-            
-        - fuel_content is the amount of fuel modeled at that point (between 0 and 1)
+        """_summary_
+
+        Returns:
+            list: _description_
         """
         return self._roads
 

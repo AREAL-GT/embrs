@@ -75,6 +75,11 @@ class Cell:
         self._cell_size = cell_size # defined as the edge length of hexagon
         self._cell_area = self.calc_cell_area()
 
+        # Flag to track if cell has been treated with long-term fire retardant
+        self._retardant = False
+        self._retardant_factor = 1.0 # Factor multiplied by rate of spread (0-1)
+        self.retardant_expiration_s = -1.0 # Time at which long-term retardant in cell expires
+
         # Width in meters of any fuel discontinuity within cell (road or firebreak)
         self._break_width = 0 
 
@@ -275,6 +280,10 @@ class Cell:
 
             self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
             self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
+
+        if self._retardant:
+            self.r_t *= self._retardant_factor
+            self.I_t *= self._retardant_factor
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
         """Stores the local forecasted wind speed and direction for the cell.
@@ -508,6 +517,15 @@ class Cell:
             self.I_h_ss = 0
             self.r_h_prev = 0
 
+    def add_retardant(self, duration_hr: float, effectiveness: float):
+        if effectiveness < 0 or effectiveness > 1:
+            raise ValueError(f"Retardant effectiveness must be between 0 and 1 ({effectiveness} passed in)")
+
+        self._retardant = True
+        self._retardant_factor = 1 - effectiveness
+
+        self.retardant_expiration_s = self._parent().curr_time_s + (duration_hr * 3600)
+
     def __str__(self):
         """Returns a formatted string representation of the cell.
 
@@ -627,7 +645,8 @@ class Cell:
             ros=np.max(self.r_t),
             I_ss=np.max(self.I_ss),
             wind_speed=self.curr_wind[0],
-            wind_dir=self.curr_wind[1]
+            wind_dir=self.curr_wind[1],
+            retardant=self._retardant
         )
 
         return entry

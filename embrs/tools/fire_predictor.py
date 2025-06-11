@@ -207,6 +207,9 @@ class FirePredictor(BaseFireSim):
             if self.model_spotting and self._spot_ign_prob > 0:
                 self._ignite_spots()
 
+            if self._long_term_retardants:
+                self.update_long_term_retardants()
+
             self._iters += 1
 
 

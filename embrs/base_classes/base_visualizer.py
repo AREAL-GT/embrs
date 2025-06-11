@@ -340,9 +340,12 @@ class BaseVisualizer:
                                               radius=self.cell_size, orientation=0)
             
             if entry.state == CellStates.FUEL:
-                # TODO: add scaling of rbga color for fuel content
+                if entry.retardant:
+                    color = 'grey'
+                else:
+                    # TODO: add scaling of rbga color for fuel content
+                    color = fc.fuel_color_mapping[entry.fuel]
                 
-                color = fc.fuel_color_mapping[entry.fuel]
                 polygon.set(color=color)
                 tree_patches.append(polygon)
 
@@ -450,8 +453,9 @@ class BaseVisualizer:
 
     def reset_figure(self, done=False):
         """Resets the visualizer to its initial state, optionally closing if simulation is done."""
+        self.close()
+        
         if done:
-            self.close()
             return
 
         # Clear current figure

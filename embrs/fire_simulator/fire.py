@@ -183,6 +183,9 @@ class FireSim(BaseFireSim):
         if self.model_spotting and self._spot_ign_prob > 0:
             self.propagate_embers()
 
+        if self._long_term_retardants:
+            self.update_long_term_retardants()
+
         if self.logger:
             self._log_changes()
 

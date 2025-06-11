@@ -267,9 +267,6 @@ class ScottBurgan40(Fuel):
 
         super().__init__(name, model_number, burnable, dynamic, f_i, f_ij, g_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
 
-
-    # TODO: Validate the two function below
-
     def calc_curing_level(self, live_h_mf: float):
         T = -1.11 * live_h_mf + 1.33
         T = min(max(T, 0), 1)
