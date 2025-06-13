@@ -17,6 +17,9 @@ import base64
 from datetime import datetime
 import numpy as np
 
+
+# TODO: Need to add support for actions in playback visualizer
+
 class PlaybackVisualizer(BaseVisualizer):
     def __init__(self, params: PlaybackVisualizerParams):
 

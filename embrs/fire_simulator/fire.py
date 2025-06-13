@@ -183,8 +183,7 @@ class FireSim(BaseFireSim):
         if self.model_spotting and self._spot_ign_prob > 0:
             self.propagate_embers()
 
-        if self._long_term_retardants:
-            self.update_long_term_retardants()
+        self.update_control_interface_elements()
 
         if self.logger:
             self._log_changes()
@@ -201,6 +200,8 @@ class FireSim(BaseFireSim):
 
         if self.agents_added:
             self.logger.cache_agent_updates(self._get_agent_updates())
+
+        self.logger.cache_action_updates(self.get_action_entries(logger=True))
 
     def _init_iteration(self) -> bool:
         """Initialize or update the simulation state for the current iteration.

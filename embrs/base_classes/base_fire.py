@@ -18,6 +18,7 @@ from embrs.models.embers import Embers
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
 from embrs.utilities.data_classes import SimParams, CellData
+from embrs.utilities.logger_schemas import ActionsEntry
 from embrs.fire_simulator.cell import Cell
 from embrs.models.crown_model import crown_fire
 from embrs.models.rothermel import *
@@ -104,6 +105,8 @@ class BaseFireSim:
         self._burnt_cells = set()
         self._frontier = set()
         self._fire_break_cells = []
+        self._active_firelines = []
+        self._new_fire_break_cache = []
         self.starting_ignitions = set()
         self._urban_cells = []
 
@@ -617,8 +620,6 @@ class BaseFireSim:
             - The accuracy of this calculation depends on correct fuel moisture modeling.
             - Currently, fuel moisture content updates are not implemented.
         """
-
-
         # Get the rate of spread in ft/s
         r_ft_s = m_s_to_ft_min(r_gamma)
 
@@ -718,6 +719,13 @@ class BaseFireSim:
 
                 if time > self.curr_time_s:
                     break
+
+    def update_control_interface_elements(self):
+        if self._long_term_retardants:
+            self.update_long_term_retardants()
+
+        if self._active_firelines:
+            self._update_active_firelines()
     
     def update_long_term_retardants(self):
         for cell in self._long_term_retardants.copy():
@@ -918,24 +926,30 @@ class BaseFireSim:
             - Updates the `_fire_break_cells` list with affected cells.
         """
         for line, break_width in self.fire_breaks:
-            length = line.length
+            self._apply_firebreak(line, break_width)
 
-            step_size = 0.5
-            num_steps = int(length/step_size) + 1
+    def _apply_firebreak(self, line: LineString, break_width: float):
+        length = line.length
 
-            for i in range(num_steps):
-                point = line.interpolate(i * step_size)
+        step_size = self._cell_size / 4.0
+        num_steps = int(length/step_size) + 1
 
-                cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
+        curr_break_cells = set()
 
-                if cell is not None:
-                    if cell not in self._fire_break_cells:
-                        self._fire_break_cells.append(cell)
+        for i in range(num_steps):
+            point = line.interpolate(i * step_size)
 
-                    if break_width > self._cell_size:
-                        cell._set_fuel_type(self.FuelClass(91))
+            cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
 
-                    cell._break_width = break_width
+            if cell is not None and cell not in curr_break_cells:
+                if cell not in self._fire_break_cells:
+                    self._fire_break_cells.append(cell)
+
+                if break_width > self._cell_size:
+                    cell._set_fuel_type(self.FuelClass(91))
+
+                curr_break_cells.add(cell)
+                cell._break_width += break_width
 
     def _set_state_from_geometries(self, geometries: list, state: CellStates):
         """Updates the state of grid cells within given polygons.
@@ -1297,7 +1311,6 @@ class BaseFireSim:
         self.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
     def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float):
-
         # Ensure that effectiveness is between 0 and 1
         effectiveness = min(max(effectiveness, 0), 1)
 
@@ -1305,7 +1318,6 @@ class BaseFireSim:
         self._long_term_retardants.add(cell)
 
         self._updated_cells[cell.id] = cell
-
 
     # Short-term supression functions
     def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
@@ -1342,17 +1354,105 @@ class BaseFireSim:
         
 
     # Functions for fireline construction
+    def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None):
+        if construction_rate is None:
+            # Add fire break instantly
+            self._apply_firebreak(line, width_m)
+            self._fire_breaks.append((line, width_m))
+            
+            # Add to a cache for visualization and logging
+            cache_entry = {
+                "line": line,
+                "width": width_m,
+                "time": self.curr_time_s,
+                "logged": False,
+                "visualized": False
+            }
 
-    # TODO: Add functions that allow user to input a lineString object defining a fireline along with its width
-        # TODO: Take in construction rate and form the fireline using that rate over time
-            # TODO: Have user specify which end it should be constructed from
-            # TODO: if possible allow for line to be constructed from both ends
+            self._new_fire_break_cache.append(cache_entry)
 
+        else:
+            self._active_firelines.append({
+                "line": line,
+                "width": width_m,
+                "rate": construction_rate,
+                "progress": 0.0,
+                "partial_line": LineString([]),
+                "cells": set()
+            })
 
+    def _update_active_firelines(self):
+        step_size = self._cell_size / 4.0
+        firelines_to_remove = []
+
+        for fireline in self._active_firelines:
+            full_line = fireline["line"]
+            length = full_line.length
+            prev_progress = fireline["progress"]
+            fireline["progress"] += fireline["rate"] * self._time_step
+
+            # Cap progress at full length
+            fireline["progress"] = min(fireline["progress"], length)
+
+            # Interpolate new points between prev_progress and current progress
+            num_steps = int(fireline["progress"] / step_size)
+            prev_steps = int(prev_progress / step_size)
+
+            for i in range(prev_steps, num_steps):
+                point = fireline["line"].interpolate(i * step_size)
+
+                cell = self.get_cell_from_xy(point.x, point.y, oob_ok=True)
+
+                if cell is not None:
+                    if cell not in self._fire_break_cells:
+                        self._fire_break_cells.append(cell)
+
+                    if cell not in fireline["cells"]:
+                        cell._break_width += fireline["width"]
+                        fireline["cells"].add(cell)
+
+                        if cell._break_width > self._cell_size:
+                            cell._set_fuel_type(self.FuelClass(91))
+                    
+                    if fireline["progress"] == length:
+                        fireline["partial_line"] = full_line
+                        self._fire_breaks.append((full_line, fireline["width"]))
+                        firelines_to_remove.append(fireline)
+
+                    else:
+                        fireline["partial_line"] = self.truncate_linestring(fireline["line"], fireline["progress"])
+
+        for fireline in firelines_to_remove:
+            self._active_firelines.remove(fireline)
+
+    def truncate_linestring(self, line: LineString, length: float) -> LineString:
+        """Truncate a LineString to the given length along its length."""
+        if length <= 0:
+            return LineString([line.coords[0]])
+        if length >= line.length:
+            return line
+
+        coords = list(line.coords)
+        accumulated = 0.0
+        new_coords = [coords[0]]
+
+        for i in range(1, len(coords)):
+            seg = LineString([coords[i - 1], coords[i]])
+            seg_len = seg.length
+            if accumulated + seg_len >= length:
+                ratio = (length - accumulated) / seg_len
+                x = coords[i - 1][0] + ratio * (coords[i][0] - coords[i - 1][0])
+                y = coords[i - 1][1] + ratio * (coords[i][1] - coords[i - 1][1])
+                new_coords.append((x, y))
+                break
+            else:
+                new_coords.append(coords[i])
+                accumulated += seg_len
+
+        return LineString(new_coords)
 
     # TODO: Write function that gets cells along lineString or any shapely geometry
         # TODO: This will be useful for users to use as a way to get cells to set states or interact with
-
 
     def set_surface_accel_constant(self, cell: Cell):
         """Sets the surface acceleration constant for a cell based on the state of its neighbors.
@@ -1371,6 +1471,51 @@ class BaseFireSim:
             
             # Model as a point fire
             cell.a_a = 0.115
+
+    def get_action_entries(self, logger: bool = False):
+        entries = []
+        if self._long_term_retardants:
+            for cell in self._long_term_retardants:
+                entries.append(ActionsEntry(
+                    timestamp=self.curr_time_s,
+                    action_type="long_term_retardant",
+                    x=cell.x_pos,
+                    y=cell.y_pos
+                ))
+
+        if self._active_firelines:
+            for fireline in self._active_firelines:
+                entries.append(ActionsEntry(
+                    timestamp=self.curr_time_s,
+                    action_type="fireline_construction",
+                    x_coords= [coord[0] for coord in fireline["partial_line"].coords],
+                    y_coords= [coord[1] for coord in fireline["partial_line"].coords],
+                    width=fireline["width"]
+                ))
+
+        if self._new_fire_break_cache:
+            to_remove = []
+            for entry in self._new_fire_break_cache:
+                entries.append(ActionsEntry(
+                    timestamp=entry["time"],
+                    action_type="fireline_construction",
+                    x_coords= [coord[0] for coord in entry["line"].coords],
+                    y_coords= [coord[1] for coord in entry["line"].coords],
+                    width=entry["width"]
+                ))
+
+                if logger:
+                    entry["logged"] = True
+                else:
+                    entry["visualized"] = True
+
+                if entry["logged"] and entry["visualized"]:
+                    to_remove.append(entry)
+
+            for entry in to_remove:
+                self._new_fire_break_cache.remove(entry)
+
+        return entries
 
     def is_firesim(self) -> bool:
         return self.__class__.__name__ == "FireSim"

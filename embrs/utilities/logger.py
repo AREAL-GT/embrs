@@ -1,5 +1,5 @@
 import os
-from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
 from embrs.utilities.parquet_writer import ParquetWriter
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -34,8 +34,13 @@ class Logger:
             os.path.join(self._session_folder, "agent_logs"), schema=AgentLogEntry
         )
 
+        self.action_writer = ParquetWriter(
+            os.path.join(self._session_folder, "action_logs"), schema=ActionsEntry
+        )
+
         self._cell_cache = []
         self._agent_cache = []
+        self._action_cache = []
         
         self._status_log = {
             "sim_start": datetime.datetime.now().isoformat(),
@@ -50,12 +55,18 @@ class Logger:
     def cache_agent_updates(self, entries):
         self._agent_cache.extend(entries)
 
+    def cache_action_updates(self, entries):
+        self._action_cache.extend(entries)
+
     def flush(self):
         self.cell_writer.write_batch(self._cell_cache)
         self._cell_cache.clear() 
 
         self.agent_writer.write_batch(self._agent_cache)
         self._agent_cache.clear()
+
+        self.action_writer.write_batch(self._action_cache)
+        self._action_cache.clear()
 
         self._status_log["latest_flush"] = datetime.datetime.now().isoformat()
         self._write_status_log()
@@ -84,6 +95,7 @@ class Logger:
 
         cell_log_path = os.path.join(self._session_folder, "cell_logs")
         agent_log_path = os.path.join(self._session_folder, "agent_logs")
+        action_log_path = os.path.join(self._session_folder, "action_logs")
 
         self._merge_parquet_files(
             cell_log_path,
@@ -95,12 +107,20 @@ class Logger:
             os.path.join(self._run_folder, "agent_logs.parquet")
         )
 
+        self._merge_parquet_files(
+            action_log_path,
+            os.path.join(self._run_folder, "action_logs.parquet")
+        )
+
         # Delete the temporary folders after merging
         if os.path.exists(cell_log_path):
             shutil.rmtree(cell_log_path)
         
         if os.path.exists(agent_log_path):
             shutil.rmtree(agent_log_path)
+
+        if os.path.exists(action_log_path):
+            shutil.rmtree(action_log_path)
 
         if on_interrupt:
             sys.exit(0)

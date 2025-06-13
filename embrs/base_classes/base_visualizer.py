@@ -1,5 +1,5 @@
 
-from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
 from embrs.utilities.data_classes import VisualizerInputs
 from embrs.utilities.fire_util import RoadConstants as rc, CellStates, FuelConstants as fc, CrownStatus
 from embrs.utilities.fire_util import UtilFuncs as util
@@ -273,7 +273,7 @@ class BaseVisualizer:
         self._init_static_elements()
 
     
-    def update_grid(self, sim_time_s: float, entries: list[CellLogEntry], agents: list[AgentLogEntry] = []) -> None:
+    def update_grid(self, sim_time_s: float, entries: list[CellLogEntry], agents: list[AgentLogEntry] = [], actions: list[ActionsEntry] = []) -> None:
         """_summary_
 
         Args:
@@ -412,6 +412,13 @@ class BaseVisualizer:
                 if agent_entry.label is not None:
                     label = self.h_ax.annotate(agent_entry.label, (agent_entry.x, agent_entry.y))
                     self.agent_labels.append(label)
+
+        if actions:
+            for action in actions:
+                if action.action_type == 'fireline_construction':
+                    if action.x_coords is not None and action.y_coords is not None and action.width is not None:
+                        x, y = action.x_coords, action.y_coords
+                        self.h_ax.plot(x, y, color='blue', linewidth=self.meters_to_points(action.width))
 
         if self.render:
             self.fig.canvas.blit(self.h_ax.bbox)

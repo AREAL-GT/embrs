@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict
+from typing import Literal, Union, Tuple
 
 @dataclass
 class CellLogEntry:
@@ -32,6 +33,19 @@ class AgentLogEntry:
     y: float
     marker: str
     color: str
+
+    def to_dict(self):
+        return asdict(self)
+
+@dataclass
+class ActionsEntry:
+    timestamp: int
+    action_type: Literal['long_term_retardant', 'short_term_suppressant', 'active_fireline']
+    x_coords: list[float] = None
+    y_coords: list[float] = None
+    x: float = None
+    y: float = None
+    width: float = None
 
     def to_dict(self):
         return asdict(self)

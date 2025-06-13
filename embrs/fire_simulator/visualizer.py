@@ -21,7 +21,8 @@ class RealTimeVisualizer(BaseVisualizer):
     def update(self):
         entries = [cell.to_log_entry(self.sim._curr_time_s) for cell in self.sim._updated_cells.values()]
         agents = [agent.to_log_entry(self.sim._curr_time_s) for agent in self.sim.agent_list]
-        self.update_grid(self.sim._curr_time_s, entries, agents)
+        actions = self.sim.get_action_entries(logger=False)
+        self.update_grid(self.sim._curr_time_s, entries, agents, actions)
         self.sim._updated_cells.clear()
 
     def get_input_params(self):
