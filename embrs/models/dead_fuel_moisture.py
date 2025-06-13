@@ -28,11 +28,11 @@ Sir = 0.0714285
 Scr = 0.285714
 
 class DeadFuelMoisture:
-    def __init__(self, radius):
+    def __init__(self, radius, stv, wmx, wfilmk):
         self.m_semTime = None
-        self.initializeParameters(radius)
+        self.initializeParameters(radius, stv, wmx, wfilmk)
 
-    def initializeParameters(self, radius):
+    def initializeParameters(self, radius, stv, wmx, wfilmk):
         self.m_radius = radius
         self.m_density = 0.4
         self.m_length = 41.0
@@ -44,9 +44,9 @@ class DeadFuelMoisture:
         self.m_stca = self.deriveAdsorptionRate(radius)
         self.m_stcd = 0.06
         self.m_mSteps = self.deriveMoistureSteps(radius)
-        self.m_stv = 9999.0
-        self.m_wmx = 0.6
-        self.m_wfilmk = 0.0
+        self.m_stv = stv
+        self.m_wmx = wmx
+        self.m_wfilmk = wfilmk
         self.m_allowRainfall2 = True
         self.m_allowRainstorm = True
         self.m_pertubateColumn = True
@@ -180,19 +180,19 @@ class DeadFuelMoisture:
 
     @staticmethod
     def createDeadFuelMoisture1():
-        return DeadFuelMoisture(0.20)
+        return DeadFuelMoisture(0.20, 0.006, 0.85, 0.10)
 
     @staticmethod
     def createDeadFuelMoisture10():
-        return DeadFuelMoisture(0.64)
+        return DeadFuelMoisture(0.64, 0.05, 0.60, 0.05)
 
     @staticmethod
     def createDeadFuelMoisture100():
-        return DeadFuelMoisture(2.00)
+        return DeadFuelMoisture(2.00, 5.0, 0.40, 0.005)
 
     @staticmethod
     def createDeadFuelMoisture1000():
-        return DeadFuelMoisture(6.40)
+        return DeadFuelMoisture(6.40, 7.5, 0.32, 0.003)
     
     def initialized(self):
         return self.m_init
@@ -262,7 +262,6 @@ class DeadFuelMoisture:
 
     def setDesorptionRate(self, desorptionRate):
         self.m_stcd = desorptionRate
-
 
     def setDiffusivitySteps(self, diffusivitySteps):
         self.m_dSteps = diffusivitySteps

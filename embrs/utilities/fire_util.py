@@ -163,11 +163,11 @@ class FuelConstants:
 
 
     # Color mapping for each fuel type
-    fuel_color_mapping = {1: '#ffffbd', 2:'#ffff00', 3: '#e6c40a',
-                        4: '#ffd37e', 5: '#ffaa66', 6: '#cdaa66',
-                        7: '#897044', 8: '#d3ffbd' , 9: '#70a800',
-                        10: '#267200', 11: '#e8bdff',
-                        12: '#798ef4', 13: '#798ef4', 91: '#830089',
+    fuel_color_mapping = {1: 'xkcd:pale green', 2:'xkcd:lime', 3: 'xkcd:bright green',
+                        4: 'xkcd:teal', 5: 'xkcd:bluish green', 6: 'xkcd:greenish teal',
+                        7: 'xkcd:light blue green', 8: 'xkcd:pale olive' , 9: 'xkcd:olive',
+                        10: 'xkcd:light forest green', 11: 'xkcd:bright olive',
+                        12: 'xkcd:tree green', 13: 'xkcd:avocado green', 91: '#830089',
                         92: '#9ea1ef' , 93: "#e872ff", 98: '#0000ff',
                         99: 'xkcd:black', -100: 'xkcd:red', 
                         101: "#ffebbe",             # GR1

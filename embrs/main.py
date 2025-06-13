@@ -194,7 +194,9 @@ def sim_loop(sim_params: SimParams):
             curr_fire = fire
 
         curr_fire.set_visualizer(viz)
-        viz.set_sim(curr_fire)
+
+        if viz_on:
+            viz.set_sim(curr_fire)
 
         # Register the signal handler
         signal.signal(signal.SIGINT, lambda signum, frame: handle_interrupt(logger, curr_fire))

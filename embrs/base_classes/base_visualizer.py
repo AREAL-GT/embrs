@@ -209,7 +209,7 @@ class BaseVisualizer:
         self.h_ax.add_artist(scalebar_box)
 
         if self.show_wind_field and self.show_wind_cbar:
-            sm = ScalarMappable(norm=self.wind_norm, cmap='jet')
+            sm = ScalarMappable(norm=self.wind_norm, cmap='turbo')
             sm.set_array([])
             self.wind_cbar = self.fig.colorbar(
                 sm, ax=self.h_ax, orientation='vertical', shrink=0.7,
@@ -332,7 +332,7 @@ class BaseVisualizer:
             # Plot the wind vectors
             self.wind_grid = self.h_ax.quiver(
                 X + self.wind_xpad, Y + self.wind_ypad, U_norm, V_norm, wind_speed,
-                scale=20, cmap='jet', norm=self.wind_norm,
+                scale=20, cmap='turbo', norm=self.wind_norm,
                 width=0.003, zorder=2, alpha=0.5)
 
         for entry in entries:
@@ -366,10 +366,15 @@ class BaseVisualizer:
 
         if fire_patches:
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
-            norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
-            fire_coll.set_array(alpha_arr)
-            fire_coll.set_cmap(mpl.colormaps["gist_heat"])
-            fire_coll.set_norm(norm)
+
+            if len(alpha_arr) > 1 and max(alpha_arr) > min(alpha_arr):
+                norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
+                fire_coll.set_array(alpha_arr)
+                fire_coll.set_cmap(mpl.colormaps["gist_heat"])
+                fire_coll.set_norm(norm)
+            else:
+                # TODO: figure out why this is getting called
+                fire_coll.set_facecolor('#F97306')  # Default color if no variation in alpha
 
         crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta')
 

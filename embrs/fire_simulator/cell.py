@@ -80,6 +80,9 @@ class Cell:
         self._retardant_factor = 1.0 # Factor multiplied by rate of spread (0-1)
         self.retardant_expiration_s = -1.0 # Time at which long-term retardant in cell expires
 
+        # Track the total amount of water dropped (if modelled as rain)
+        self.local_rain = 0.0
+
         # Width in meters of any fuel discontinuity within cell (road or firebreak)
         self._break_width = 0 
 
@@ -174,7 +177,8 @@ class Cell:
         self._neighbors = {}
         self._burnable_neighbors = {}
 
-        self.moist_update = -1
+        # Last time the moisture was updated in cell
+        self.moist_update_time_s = 0
 
         # Get shapely polygon representation of cell
         self.polygon = self.to_polygon()
@@ -314,14 +318,13 @@ class Cell:
 
         self.curr_wind = (self.forecast_wind_speeds[0], self.forecast_wind_dirs[0]) # Note: (m/s, degrees)
 
-    def _step_moisture(self, weather_stream: WeatherStream, idx: int):
+    def _step_moisture(self, weather_stream: WeatherStream, idx: int, update_interval_hr: float = 1):
 
         elev_ref = weather_stream.ref_elev
 
         curr_weather = weather_stream.stream[idx]
 
         bp0 = 0.0218
-        update_interval_hr = 1
 
         t_f_celsius, h_f_frac = apply_site_specific_correction(self, elev_ref, curr_weather)
         solar_radiation = calc_local_solar_radiation(self, curr_weather)
@@ -343,24 +346,53 @@ class Cell:
                 t_f_celsius, # Current observation's ambient air temperature (degrees C)
                 h_f_frac, # Current observation's ambient air relative humidity (g/g)
                 solar_radiation, # Current observation's solar radiation (W/m^2)
-                curr_weather.rain, # Current observation's total cumulative rainfall (cm)
+                curr_weather.rain + self.local_rain, # Current observation's total cumulative rainfall (cm)
                 bp0) # Current observation's stick barometric pressure (cal/cm^3)
 
     def _update_moisture(self, idx: float, weather_stream: WeatherStream):
-        if self.moist_update == idx:
-            return
-        
-        else:
-            # TODO: need to check that these indices are right
-            for i in range(self.moist_update + 1, idx + 1): 
-                self._step_moisture(weather_stream, i)
+        # Make target time the midpoint of the weather interval
+        target_time_s = (idx + 0.5) * self._parent().weather_t_step  # Convert index to seconds
 
-        self.moist_update = idx
+        self._catch_up_moisture_to_curr(target_time_s, weather_stream)
+
+        # Update moisture content for each dead fuel moisture class
         self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
 
         if self.fuel.dynamic:
             # Set dead herbaceous moisture to 1-hr value
             self.fmois[3] = self.fmois[0]
+
+    def _catch_up_moisture_to_curr(self, target_time_s: float, weather_stream: WeatherStream):
+        if self.moist_update_time_s >= target_time_s:
+            return
+
+        curr = self.moist_update_time_s
+        weather_t_step = self._parent().weather_t_step # seconds
+
+        # Align to next weather boundary
+        interval_end_s = ((curr // weather_t_step) + 1) * weather_t_step
+        if interval_end_s > target_time_s:
+            interval_end_s = target_time_s
+        
+        if curr < interval_end_s:
+            idx = int(curr // weather_t_step)
+            dt_hr = (interval_end_s - curr) / 3600  # Convert seconds to hours
+            self._step_moisture(weather_stream, idx, update_interval_hr=dt_hr)
+            curr = interval_end_s
+
+        # Take full interval steps until we reach the target time
+        while curr + weather_t_step <= target_time_s:
+            idx = int(curr // weather_t_step)
+            self._step_moisture(weather_stream, idx, update_interval_hr=weather_t_step / 3600)
+            curr += weather_t_step
+
+        if curr < target_time_s:
+            idx = int(curr // weather_t_step)
+            dt_hr = (target_time_s - curr) / 3600  # Convert seconds to hours
+            self._step_moisture(weather_stream, idx, update_interval_hr=dt_hr)
+            curr = target_time_s
+
+        self.moist_update_time_s = curr
 
     def _update_weather(self, idx: int, weather_stream: WeatherStream, ignore_moisture: bool):
         if not ignore_moisture:
@@ -525,6 +557,59 @@ class Cell:
         self._retardant_factor = 1 - effectiveness
 
         self.retardant_expiration_s = self._parent().curr_time_s + (duration_hr * 3600)
+
+    def water_drop_as_rain(self, water_depth_cm: float, duration_s: float = 30):
+        if not self.fuel.burnable:
+            return
+
+        now_idx = self._parent()._curr_weather_idx
+        now_s = self._parent().curr_time_s
+        weather_stream = self._parent()._weather_stream
+
+        # 1. Step moisture from last update to the current time
+        self._catch_up_moisture_to_curr(now_s, weather_stream)
+
+        # 2. Increment local rain
+        self.local_rain += water_depth_cm
+
+        # 3. Step moisture from current time to end of local rain interval
+        interval_hr = duration_s / 3600 # Convert seconds to hours
+        self._step_moisture(weather_stream, now_idx, update_interval_hr=interval_hr)
+
+        # 4. Store the time so that next update just updates from current time over a weather interval
+        self.moist_update_time_s = now_s + duration_s
+
+         # Update moisture content for each dead fuel moisture class
+        self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
+
+        if self.fuel.dynamic:
+            # Set dead herbaceous moisture to 1-hr value
+            self.fmois[3] = self.fmois[0]
+
+    def water_drop_as_moisture_bump(self, moisture_bump: float):
+        if not self.fuel.burnable:
+            return
+
+        # Catch cell up to current time
+        now_idx = self._parent()._curr_weather_idx
+        now_s = self._parent().curr_time_s
+        weather_stream = self._parent()._weather_stream
+        self._catch_up_moisture_to_curr(now_s, weather_stream)
+
+        for dfm in self.dfms:
+            # Add moisture bump to outer node of each dead fuel moisture class
+            dfm.m_w[0] += moisture_bump
+            dfm.m_w[0] = max(dfm.m_w[0], dfm.m_wmx)
+
+        self._step_moisture(weather_stream, now_idx, update_interval_hr=30/3600)
+
+        # Update moisture content for each dead fuel moisture class
+        self.fmois[0:len(self.dfms)] = [dfm.meanWtdMoisture() for dfm in self.dfms]
+
+        if self.fuel.dynamic:
+            # Set dead herbaceous moisture to 1-hr value
+            self.fmois[3] = self.fmois[0]
+
 
     def __str__(self):
         """Returns a formatted string representation of the cell.

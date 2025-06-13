@@ -1306,8 +1306,40 @@ class BaseFireSim:
 
         self._updated_cells[cell.id] = cell
 
-    # TODO: Add short-term (water) suppression functions
-        # TODO: Both a rain option and a increase of outer layer fuel moisture    
+
+    # Short-term supression functions
+    def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
+        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
+        if cell is not None:
+            self.water_drop_at_cell_as_rain(cell, water_depth_cm)
+
+    def water_drop_at_indices_as_rain(self, row: int, col: int, water_depth_cm: float):
+        cell = self.get_cell_from_indices(row, col)
+        self.water_drop_at_cell_as_rain(cell, water_depth_cm)
+
+    def water_drop_at_cell_as_rain(self, cell: Cell, water_depth_cm: float):
+        
+        if water_depth_cm < 0:
+            raise ValueError(f"Water depth must be >=0, {water_depth_cm} passed in")
+
+        cell.water_drop_as_rain(water_depth_cm)
+
+    def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float):
+        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
+        if cell is not None:
+            self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
+
+    def water_drop_at_indices_as_moisture_bump(self, row: int, col: int, moisture_inc: float):
+        cell = self.get_cell_from_indices(row, col)
+        self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
+
+    def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float):
+
+        if moisture_inc < 0:
+            raise ValueError(f"Moisture increase must be >0, {moisture_inc} passed in")
+
+        cell.water_drop_as_moisture_bump(moisture_inc)
+        
 
     # Functions for fireline construction
 
