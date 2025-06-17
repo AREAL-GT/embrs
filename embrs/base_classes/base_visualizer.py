@@ -58,6 +58,9 @@ class BaseVisualizer:
         self.show_wind_cbar = params.show_wind_cbar
         self.show_wind_field = params.show_wind_field
 
+        self.retardant_art = None
+        self.water_drop_art = None
+
         self.show_compass = params.show_compass
 
         init_entries = params.init_entries
@@ -340,11 +343,9 @@ class BaseVisualizer:
                                               radius=self.cell_size, orientation=0)
             
             if entry.state == CellStates.FUEL:
-                if entry.retardant:
-                    color = 'grey'
-                else:
-                    # TODO: add scaling of rbga color for fuel content
-                    color = fc.fuel_color_mapping[entry.fuel]
+
+                # TODO: add scaling of rbga color for fuel content
+                color = fc.fuel_color_mapping[entry.fuel]
                 
                 polygon.set(color=color)
                 tree_patches.append(polygon)
@@ -359,13 +360,10 @@ class BaseVisualizer:
             else:
                 burnt_patches.append(polygon)
 
-
-        # TODO: handle soak_xs and ys for when suppressant has been dropped in a cell
-
         fuel_coll = PatchCollection(tree_patches, match_original=True)
 
         if fire_patches:
-            fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
+            fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306', zorder=3)
 
             if len(alpha_arr) > 1 and max(alpha_arr) > min(alpha_arr):
                 norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
@@ -376,9 +374,9 @@ class BaseVisualizer:
                 # TODO: figure out why this is getting called
                 fire_coll.set_facecolor('#F97306')  # Default color if no variation in alpha
 
-        crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta')
+        crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta', zorder=3)
 
-        burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
+        burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k', zorder=3)
 
         self.h_ax.add_collection(fuel_coll)
         self.h_ax.add_collection(fire_coll)
@@ -413,12 +411,35 @@ class BaseVisualizer:
                     label = self.h_ax.annotate(agent_entry.label, (agent_entry.x, agent_entry.y))
                     self.agent_labels.append(label)
 
+        if self.retardant_art is not None:
+            self.retardant_art.remove()
+            self.retardant_art = None
+
+        if self.water_drop_art is not None:
+            self.water_drop_art.remove()
+            self.water_drop_art = None
+        
         if actions:
             for action in actions:
                 if action.action_type == 'fireline_construction':
                     if action.x_coords is not None and action.y_coords is not None and action.width is not None:
-                        x, y = action.x_coords, action.y_coords
-                        self.h_ax.plot(x, y, color='blue', linewidth=self.meters_to_points(action.width))
+                        self.h_ax.plot(action.x_coords, action.y_coords, color='blue', linewidth=self.meters_to_points(action.width))
+
+                elif action.action_type == 'long_term_retardant':
+                    if action.x_coords is not None and action.y_coords is not None and action.effectiveness is not None:
+                        self.retardant_art = self.h_ax.scatter(
+                            action.x_coords, action.y_coords,
+                            marker='h', s=self.meters_to_points(6*self.cell_size),
+                            c= action.effectiveness, cmap='Reds_r', vmin=0, vmax=1, zorder=1
+                        )
+
+                elif action.action_type == 'short_term_suppressant':
+                    if action.x_coords is not None and action.y_coords is not None and action.effectiveness is not None:
+                        self.water_drop_art = self.h_ax.scatter(
+                            action.x_coords, action.y_coords,
+                            marker='h', s=self.meters_to_points(6*self.cell_size),
+                            c=action.effectiveness, cmap='Blues', vmin=0.5, vmax=1, zorder=1
+                        )
 
         if self.render:
             self.fig.canvas.blit(self.h_ax.bbox)

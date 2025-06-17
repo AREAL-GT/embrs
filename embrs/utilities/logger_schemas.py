@@ -43,9 +43,10 @@ class ActionsEntry:
     action_type: Literal['long_term_retardant', 'short_term_suppressant', 'active_fireline']
     x_coords: list[float] = None
     y_coords: list[float] = None
-    x: float = None
-    y: float = None
+
+    # Parameters speicific to action types
     width: float = None
+    effectiveness: list[float] = None
 
     def to_dict(self):
         return asdict(self)

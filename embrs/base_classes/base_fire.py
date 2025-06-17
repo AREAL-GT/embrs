@@ -100,6 +100,7 @@ class BaseFireSim:
         self._cell_dict = {}
         self._soaked = []
         self._long_term_retardants = set()
+        self._active_water_drops = []
         self._burning_cells = []
         self._new_ignitions = []
         self._burnt_cells = set()
@@ -726,7 +727,18 @@ class BaseFireSim:
 
         if self._active_firelines:
             self._update_active_firelines()
+
+        if self._active_water_drops:
+            self._update_active_water_drops()
     
+    def _update_active_water_drops(self):
+        for cell in self._active_water_drops.copy():
+            cell._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+            dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
+
+            if dead_mf < cell.fuel.dead_mx * 0.5:
+                self._active_water_drops.remove(cell)
+
     def update_long_term_retardants(self):
         for cell in self._long_term_retardants.copy():
             if cell.retardant_expiration_s <= self._curr_time_s:
@@ -1314,10 +1326,10 @@ class BaseFireSim:
         # Ensure that effectiveness is between 0 and 1
         effectiveness = min(max(effectiveness, 0), 1)
 
-        cell.add_retardant(duration_hr, effectiveness)
-        self._long_term_retardants.add(cell)
-
-        self._updated_cells[cell.id] = cell
+        if cell.fuel.burnable:
+            cell.add_retardant(duration_hr, effectiveness)
+            self._long_term_retardants.add(cell)
+            self._updated_cells[cell.id] = cell
 
     # Short-term supression functions
     def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
@@ -1334,7 +1346,10 @@ class BaseFireSim:
         if water_depth_cm < 0:
             raise ValueError(f"Water depth must be >=0, {water_depth_cm} passed in")
 
-        cell.water_drop_as_rain(water_depth_cm)
+        if cell.fuel.burnable:
+            cell.water_drop_as_rain(water_depth_cm)
+            self._active_water_drops.append(cell)
+            self._updated_cells[cell.id] = cell
 
     def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float):
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -1346,12 +1361,13 @@ class BaseFireSim:
         self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
     def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float):
-
         if moisture_inc < 0:
             raise ValueError(f"Moisture increase must be >0, {moisture_inc} passed in")
 
-        cell.water_drop_as_moisture_bump(moisture_inc)
-        
+        if cell.fuel.burnable:
+            cell.water_drop_as_moisture_bump(moisture_inc)
+            self._active_water_drops.append(cell)
+            self._updated_cells[cell.id] = cell
 
     # Functions for fireline construction
     def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None):
@@ -1475,13 +1491,21 @@ class BaseFireSim:
     def get_action_entries(self, logger: bool = False):
         entries = []
         if self._long_term_retardants:
+            lt_xs = []
+            lt_ys = []
+            e_vals = []
             for cell in self._long_term_retardants:
-                entries.append(ActionsEntry(
-                    timestamp=self.curr_time_s,
-                    action_type="long_term_retardant",
-                    x=cell.x_pos,
-                    y=cell.y_pos
-                ))
+                lt_xs.append(cell.x_pos)
+                lt_ys.append(cell.y_pos)
+                e_vals.append(cell._retardant_factor)
+
+            entries.append(ActionsEntry(
+                timestamp=self.curr_time_s,
+                action_type="long_term_retardant",
+                x_coords= lt_xs,
+                y_coords= lt_ys,
+                effectiveness= e_vals
+            ))
 
         if self._active_firelines:
             for fireline in self._active_firelines:
@@ -1492,6 +1516,27 @@ class BaseFireSim:
                     y_coords= [coord[1] for coord in fireline["partial_line"].coords],
                     width=fireline["width"]
                 ))
+
+        if self._active_water_drops:
+            w_xs = []
+            w_ys = []
+            e_vals = []
+            for cell in self._active_water_drops.copy():
+                dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
+                frac = dead_mf/cell.fuel.dead_mx
+                
+                if frac > 0.5:
+                    w_xs.append(cell.x_pos)
+                    w_ys.append(cell.y_pos)
+                    e_vals.append(dead_mf/cell.fuel.dead_mx)
+            
+            entries.append(ActionsEntry(
+                timestamp=self.curr_time_s,
+                action_type="short_term_suppressant",
+                x_coords=w_xs,
+                y_coords=w_ys,
+                effectiveness=e_vals
+            ))
 
         if self._new_fire_break_cache:
             to_remove = []
