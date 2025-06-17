@@ -115,9 +115,11 @@ class PlaybackVisualizerParams:
     video_name: str
     has_agents: bool
     has_actions: bool
+    has_predictions: bool
     video_fps: Optional[int] = 10 
     agent_file: Optional[str] = None
     action_file: Optional[str] = None
+    prediction_file: Optional[str] = None
     
     # Visualization Preferences
     freq: Optional[float] = 300

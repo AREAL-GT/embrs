@@ -1,5 +1,6 @@
 from dataclasses import dataclass, asdict
 from typing import Literal, Union, Tuple
+import json
 
 @dataclass
 class CellLogEntry:
@@ -50,3 +51,17 @@ class ActionsEntry:
 
     def to_dict(self):
         return asdict(self)
+    
+@dataclass
+class PredictionEntry:
+    timestamp: int
+    prediction: dict  # dict[int, Tuple[int, int]]
+
+    def to_dict(self):
+        # Convert keys to strings and values to lists for JSON serialization
+        serializable_pred = {str(k): list(v) for k, v in self.prediction.items()}
+        return {
+            "timestamp": self.timestamp,
+            "prediction": json.dumps(serializable_pred)
+        }
+

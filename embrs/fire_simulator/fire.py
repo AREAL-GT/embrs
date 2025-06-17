@@ -194,12 +194,14 @@ class FireSim(BaseFireSim):
         self._iters += 1
 
     def _log_changes(self):
-        # TODO: add a mechanism for treated cells to be added to updates
-
         self.logger.cache_cell_updates(self._get_cell_updates())
 
         if self.agents_added:
             self.logger.cache_agent_updates(self._get_agent_updates())
+
+        if self.curr_prediction is not None:
+            self.logger.cache_prediction(self.get_prediction_entry())
+            self.curr_prediction = None
 
         self.logger.cache_action_updates(self.get_action_entries(logger=True))
 
@@ -356,6 +358,8 @@ class FireSim(BaseFireSim):
         """
         if self._visualizer is not None:
             self._visualizer.visualize_prediction(prediction_grid)
+
+        self.curr_prediction = prediction_grid
 
     @property
     def updated_cells(self) -> dict:

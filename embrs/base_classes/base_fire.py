@@ -18,7 +18,7 @@ from embrs.models.embers import Embers
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
 from embrs.utilities.data_classes import SimParams, CellData
-from embrs.utilities.logger_schemas import ActionsEntry
+from embrs.utilities.logger_schemas import ActionsEntry, PredictionEntry
 from embrs.fire_simulator.cell import Cell
 from embrs.models.crown_model import crown_fire
 from embrs.models.rothermel import *
@@ -92,6 +92,8 @@ class BaseFireSim:
 
         # Variable to store logger object
         self.logger = None
+
+        self.curr_prediction = None
 
         # Containers for keeping track of updates to cells 
         self._updated_cells = {}
@@ -1561,6 +1563,9 @@ class BaseFireSim:
                 self._new_fire_break_cache.remove(entry)
 
         return entries
+    
+    def get_prediction_entry(self):
+        return PredictionEntry(self._curr_time_s, self.curr_prediction)
 
     def is_firesim(self) -> bool:
         return self.__class__.__name__ == "FireSim"

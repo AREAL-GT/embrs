@@ -982,6 +982,12 @@ class VizFolderSelector(FileSelectBase):
         else:
             self.has_actions = False
 
+        if os.path.exists(os.path.join(run_folderpath, 'prediction_logs.parquet')):
+            self.has_predictions = True
+            self.prediction_file = os.path.join(run_folderpath, 'prediction_logs.parquet')
+        else:  
+            self.has_predictions = False
+
         if os.path.exists(os.path.join(run_folderpath, 'cell_logs.parquet')):
             self.viz_file = os.path.join(run_folderpath, 'cell_logs.parquet')
 
@@ -1061,9 +1067,6 @@ class VizFolderSelector(FileSelectBase):
             if not video_filename.lower().endswith(".mp4"):
                 video_filename += ".mp4"
 
-        
-
-
             video_path = os.path.join(self.video_folder.get(), video_filename)
 
             if os.path.exists(video_path):
@@ -1087,6 +1090,7 @@ class VizFolderSelector(FileSelectBase):
             video_name=video_filename,
             has_agents=self.has_agents,
             has_actions=self.has_actions,
+            has_predictions=self.has_predictions,
             video_fps=self.video_fps.get(),
             freq=self.viz_freq.get(),
             scale_km=self.scale_km.get(),
@@ -1102,6 +1106,9 @@ class VizFolderSelector(FileSelectBase):
 
         if self.has_actions:
             self.result.action_file = self.action_file
+
+        if self.has_predictions:
+            self.result.prediction_file = self.prediction_file
 
         self.submit_callback(self.result)
 

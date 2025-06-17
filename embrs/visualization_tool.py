@@ -1,7 +1,7 @@
 
 from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInputs
-from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry, PredictionEntry
 from embrs.utilities.file_io import VizFolderSelector
 
 import matplotlib.animation as animation
@@ -18,8 +18,6 @@ from datetime import datetime
 import numpy as np
 
 
-# TODO: Need to add support for actions in playback visualizer
-
 class PlaybackVisualizer(BaseVisualizer):
     def __init__(self, params: PlaybackVisualizerParams):
 
@@ -34,13 +32,16 @@ class PlaybackVisualizer(BaseVisualizer):
         init_location = params.init_location
         self.has_agents = params.has_agents
         self.has_actions = params.has_actions
-
+        self.has_predictions = params.has_predictions
 
         if self.has_agents:
             self.agent_file = params.agent_file
 
         if self.has_actions:
             self.action_file = params.action_file
+
+        if self.has_predictions:
+            self.prediction_file = params.prediction_file
 
         self.save_video = params.save_video
         
@@ -170,6 +171,20 @@ class PlaybackVisualizer(BaseVisualizer):
             df = pd.read_parquet(self.action_file)
             filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
             actions = [ActionsEntry(**row.to_dict()) for _, row in filtered.iterrows()]
+
+        if self.has_predictions:
+            df = pd.read_parquet(self.prediction_file)
+
+            # Convert back from string to original dict[int, Tuple[int, int]]
+            df["prediction"] = df["prediction"].apply(
+                lambda s: {int(k): tuple(v) for k, v in json.loads(s).items()})
+
+            filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
+            predictions = [PredictionEntry(**row.to_dict()) for _, row in filtered.iterrows()]
+
+            if predictions:
+                output = predictions[-1].prediction
+                self.visualize_prediction(output)
 
         return entries, agents, actions
 
