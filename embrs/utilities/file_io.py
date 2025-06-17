@@ -976,6 +976,12 @@ class VizFolderSelector(FileSelectBase):
         else:
             self.has_agents = False
 
+        if os.path.exists(os.path.join(run_folderpath, 'action_logs.parquet')):
+            self.has_actions = True
+            self.action_file = os.path.join(run_folderpath, 'action_logs.parquet')
+        else:
+            self.has_actions = False
+
         if os.path.exists(os.path.join(run_folderpath, 'cell_logs.parquet')):
             self.viz_file = os.path.join(run_folderpath, 'cell_logs.parquet')
 
@@ -1080,6 +1086,7 @@ class VizFolderSelector(FileSelectBase):
             video_folder=self.video_folder.get(),
             video_name=video_filename,
             has_agents=self.has_agents,
+            has_actions=self.has_actions,
             video_fps=self.video_fps.get(),
             freq=self.viz_freq.get(),
             scale_km=self.scale_km.get(),
@@ -1092,6 +1099,9 @@ class VizFolderSelector(FileSelectBase):
 
         if self.has_agents:
             self.result.agent_file = self.agent_file
+
+        if self.has_actions:
+            self.result.action_file = self.action_file
 
         self.submit_callback(self.result)
 

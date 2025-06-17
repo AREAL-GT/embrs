@@ -1,7 +1,7 @@
 
 from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInputs
-from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
 from embrs.utilities.file_io import VizFolderSelector
 
 import matplotlib.animation as animation
@@ -33,9 +33,14 @@ class PlaybackVisualizer(BaseVisualizer):
         self.show_legend = params.show_legend
         init_location = params.init_location
         self.has_agents = params.has_agents
+        self.has_actions = params.has_actions
+
 
         if self.has_agents:
             self.agent_file = params.agent_file
+
+        if self.has_actions:
+            self.action_file = params.action_file
 
         self.save_video = params.save_video
         
@@ -54,7 +59,7 @@ class PlaybackVisualizer(BaseVisualizer):
             init_path = f"{log_folder}/init_state.parquet"
         else:
             init_path = f"{os.path.dirname(log_folder)}/init_state.parquet"
-
+        
         input_params = self.get_input_params(init_path)
 
         super().__init__(input_params, render=self.show_viz)
@@ -122,7 +127,7 @@ class PlaybackVisualizer(BaseVisualizer):
         
         pbar = tqdm(total=total_steps, desc="Playback Progress:", unit="step")
         while not done:
-            entries, agents = self.get_entries_between(t, t+self.update_freq_s)
+            entries, agents, actions = self.get_entries_between(t, t+self.update_freq_s)
 
             if len(entries) == 0:
                 done = True
@@ -130,7 +135,7 @@ class PlaybackVisualizer(BaseVisualizer):
             
             t+=self.update_freq_s
 
-            self.update_grid(t, entries, agents)     
+            self.update_grid(t, entries, agents, actions)     
 
             if writer:
                 writer.grab_frame()
@@ -144,6 +149,7 @@ class PlaybackVisualizer(BaseVisualizer):
 
     def get_entries_between(self, start_time: float, end_time: float):
         agents = []
+        actions = []
 
         df = pd.read_parquet(self.log_file)
 
@@ -160,7 +166,12 @@ class PlaybackVisualizer(BaseVisualizer):
             filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
             agents = [AgentLogEntry(**row.to_dict()) for _, row in filtered.iterrows()]
         
-        return entries, agents
+        if self.has_actions:
+            df = pd.read_parquet(self.action_file)
+            filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
+            actions = [ActionsEntry(**row.to_dict()) for _, row in filtered.iterrows()]
+
+        return entries, agents, actions
 
 def run(params: PlaybackVisualizerParams):
     viz = PlaybackVisualizer(params)
