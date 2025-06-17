@@ -480,11 +480,8 @@ class BaseFireSim:
         crown_fire(cell, self.fmc)
 
         if cell._crown_status != CrownStatus.ACTIVE:
-            # TODO: can we make this "surface_fire()" and set cell values in the function to make everything a bit clearer
             # Update values for cells that are not active crown fires
-            r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-            cell.r_ss = r_list
-            cell.I_ss = I_list
+            surface_fire(cell)
 
         cell.has_steady_state = True
 
@@ -585,8 +582,9 @@ class BaseFireSim:
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
                             neighbor._crown_status = CrownStatus.ACTIVE
 
-                        neighbor.r_prev_list, _ = calc_propagation_in_cell(neighbor, r_ign) # r in m/s, I in BTU/ft/min
-                        
+                        surface_fire(neighbor, r_ign)
+                        neighbor.r_prev_list = neighbor.r_ss.copy()
+
                         self._updated_cells[neighbor.id] = neighbor
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:

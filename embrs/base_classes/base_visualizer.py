@@ -368,13 +368,14 @@ class BaseVisualizer:
             else:
                 # TODO: figure out why this is getting called
                 fire_coll.set_facecolor('#F97306')  # Default color if no variation in alpha
+            
+            self.h_ax.add_collection(fire_coll)
 
         crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta', zorder=3)
 
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k', zorder=3)
 
         self.h_ax.add_collection(fuel_coll)
-        self.h_ax.add_collection(fire_coll)
         self.h_ax.add_collection(burnt_coll)
         self.h_ax.add_collection(crown_coll)
 

@@ -117,14 +117,13 @@ class FirePredictor(BaseFireSim):
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-                cell.r_ss = r_list
-                cell.I_ss = I_list
+                surface_fire(cell)
+                crown_fire(cell, self.fmc)
                 cell.has_steady_state = True
 
                 # Don't model fire acceleration in prediction model
-                cell.r_t = r_list
-                cell.I_t = I_list
+                cell.r_t = cell.r_ss
+                cell.I_t = cell.I_ss
 
                 self._updated_cells[cell.id] = cell
 
@@ -132,11 +131,7 @@ class FirePredictor(BaseFireSim):
         else:
             for cell, loc in self._new_ignitions:
                 self._set_prediction_forecast(cell)
-                r_list, I_list = calc_propagation_in_cell(cell) # r in m/s, I in BTU/ft/min
-
-                cell.r_ss = r_list
-                cell.I_ss = I_list
-
+                surface_fire(cell)
                 crown_fire(cell, self.fmc)
 
                 if cell._break_width > 0:
