@@ -64,4 +64,3 @@ class PredictionEntry:
             "timestamp": self.timestamp,
             "prediction": json.dumps(serializable_pred)
         }
-

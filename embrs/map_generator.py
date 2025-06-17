@@ -148,7 +148,7 @@ def trim_roads(map: MapParams, raster_roads: List) -> List:
         x_display = np.array(x_trimmed) / 30
         y_display = np.array(y_trimmed) / 30
 
-        plt.plot(x_display, y_display, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25) # TODO: play with road width scaling
+        plt.plot(x_display, y_display, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25)
 
     return trimmed_roads
 
@@ -507,7 +507,6 @@ def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Dict[str,
             
     print(f"Fetched {len(roads)} roads from OSM.")
     return roads
-    
 
 def resample_raster(array, crs, transform, target_resolution, method):
     """TODO: insert docstring

@@ -1077,7 +1077,6 @@ class VizFolderSelector(FileSelectBase):
                 if not result:
                     return  # Cancel and return to GUI without submitting
 
-
         else:
             self.render_visualization.set(True)
             video_filename = ""

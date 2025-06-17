@@ -128,9 +128,6 @@ class FuelConstants:
     """
     burnout_thresh = 0.01 # TODO: this is not the place for this to be defined
 
-
-    # TODO: add ScottBurgan to these dictionaries
-
     # Dictionary of fuel number to name
     fuel_names = {1: "Short grass", 2: "Timber grass", 3: "Tall grass", 4: "Chaparral",
                 5: "Brush", 6: "Hardwood slash", 7: "Southern rough", 8: "Closed timber litter",
@@ -161,7 +158,6 @@ class FuelConstants:
         "SB1": 201, "SB2": 202, "SB3": 203, "SB4": 204
     }
 
-
     # Color mapping for each fuel type
     fuel_color_mapping = {1: 'xkcd:pale green', 2:'xkcd:lime', 3: 'xkcd:bright green',
                         4: 'xkcd:teal', 5: 'xkcd:bluish green', 6: 'xkcd:greenish teal',
@@ -172,49 +168,49 @@ class FuelConstants:
                         99: 'xkcd:black', -100: 'xkcd:red', 
                         101: "#ffebbe",             # GR1
                         102: "#ffd273",             # GR2
-                        103: "#ffeb8b",            # GR3
-                        104: "#ffff73",                  # GR4
-                        105: "#f4dd28",                   # GR5
-                        106: "#e6e640",            # GR6
-                        107: "#ccc573",                   # GR7
-                        108: "#8b854d",        # GR8
-                        109: "xkcd:drab green",              # GR9
+                        103: "#ffeb8b",             # GR3
+                        104: "#ffff73",             # GR4
+                        105: "#f4dd28",             # GR5
+                        106: "#e6e640",             # GR6
+                        107: "#ccc573",             # GR7
+                        108: "#8b854d",             # GR8
+                        109: "xkcd:drab green",     # GR9
 
-                        121: "#ffaa00",                  # GS1
-                        122: "#ffa67e",               # GS2
-                        123: "#ff6300",                    # GS3
-                        124: "#cc6600",                  # GS4
+                        121: "#ffaa00",             # GS1
+                        122: "#ffa67e",             # GS2
+                        123: "#ff6300",             # GS3
+                        124: "#cc6600",             # GS4
 
                         141: "#d7c19d",             # SH1
                         142: "#d7af9d",             # SH2
-                        143: "#cc8966",          # SH3
-                        144: "#895a44",                   # SH4
-                        145: "#ccaa66",                     # SH5
-                        146: "#ed7044",            # SH6
-                        147: "#cc7c39",                # SH7
-                        148: "#a83700",               # SH8
-                        149: "#731a00",              # SH9
+                        143: "#cc8966",             # SH3
+                        144: "#895a44",             # SH4
+                        145: "#ccaa66",             # SH5
+                        146: "#ed7044",             # SH6
+                        147: "#cc7c39",             # SH7
+                        148: "#a83700",             # SH8
+                        149: "#731a00",             # SH9
 
-                        161: "#e8ffbe",              # TU1
-                        162: "#aaff00",                    # TU2
+                        161: "#e8ffbe",             # TU1
+                        162: "#aaff00",             # TU2
                         163: "#b3d79d",             # TU3
-                        164: "#70a800",            # TU4
-                        165: "#257300",              # TU5
+                        164: "#70a800",             # TU4
+                        165: "#257300",             # TU5
 
                         181: "#beffe8",             # TL1
-                        182: "#00ffc5",                    # TL2
-                        183: "#bed2ff",          # TL3
-                        184: "#7a68ed",    # TL4
-                        185: "#bee8ff",              # TL5
+                        182: "#00ffc5",             # TL2
+                        183: "#bed2ff",             # TL3
+                        184: "#7a68ed",             # TL4
+                        185: "#bee8ff",             # TL5
                         186: "#00c5ff",             # TL6
-                        187: "#0084a8",              # TL7
-                        188: "#005be6",                    # TL8
-                        189: "#4d6e90",              # TL9
+                        187: "#0084a8",             # TL7
+                        188: "#005be6",             # TL8
+                        189: "#4d6e90",             # TL9
 
-                        201: "#e8beff",              # SB1
-                        202: "#c500ff",                # SB2
-                        203: "#ffbee8",                 # SB3
-                        204: "#ff7e7e",            # SB4
+                        201: "#e8beff",             # SB1
+                        202: "#c500ff",             # SB2
+                        203: "#ffbee8",             # SB3
+                        204: "#ff7e7e",             # SB4
                     }
 
 class RoadConstants:

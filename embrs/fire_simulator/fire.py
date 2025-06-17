@@ -321,7 +321,6 @@ class FireSim(BaseFireSim):
             cell.burn_idx = -1
 
         else:
-            # TODO: If a fire intesects a cell in this state we need to set fuel load to this value for burn
             cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
             
         # Add cell to update dictionary

@@ -7,12 +7,10 @@ from typing import Callable, Tuple
 
 import numpy as np
 
-# TODO: this should probably be moved to fire_simulator
-
 class Embers:
     def __init__(self, ign_prob: float, species: int, dbh: float, min_spot_dist: float, limits: Tuple[float, float], get_cell_from_xy: Callable[[float, float], Cell]):
         
-        # Call back injection # TODO: make sure this works correctly
+        # Call back injection
         self.get_cell_from_xy = get_cell_from_xy
 
         self.x_lim, self.y_lim = limits
@@ -113,10 +111,6 @@ class Embers:
     def calc_front_dist(self, cell: Cell):
         # Calculate the length of the fire front
         # approximated as the length of the cell's edges that are adjacent to burnable neighbors
-
-        # TODO: We may need to make this more sophisticated, check the direction of the fire spread and only count
-        # edges that are in the direction of the fire spread
-
         a = cell.cell_size
         num_neighbors = len(cell.burnable_neighbors)
 
@@ -169,8 +163,6 @@ class Embers:
         return u
 
     def flight(self, end_curr_time_step: float):
-        # TODO: when debugging this, watch carefully how time is being handled
-
         spots = set()
 
         sstep = 0.25 # minutes
@@ -372,7 +364,7 @@ class Embers:
 
                         if dist > self.min_spot_dist_m:
                             
-                            if curr_cell.state == CellStates.FUEL: # TODO make sure if moisture in cell > extinction that fire does not spread ( i think rothermel handles this for us automatically)
+                            if curr_cell.state == CellStates.FUEL:
                                 spots.add((curr_cell, 0)) # Add to a set that will handle igniting spot fires
                                 curr_cell.directions, curr_cell.distances, curr_cell.end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
                                 curr_cell._set_state(CellStates.FIRE)

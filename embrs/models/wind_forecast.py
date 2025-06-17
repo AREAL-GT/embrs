@@ -96,7 +96,7 @@ def run_windninja_single(task: WindNinjaTask):
         log_file = os.path.join(output_path, "windninja_log.txt")
 
         with open(log_file, "w") as file:
-            subprocess.run(command, check=True, stdout=file, stderr=file) # TODO: is the HTTP 500 error ok?
+            subprocess.run(command, check=True, stdout=file, stderr=file)
         
         rename_windninja_outputs(output_path, task.index)
 

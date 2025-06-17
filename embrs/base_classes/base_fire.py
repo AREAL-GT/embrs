@@ -26,7 +26,7 @@ from embrs.models.fuel_models import Anderson13, ScottBurgan40
 from embrs.base_classes.agent_base import AgentBase
 from embrs.models.weather import WeatherStream
 from embrs.models.burnup import Burnup
-from embrs.models.wind_forecast import run_windninja, create_uniform_wind # TODO: Should wind_forecast beceom a class? Should it be a member of WeatherStream?
+from embrs.models.wind_forecast import run_windninja, create_uniform_wind
 from embrs.models.perryman_spot import PerrymanSpotting
 
 
@@ -207,7 +207,7 @@ class BaseFireSim:
                     if not prediction and duff_lookup.get(fccs_id) is not None:
                         cell_data.wdf = duff_lookup[fccs_id] # tons/acre
                     else:
-                        # TODO: Figure out why this is sometimes getting called
+                        # Default to 0 duff loading
                         cell_data.wdf = 0
 
                     # Get data for cell
@@ -567,7 +567,7 @@ class BaseFireSim:
                 # Check that neighbor state is burnable
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
-                    if self.is_firesim(): # TODO: better way to handle with wanting to update moisture, but wind only populated for cells that are ignited for prediction model?
+                    if self.is_firesim():
                         neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
@@ -772,7 +772,6 @@ class BaseFireSim:
         wind_speed = curr_weather.wind_speed
 
         if self._uniform_map:
-            # TODO: should uniform maps use temperature too?
             t_ambF = 75
         else:
             t_ambF = curr_weather.temp

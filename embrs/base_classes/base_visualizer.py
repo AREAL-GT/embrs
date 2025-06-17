@@ -306,11 +306,6 @@ class BaseVisualizer:
             # Determine number of samples in each dimension based on desired spacing
             n_rows, n_cols = curr_forecast.shape[:2]
 
-            # TODO: Decide if we would like to downsample the wind grid or make it user configurable
-            # desired_spacing = self.width_m / 6
-            # desired_num_rows = max(int(np.round(n_rows * self.wind_res / desired_spacing)), 2)
-            # desired_num_cols = max(int(np.round(n_cols * self.wind_res / desired_spacing)), 2)
-
             row_indices = np.linspace(0, n_rows - 1, n_rows, dtype=int)
             col_indices = np.linspace(0, n_cols - 1, n_cols, dtype=int)
 

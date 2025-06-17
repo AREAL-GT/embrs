@@ -336,11 +336,11 @@ class WeatherStream:
         weather_data["wind_speed"] = data["weather_entries"]["wind_speed"]
         weather_data["wind_direction"] = data["weather_entries"]["wind_direction"]
 
-        # TODO: Can make these an input
+        # Set live moisture values
         self.live_h_mf = 1.4
         self.live_w_mf = 1.25
 
-        # Set Foliar moisture content to 100 # TODO: can make this an input
+        # Set Foliar moisture content to 100
         self.fmc = 100
 
         # Generate stream with final data
