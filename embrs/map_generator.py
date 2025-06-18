@@ -23,7 +23,7 @@ import numpy as np
 from embrs.utilities.file_io import MapGenFileSelector
 from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
 from embrs.utilities.fire_util import RoadConstants as rc
-from embrs.utilities.fire_util import FuelConstants as fc
+from embrs.models.fuel_models import FuelConstants as fc
 from embrs.utilities.data_classes import MapParams, MapDrawerData, GeoInfo, LandscapeData
 
 def generate_map_from_file(map_params: MapParams):

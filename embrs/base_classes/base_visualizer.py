@@ -1,7 +1,8 @@
 
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
 from embrs.utilities.data_classes import VisualizerInputs
-from embrs.utilities.fire_util import RoadConstants as rc, CellStates, FuelConstants as fc, CrownStatus
+from embrs.utilities.fire_util import RoadConstants as rc, CellStates, CrownStatus
+from embrs.models.fuel_models import FuelConstants as fc
 from embrs.utilities.fire_util import UtilFuncs as util
 
 
@@ -20,9 +21,8 @@ from shapely.geometry import LineString
 from datetime import timedelta
 import copy
 
-# TODO: Improve crown visualization? 
 # TODO: Implement and improve fully burning visualization?
-# TODO: Worth adding temperature and other weather conditions?
+# TODOtoday: Worth adding temperature and other weather conditions?
 
 class BaseVisualizer:
     def __init__(self, params: VisualizerInputs, render=True):
@@ -339,7 +339,7 @@ class BaseVisualizer:
             
             if entry.state == CellStates.FUEL:
 
-                # TODO: add scaling of rbga color for fuel content
+                # TODOtoday: add scaling of rbga color for fuel content
                 color = fc.fuel_color_mapping[entry.fuel]
                 
                 polygon.set(color=color)

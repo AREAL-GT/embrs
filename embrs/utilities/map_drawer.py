@@ -1,7 +1,7 @@
 """Module that handles user drawing on top of sim map when specifying map parameters.
 """
 
-from embrs.utilities.fire_util import FuelConstants as fc
+from embrs.models.fuel_models import FuelConstants as fc
 
 from typing import Tuple
 import rasterio

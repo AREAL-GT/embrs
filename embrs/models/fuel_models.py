@@ -289,3 +289,95 @@ class ScottBurgan40(Fuel):
         alpha = (curing - lower) / (upper - lower)
 
         return (1 - alpha) * f_lower + alpha * f_upper
+
+class FuelConstants:
+    """_summary_
+    """
+    burnout_thresh = 0.01
+
+    # Dictionary of fuel number to name
+    fuel_names = {1: "Short grass", 2: "Timber grass", 3: "Tall grass", 4: "Chaparral",
+                5: "Brush", 6: "Hardwood slash", 7: "Southern rough", 8: "Closed timber litter",
+                9: "Hardwood litter", 10: "Timber litter", 11: "Light logging slash",
+                12: "Medium logging slash", 13: "Heavy logging slash", 91: 'Urban', 92: 'Snow/ice',
+                93: 'Agriculture', 98: 'Water', 99: 'Barren',  101: "GR1", 102: "GR2", 103: "GR3",
+                104: "GR4", 105: "GR5", 106: "GR6", 107: "GR7", 108: "GR8", 109: "GR9", 121: "GS1",
+                122: "GS2", 123: "GS3", 124: "GS4", 141: "SH1", 142: "SH2", 143: "SH3", 144: "SH4",
+                145: "SH5", 146: "SH6", 147: "SH7", 148: "SH8", 149: "SH9", 161: "TU1", 162: "TU2",
+                163: "TU3", 164: "TU4", 165: "TU5", 181: "TL1", 182: "TL2", 183: "TL3", 184: "TL4", 
+                185: "TL5", 186: "TL6", 187: "TL7", 188: "TL8", 189: "TL9", 201: "SB1", 202: "SB2",
+                203: "SB3", 204: "SB4"
+    }
+
+    fuel_type_reverse_lookup = {
+                "Short grass": 1, "Timber grass": 2, "Tall grass": 3, "Chaparral": 4,
+                "Brush": 5, "Hardwood slash": 6, "Southern rough": 7, "Closed timber litter": 8,
+                "Hardwood litter": 9, "Timber litter": 10, "Light logging slash": 11,
+                "Medium logging slash": 12, "Heavy logging slash": 13, "Urban": 91,
+                "Snow/ice": 92, "Agriculture": 93, "Water": 98, "Barren": 99,
+                "GR1": 101, "GR2": 102, "GR3": 103, "GR4": 104, "GR5": 105,
+                "GR6": 106, "GR7": 107, "GR8": 108, "GR9": 109,
+                "GS1": 121, "GS2": 122, "GS3": 123, "GS4": 124,
+                "SH1": 141, "SH2": 142, "SH3": 143, "SH4": 144, "SH5": 145,
+                "SH6": 146, "SH7": 147, "SH8": 148, "SH9": 149,
+                "TU1": 161, "TU2": 162, "TU3": 163, "TU4": 164, "TU5": 165,
+                "TL1": 181, "TL2": 182, "TL3": 183, "TL4": 184, "TL5": 185,
+                "TL6": 186, "TL7": 187, "TL8": 188, "TL9": 189,
+                "SB1": 201, "SB2": 202, "SB3": 203, "SB4": 204
+    }
+
+    # Color mapping for each fuel type
+    fuel_color_mapping = {
+                1: 'xkcd:pale green', 2:'xkcd:lime', 3: 'xkcd:bright green',
+                4: 'xkcd:teal', 5: 'xkcd:bluish green', 6: 'xkcd:greenish teal',
+                7: 'xkcd:light blue green', 8: 'xkcd:pale olive' , 9: 'xkcd:olive',
+                10: 'xkcd:light forest green', 11: 'xkcd:bright olive',
+                12: 'xkcd:tree green', 13: 'xkcd:avocado green', 91: '#830089',
+                92: '#9ea1ef' , 93: "#e872ff", 98: '#0000ff',
+                99: 'xkcd:black', -100: 'xkcd:red', 
+                101: "#ffebbe",             # GR1
+                102: "#ffd273",             # GR2
+                103: "#ffeb8b",             # GR3
+                104: "#ffff73",             # GR4
+                105: "#f4dd28",             # GR5
+                106: "#e6e640",             # GR6
+                107: "#ccc573",             # GR7
+                108: "#8b854d",             # GR8
+                109: "xkcd:drab green",     # GR9
+
+                121: "#ffaa00",             # GS1
+                122: "#ffa67e",             # GS2
+                123: "#ff6300",             # GS3
+                124: "#cc6600",             # GS4
+
+                141: "#d7c19d",             # SH1
+                142: "#d7af9d",             # SH2
+                143: "#cc8966",             # SH3
+                144: "#895a44",             # SH4
+                145: "#ccaa66",             # SH5
+                146: "#ed7044",             # SH6
+                147: "#cc7c39",             # SH7
+                148: "#a83700",             # SH8
+                149: "#731a00",             # SH9
+
+                161: "#e8ffbe",             # TU1
+                162: "#aaff00",             # TU2
+                163: "#b3d79d",             # TU3
+                164: "#70a800",             # TU4
+                165: "#257300",             # TU5
+
+                181: "#beffe8",             # TL1
+                182: "#00ffc5",             # TL2
+                183: "#bed2ff",             # TL3
+                184: "#7a68ed",             # TL4
+                185: "#bee8ff",             # TL5
+                186: "#00c5ff",             # TL6
+                187: "#0084a8",             # TL7
+                188: "#005be6",             # TL8
+                189: "#4d6e90",             # TL9
+
+                201: "#e8beff",             # SB1
+                202: "#c500ff",             # SB2
+                203: "#ffbee8",             # SB3
+                204: "#ff7e7e",             # SB4
+    }

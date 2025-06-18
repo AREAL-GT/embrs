@@ -7,7 +7,7 @@ from embrs.utilities.data_classes import MapParams, GeoInfo, LandscapeData
 
 from matplotlib.colors import ListedColormap, BoundaryNorm
 
-from embrs.utilities.fire_util import FuelConstants as fc
+from embrs.models.fuel_models import FuelConstants as fc
 
 from embrs.map_generator import get_user_data, save_to_file
 

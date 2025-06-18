@@ -18,7 +18,8 @@ import sys
 import os
 
 from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, UniformMapParams, PlaybackVisualizerParams
-from embrs.utilities.fire_util import FuelConstants, CanopySpecies
+from embrs.utilities.fire_util import CanopySpecies
+from embrs.models.fuel_models import FuelConstants
 from embrs.base_classes.control_base import ControlClass
 
 class FileSelectBase:
