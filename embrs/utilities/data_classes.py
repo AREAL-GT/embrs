@@ -24,19 +24,16 @@ class GeoInfo:
     timezone: Optional[str] = None
     north_angle_deg: Optional[float] = None
 
-    def calc_center_coords(self):
+    def calc_center_coords(self, source_crs):
         if self.bounds is None:
             raise ValueError("Can't perform this function without bounds")
-
-        # Manually set the correct EPSG code for NAD83 / Conus Albers
-        epsg_code = "EPSG:5070" # TODO: this should probably not be hard-coded
 
         # Compute midpoint in projected coordinates
         mid_x = (self.bounds.left + self.bounds.right) / 2
         mid_y = (self.bounds.bottom + self.bounds.top) / 2
 
-        # Define the transformation from raster CRS (NAD83 / Conus Albers) to WGS84 (EPSG:4326)
-        transformer = Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True)
+        # Define the transformation from raster CRS to WGS84 (EPSG:4326)
+        transformer = Transformer.from_crs(source_crs, "EPSG:4326", always_xy=True)
 
         # Transform the midpoint from projected coordinates to lat/lon
         self.center_lon, self.center_lat = transformer.transform(mid_x, mid_y)
