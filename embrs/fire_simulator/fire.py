@@ -94,7 +94,7 @@ class FireSim(BaseFireSim):
 
         super().__init__(sim_params)
         
-        # Log frequency
+        # Log frequency (set to 1 hour by default)
         self._log_freq = int(np.floor(3600 / self._time_step))
 
         self._init_iteration()
@@ -188,7 +188,7 @@ class FireSim(BaseFireSim):
         if self.logger:
             self._log_changes()
 
-            if self._iters % self._log_freq == 0: # TODOtoday: adjust this or make it settable
+            if self._iters % self._log_freq == 0:
                 self.logger.flush()
 
         self._iters += 1
