@@ -7,7 +7,7 @@ Also contains various properties on the overall state of the fire.
     :members:
 """
 
-from typing import Tuple
+from typing import Tuple, Union, List
 from shapely.geometry import Point, Polygon, LineString
 import numpy as np
 from tqdm import tqdm
@@ -1001,65 +1001,18 @@ class BaseFireSim:
             - Appends new ignitions to `starting_ignitions` when applicable.
         """
 
+        all_cells = []
+
         for geom in geometries:
+            cells = self.get_cells_at_geometry(geom)
+            all_cells.extend(cells)
 
-            if isinstance(geom, Polygon):
-                minx, miny, maxx, maxy = geom.bounds
-                # Get row and col indices for bounding box
-                min_row = int(miny // (self.cell_size * 1.5))
-                max_row = int(maxy // (self.cell_size * 1.5))
-                min_col = int(minx // (self.cell_size * np.sqrt(3)))
-                max_col = int(maxx // (self.cell_size * np.sqrt(3)))
-                
-                for row in range(min_row - 1, max_row + 2):
-                    for col in range(min_col - 1, max_col + 2):
+        for cell in all_cells:
+            if state == CellStates.BURNT:
+                cell._set_state(state)
 
-                        # Check that row and col are in bounds
-                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-                            cell = self._cell_grid[row, col]
-
-                            # See if cell is within polygon
-                            if geom.intersection(cell.polygon).area > 1e-6:                                
-                                if state == CellStates.BURNT:
-                                    cell._set_state(state)
-                                
-                                elif state == CellStates.FIRE and cell._fuel.burnable:
-                                    self.starting_ignitions.add((cell, 0))
-            
-            elif isinstance(geom, LineString):
-                length = geom.length
-
-                step_size = 0.5
-                num_steps = int(length/step_size) + 1
-
-                for i in range(num_steps):
-                    point = geom.interpolate(i * step_size)
-
-                    cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
-
-                    if cell is not None:
-                        
-                        if state == CellStates.BURNT:
-                            cell._set_state(state)
-                        
-                        elif state == CellStates.FIRE and cell._fuel.burnable and (cell, 0) not in self.starting_ignitions:
-                            self.starting_ignitions.add((cell, 0))
-
-            elif isinstance(geom, Point):
-                x, y = geom.x, geom.y
-
-                cell = self.get_cell_from_xy(x, y, oob_ok=True)
-
-                if cell is not None:
-                    if state == CellStates.BURNT:
-                        cell._set_state(state)
-                    
-                    elif state == CellStates.FIRE and cell._fuel.burnable and (cell, 0) not in self.starting_ignitions:
-                        self.starting_ignitions.add((cell, 0))
-
-            else:
-                raise ValueError(f"Unknown geometry type: {type(geom)}")
-
+            elif state == CellStates.FIRE and cell._fuel.burnable:
+                self.starting_ignitions.add((cell, 0))
 
     @property
     def frontier(self) -> list:
@@ -1469,8 +1422,59 @@ class BaseFireSim:
 
         return LineString(new_coords)
 
-    # TODOtoday: Write function that gets cells along lineString or any shapely geometry
-        # TODO: This will be useful for users to use as a way to get cells to set states or interact with
+    def get_cells_at_geometry(self, geom: Union[Polygon, LineString, Point]) -> List[Cell]:
+        """Get all cells that intersect with the given geometry.
+
+        Args:
+            geometry (Union[Polygon, LineString, Point]): The geometry to check for cell intersections.
+
+        Returns:
+            List[Cell]: A list of Cell objects that intersect with the geometry.
+        """
+        cells = set()
+        if isinstance(geom, Polygon):
+                minx, miny, maxx, maxy = geom.bounds
+                # Get row and col indices for bounding box
+                min_row = int(miny // (self.cell_size * 1.5))
+                max_row = int(maxy // (self.cell_size * 1.5))
+                min_col = int(minx // (self.cell_size * np.sqrt(3)))
+                max_col = int(maxx // (self.cell_size * np.sqrt(3)))
+                
+                for row in range(min_row - 1, max_row + 2):
+                    for col in range(min_col - 1, max_col + 2):
+                        # Check that row and col are in bounds
+                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
+                            cell = self._cell_grid[row, col]
+
+                            # See if cell is within polygon
+                            if geom.intersection(cell.polygon).area > 1e-6:                                
+                                cells.add(cell)
+
+        elif isinstance(geom, LineString):
+                length = geom.length
+
+                step_size = 0.5
+                num_steps = int(length/step_size) + 1
+
+                for i in range(num_steps):
+                    point = geom.interpolate(i * step_size)
+                    cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
+
+                    if cell is not None:
+                        cells.add(cell)
+                        
+        elif isinstance(geom, Point):
+                x, y = geom.x, geom.y
+                cell = self.get_cell_from_xy(x, y, oob_ok=True)
+
+                if cell is not None:
+                    cells.add(cell)
+
+        else:
+            raise ValueError(f"Unknown geometry type: {type(geom)}")
+
+        return list(cells)
+
 
     def set_surface_accel_constant(self, cell: Cell):
         """Sets the surface acceleration constant for a cell based on the state of its neighbors.
