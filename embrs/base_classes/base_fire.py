@@ -566,6 +566,7 @@ class BaseFireSim:
                     # Make ignition calculation
                     if self.is_firesim():
                         neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 
@@ -583,9 +584,17 @@ class BaseFireSim:
                             neighbor._crown_status = CrownStatus.ACTIVE
 
                         surface_fire(neighbor, r_ign)
-                        neighbor.r_prev_list = neighbor.r_ss.copy()
 
+                        neighbor.r_prev_list = neighbor.r_ss.copy()
                         self._updated_cells[neighbor.id] = neighbor
+
+                        if neighbor.id in self._frontier:
+                            self._frontier.remove(neighbor.id)
+
+                    else:
+                        if neighbor.id not in self._frontier:
+                            self._frontier.add(neighbor.id)
+
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
         """Calculates the rate of spread (ROS) required for ignition between a burning cell 
@@ -1052,22 +1061,18 @@ class BaseFireSim:
                 raise ValueError(f"Unknown geometry type: {type(geom)}")
 
 
-    # TODO: need to re-implement this functionality
     @property
     def frontier(self) -> list:
-        """List of cells on the frontier of the fire.
-        
-        Cells that are in the :py:attr:`CellStates.FUEL` state and neighboring at least one 
-        cell in the :py:attr:`CellStates.FIRE` state. Excludes any cells surrounded completely by
-        :py:attr:`CellStates.FIRE`.
-        """
+        """_summary_
 
-        front = []
+        Returns:
+            list: _description_
+        """
         frontier_copy = set(self._frontier)
 
         for c in frontier_copy:
             remove = True
-            for neighbor_id, _ in c.neighbors:
+            for neighbor_id in self.cell_dict[c].burnable_neighbors:
                 neighbor = self.cell_dict[neighbor_id]
                 if neighbor.state == CellStates.FUEL:
                     remove = False
@@ -1075,10 +1080,8 @@ class BaseFireSim:
 
             if remove:
                 self._frontier.remove(c)
-            else:
-                front.append(c)
 
-        return front
+        return self._frontier
 
     def get_avg_fire_coord(self) -> Tuple[float, float]:
         """Get the average position of all the cells on fire.
@@ -1466,7 +1469,7 @@ class BaseFireSim:
 
         return LineString(new_coords)
 
-    # TODO: Write function that gets cells along lineString or any shapely geometry
+    # TODOtoday: Write function that gets cells along lineString or any shapely geometry
         # TODO: This will be useful for users to use as a way to get cells to set states or interact with
 
     def set_surface_accel_constant(self, cell: Cell):

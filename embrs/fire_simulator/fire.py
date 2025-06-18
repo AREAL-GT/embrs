@@ -188,7 +188,7 @@ class FireSim(BaseFireSim):
         if self.logger:
             self._log_changes()
 
-            if self._iters % self._log_freq == 0: # TODO: adjust this or make it settable
+            if self._iters % self._log_freq == 0: # TODOtoday: adjust this or make it settable
                 self.logger.flush()
 
         self._iters += 1
@@ -244,6 +244,9 @@ class FireSim(BaseFireSim):
             for cell, loc in self._new_ignitions:
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
+
+                for neighbor in list(cell.burnable_neighbors.keys()):
+                    self._frontier.add(neighbor)
 
                 if cell._break_width > 0:
                     flame_len_ft = calc_flame_len(np.max(cell.I_ss))
