@@ -234,7 +234,7 @@ class BaseVisualizer:
         for entry in init_entries:
 
             polygon = mpatches.RegularPolygon((entry.x, entry.y), 
-                                              numVertices=6, radius=self.cell_size, orientation=0, zorder=4)
+                                              numVertices=6, radius=self.cell_size, orientation=0, zorder=1)
             
             if entry.state == CellStates.FUEL:
                 color = fc.fuel_color_mapping[entry.fuel]
@@ -339,9 +339,9 @@ class BaseVisualizer:
             
             if entry.state == CellStates.FUEL:
 
-                # TODOtoday: add scaling of rbga color for fuel content
-                color = fc.fuel_color_mapping[entry.fuel]
-                
+                color = np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[entry.fuel])))
+                fuel_frac = entry.w_n_dead / entry.w_n_dead_start if entry.w_n_dead_start > 0 else 1.0
+                color *= fuel_frac
                 polygon.set(color=color)
                 tree_patches.append(polygon)
 
@@ -355,24 +355,22 @@ class BaseVisualizer:
             else:
                 burnt_patches.append(polygon)
 
-        fuel_coll = PatchCollection(tree_patches, match_original=True)
+        fuel_coll = PatchCollection(tree_patches, match_original=True, zorder=3)
 
         if fire_patches:
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306', zorder=3)
 
-            if len(alpha_arr) > 1 and max(alpha_arr) > min(alpha_arr):
+            if max(alpha_arr) > min(alpha_arr):
                 norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
                 fire_coll.set_array(alpha_arr)
                 fire_coll.set_cmap(mpl.colormaps["gist_heat"])
                 fire_coll.set_norm(norm)
             else:
-                # TODO: figure out why this is getting called
                 fire_coll.set_facecolor('#F97306')  # Default color if no variation in alpha
             
             self.h_ax.add_collection(fire_coll)
 
         crown_coll = PatchCollection(crown_patches, edgecolor ='none', facecolor ='magenta', zorder=3)
-
         burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k', zorder=3)
 
         self.h_ax.add_collection(fuel_coll)
@@ -426,7 +424,7 @@ class BaseVisualizer:
                         self.retardant_art = self.h_ax.scatter(
                             action.x_coords, action.y_coords,
                             marker='h', s=self.meters_to_points(6*self.cell_size),
-                            c= action.effectiveness, cmap='Reds_r', vmin=0, vmax=1, zorder=1
+                            c=action.effectiveness, cmap='Reds_r', vmin=0, vmax=1, zorder=4
                         )
 
                 elif action.action_type == 'short_term_suppressant':
@@ -434,7 +432,7 @@ class BaseVisualizer:
                         self.water_drop_art = self.h_ax.scatter(
                             action.x_coords, action.y_coords,
                             marker='h', s=self.meters_to_points(6*self.cell_size),
-                            c=action.effectiveness, cmap='Blues', vmin=0.5, vmax=1, zorder=1
+                            c=action.effectiveness, cmap='Blues', vmin=0.5, vmax=1, zorder=4
                         )
 
         if self.render:

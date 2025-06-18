@@ -12,6 +12,7 @@ class CellLogEntry:
     state: int
     crown_state: int
     w_n_dead: float
+    w_n_dead_start : float
     w_n_live: float
     dfm_1hr: float
     dfm_10hr: float

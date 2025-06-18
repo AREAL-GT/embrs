@@ -631,13 +631,12 @@ class Cell:
             flame_len_m (_type_): _description_
         """
         # Mees et. al 1993
-
         if self._break_width == 0:
             return 0
 
         x = self._break_width
         m = flame_len_m
-        T = 1 # TODO: make this a tunable parameter?
+        T = 1
 
         if m <= 0.61:
             h = 0
@@ -703,12 +702,14 @@ class Cell:
 
         if self.fuel.burnable:
             w_n_dead = self.fuel.w_n_dead
+            w_n_dead_start = self.fuel.w_n_dead_nominal
             w_n_live = self.fuel.w_n_live
             dfm_1hr = self.fmois[0]
             dfm_10hr = self.fmois[1]
             dfm_100hr = self.fmois[2]
         else:
             w_n_dead = 0
+            w_n_dead_start = 0
             w_n_live = 0
             dfm_1hr = 0
             dfm_10hr = 0
@@ -723,6 +724,7 @@ class Cell:
             state=self.state,
             crown_state=self._crown_status,
             w_n_dead=w_n_dead,
+            w_n_dead_start=w_n_dead_start,
             w_n_live=w_n_live,
             dfm_1hr=dfm_1hr,
             dfm_10hr=dfm_10hr,

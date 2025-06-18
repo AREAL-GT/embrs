@@ -501,7 +501,7 @@ class BaseFireSim:
         # Update extent of fire spread along each direction
         cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
 
-        # TODO: is there a way to prevent distances that are done from being computed?
+        # TODOtoday: is there a way to prevent distances that are done from being computed?
         intersections = np.where(cell.fire_spread > cell.distances)[0]
 
         # Check where fire spread has reached edge of cell
@@ -634,7 +634,7 @@ class BaseFireSim:
         r_ft_s = m_s_to_ft_min(r_gamma)
 
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_ft_s * calc_heat_sink(cell.fuel, cell.fmois) # TODO: make sure this computation is valid (I think it is)
+        heat_source = r_ft_s * calc_heat_sink(cell.fuel, cell.fmois) # TODOtoday: make sure this computation is valid (I think it is)
 
         # Get the heat sink using the neighbors fuel and moisture content
         heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)
@@ -760,8 +760,8 @@ class BaseFireSim:
                 self._long_term_retardants.remove(cell)
 
     def generate_burn_history_entry(self, cell, fuel_loads):
-        # TODO: this assumes that any live fuel will be totally consumed
-        # TODO: verify this assumption
+        # TODOtoday: this assumes that any live fuel will be totally consumed
+        # TODOtoday: verify this assumption
 
         entry = [0] * len(cell.fuel.w_0)
         j = 0
@@ -773,9 +773,7 @@ class BaseFireSim:
         return entry
 
     def compute_burn_histories(self, new_ignitions):
-        # TODO: This assumes weather will be static across burn history
         curr_weather = self._weather_stream.stream[self._curr_weather_idx]
-
         wind_speed = curr_weather.wind_speed
 
         if self._uniform_map:
@@ -794,7 +792,7 @@ class BaseFireSim:
 
             I_r = cell.reaction_intensity  # BTU/ft2/min
 
-            # TODO: should we add wind speed to the burnup model?
+            # TODOtoday: should we add wind speed to the burnup model?
             u = 0   #wind_speed * cell.wind_adj_factor
             
             # Get fuel bed depth
@@ -868,7 +866,6 @@ class BaseFireSim:
                 fuel_loads = burn_mgr.get_flaming_front_consumption()
                 entry = self.generate_burn_history_entry(cell, fuel_loads)
                 cell.burn_history = [entry]
-
 
     def calc_wind_padding(self, forecast: np.ndarray):
 
@@ -1236,7 +1233,6 @@ class BaseFireSim:
         # Set new state
         cell._set_state(state)
 
-    # TODO: should we log messages when get_cell_from_xy fails here?
     # Functions for setting wild fires
     def set_ignition_at_xy(self, x_m: float, y_m: float):
         """Set a wild fire in the cell at position (x_m, y_m) in the Cartesian plane.
@@ -1531,7 +1527,7 @@ class BaseFireSim:
                 dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
                 frac = dead_mf/cell.fuel.dead_mx
                 
-                if frac > 0.5:
+                if frac > 0.5 and cell.state == CellStates.FUEL:
                     w_xs.append(cell.x_pos)
                     w_ys.append(cell.y_pos)
                     e_vals.append(dead_mf/cell.fuel.dead_mx)
