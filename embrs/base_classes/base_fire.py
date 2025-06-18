@@ -12,6 +12,7 @@ from shapely.geometry import Point, Polygon, LineString
 import numpy as np
 from tqdm import tqdm
 import pickle
+import copy
 import os
 
 from embrs.models.embers import Embers
@@ -501,19 +502,25 @@ class BaseFireSim:
         # Update extent of fire spread along each direction
         cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
 
-        # TODOtoday: is there a way to prevent distances that are done from being computed?
+        # Compute intersections between fire spread and distances to neighbors
         intersections = np.where(cell.fire_spread > cell.distances)[0]
 
-        # TODOtoday: ignite neighbors should only be called once per intersection
-        # Check where fire spread has reached edge of cell
-        if len(intersections) >= int(len(cell.distances)):
-            # Set cell to fully burning when all edges reached
-            cell.fully_burning = True
-
-        if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
-            for idx in intersections:
-                # Check if ignition signal should be sent to each intersecting neighbor
+        for idx in sorted(intersections, reverse=True):
+            # Check if ignition signal should be sent to each intersecting neighbor
+            if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
                 self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+    
+            cell.r_t = np.delete(cell.r_t, idx)
+            cell.r_ss = np.delete(cell.r_ss, idx)
+            cell.r_prev_list = np.delete(cell.r_prev_list, idx)
+            cell.I_ss = np.delete(cell.I_ss, idx)
+            cell.directions = np.delete(cell.directions, idx)
+            cell.distances = np.delete(cell.distances, idx)
+            cell.end_pts.remove(cell.end_pts[idx])
+            cell.fire_spread = np.delete(cell.fire_spread, idx)
+            
+        if len(cell.distances) == 0:
+            cell.fully_burning = True
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list) -> list:
         """Attempts to ignite neighboring cells based on fire spread conditions.
@@ -578,7 +585,8 @@ class BaseFireSim:
                     # Check that ignition ros is greater than no wind no slope ros
                     if 0 < r_0 < r_ign:
                         self._new_ignitions.append((neighbor, n_loc))
-                        neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+                        neighbor.directions, neighbor.distances, end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+                        neighbor.end_pts = copy.deepcopy(end_pts)
                         neighbor._set_state(CellStates.FIRE)
 
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
@@ -631,11 +639,11 @@ class BaseFireSim:
             - The accuracy of this calculation depends on correct fuel moisture modeling.
             - Currently, fuel moisture content updates are not implemented.
         """
-        # Get the rate of spread in ft/s
-        r_ft_s = m_s_to_ft_min(r_gamma)
+        # Get the rate of spread in ft/min
+        r_ft_min = m_s_to_ft_min(r_gamma)
 
         # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_ft_s * calc_heat_sink(cell.fuel, cell.fmois) # TODOtoday: make sure this computation is valid (I think it is)
+        heat_source = r_ft_min * calc_heat_sink(cell.fuel, cell.fmois)
 
         # Get the heat sink using the neighbors fuel and moisture content
         heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)

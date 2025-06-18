@@ -712,6 +712,13 @@ class Cell:
             dfm_10hr = 0
             dfm_100hr = 0
 
+        if len(self.r_t) > 0:
+            r_t = np.max(self.r_t)
+            I_ss = np.max(self.I_ss)
+        else:
+            r_t = 0
+            I_ss = 0
+
         entry = CellLogEntry(
             timestamp=time,
             id=self.id,
@@ -726,8 +733,8 @@ class Cell:
             dfm_1hr=dfm_1hr,
             dfm_10hr=dfm_10hr,
             dfm_100hr=dfm_100hr,
-            ros=np.max(self.r_t),
-            I_ss=np.max(self.I_ss),
+            ros=r_t,
+            I_ss=I_ss,
             wind_speed=self.curr_wind[0],
             wind_dir=self.curr_wind[1],
             retardant=self._retardant

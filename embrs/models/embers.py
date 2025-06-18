@@ -6,6 +6,7 @@ from embrs.fire_simulator.cell import Cell
 from typing import Callable, Tuple
 
 import numpy as np
+import copy
 
 class Embers:
     def __init__(self, ign_prob: float, species: int, dbh: float, min_spot_dist: float, limits: Tuple[float, float], get_cell_from_xy: Callable[[float, float], Cell]):
@@ -366,7 +367,8 @@ class Embers:
                             
                             if curr_cell.state == CellStates.FUEL:
                                 spots.add((curr_cell, 0)) # Add to a set that will handle igniting spot fires
-                                curr_cell.directions, curr_cell.distances, curr_cell.end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
+                                curr_cell.directions, curr_cell.distances, end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
+                                curr_cell.end_pts = copy.deepcopy(end_pts)
                                 curr_cell._set_state(CellStates.FIRE)
                 else:
                     if curr_time == end_curr_time_step:

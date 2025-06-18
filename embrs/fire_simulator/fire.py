@@ -15,6 +15,7 @@ Classes:
 
 from tqdm import tqdm
 import numpy as np
+import copy
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
@@ -97,7 +98,7 @@ class FireSim(BaseFireSim):
         # Log frequency (set to 1 hour by default)
         self._log_freq = int(np.floor(3600 / self._time_step))
 
-        self._init_iteration()
+        self._init_iteration(True)
 
     def iterate(self):
         """Advances the fire simulation by one time step.
@@ -205,7 +206,7 @@ class FireSim(BaseFireSim):
 
         self.logger.cache_action_updates(self.get_action_entries(logger=True))
 
-    def _init_iteration(self) -> bool:
+    def _init_iteration(self, in_constructor: bool = False) -> bool:
         """Initialize or update the simulation state for the current iteration.
 
         This method handles both first-time initialization (when _iters == 0) and 
@@ -221,7 +222,7 @@ class FireSim(BaseFireSim):
             bool: True if the simulation should terminate (due to time limit or no active fires),
                  False otherwise.
         """
-        if self._iters == 0:
+        if in_constructor:
             if self.progress_bar is None:
                 self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
                                      desc='Current sim ', position=0, leave=False)
@@ -229,7 +230,8 @@ class FireSim(BaseFireSim):
             self.weather_changed = True
             self._new_ignitions = self.starting_ignitions
             for cell, loc in self._new_ignitions:
-                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
+                cell.directions, cell.distances, end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
+                cell.end_pts = copy.deepcopy(end_pts)
                 cell._set_state(CellStates.FIRE)
 
                 surface_fire(cell)
