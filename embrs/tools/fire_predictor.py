@@ -17,7 +17,7 @@ class FirePredictor(BaseFireSim):
         self.c_size = -1
 
         self.set_params(params)
-        self.nom_ign_prob = self._calc_nominal_prob()
+        self.nom_ign_prob = self._calc_nominal_prob() # TODO: move this to set_params
 
     def set_params(self, params: PredictorParams):
 
@@ -181,8 +181,9 @@ class FirePredictor(BaseFireSim):
         self._iters = 0
 
         while self._init_iteration():
+            fires_still_burning = []
+            
             for cell, loc in self._burning_cells:
-
                 if self.weather_changed or not cell.has_steady_state:
                     cell._update_weather(self._curr_weather_idx, self._weather_stream, True)
 
@@ -197,6 +198,8 @@ class FirePredictor(BaseFireSim):
 
                 if cell.fully_burning:
                     self.set_state_at_cell(cell, CellStates.BURNT)
+                else:
+                    fires_still_burning.append((cell, loc))
 
                 self.updated_cells[cell.id] = cell
 
@@ -204,7 +207,9 @@ class FirePredictor(BaseFireSim):
                 self._ignite_spots()
 
             self.update_control_interface_elements()
-            
+
+            self._burning_cells = list(fires_still_burning)
+
             self._iters += 1
 
     def _ignite_spots(self):
