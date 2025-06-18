@@ -249,7 +249,7 @@ class FireSim(BaseFireSim):
                     self._frontier.add(neighbor)
 
                 if cell._break_width > 0:
-                    flame_len_ft = calc_flame_len(np.max(cell.I_ss))
+                    flame_len_ft = calc_flame_len(cell)
                     flame_len_m = ft_to_m(flame_len_ft)
 
                     hold_prob = cell.calc_hold_prob(flame_len_m)

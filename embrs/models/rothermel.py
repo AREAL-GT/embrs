@@ -1,4 +1,5 @@
 from embrs.models.fuel_models import Fuel
+from embrs.utilities.fire_util import CrownStatus
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
 import numpy as np
@@ -427,12 +428,17 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
 
     return e
 
-def calc_flame_len(fli: float):
+def calc_flame_len(cell: Cell):
     # Fireline intensity in Btu/ft/min
-
+    fli = np.max(cell.I_ss)
     fli /= 60 # convert to Btu/ft/s
 
-    # Brown and Davis 1973 pg. 175
-    flame_len_ft = 0.45 * fli ** (0.46)
+    if cell._crown_status == CrownStatus.NONE:
+        # Surface fire
+        # Brown and Davis 1973 pg. 175
+        flame_len_ft = 0.45 * fli ** (0.46)
+
+    else:
+        flame_len_ft = (0.2 * (fli ** (2/3))) # in feet
 
     return flame_len_ft

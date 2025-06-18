@@ -63,7 +63,6 @@ def crown_fire(cell: Cell, fmc: float):
             # Actual active crown fire spread rate
             r_actual = R + cfb * (R_cmax - R) # m/min
 
-            # TODOtoday: should use the same checks farsite has for values of R_cmax etc.
             if r_actual >= rac:
                 # Active crown fire
                 cell._crown_status = CrownStatus.ACTIVE
@@ -73,7 +72,7 @@ def crown_fire(cell: Cell, fmc: float):
                 cell._crown_status = CrownStatus.PASSIVE
             
             # Set rate of spread based on crown fire equations
-            cell.r_ss, cell.I_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
+            cell.r_ss, cell.I_ss = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
 
         else:
             cell._crown_status = CrownStatus.NONE
@@ -222,7 +221,7 @@ def calc_crown_eccentricity(wind_slope_vec_mag: float):
 def calc_crown_propagation(cell, r_actual, alpha, vec_mag, sfc, cfb):
     # Calculate Fireline intensity (Based on Equation 22 of Scott Reinhardt Crown Fire [RMRS-RP-29])
     clb = crown_loading_burned(cell, cfb)
-    I_h, flame_len_m = crown_intensity(r_actual, sfc, clb)
+    I_h = crown_intensity(r_actual, sfc, clb)
 
     # Calculate Crown Eccentricity
     e = calc_crown_eccentricity(vec_mag)
@@ -231,7 +230,7 @@ def calc_crown_propagation(cell, r_actual, alpha, vec_mag, sfc, cfb):
     r_list, I_list = calc_vals_for_all_directions(cell, r_actual, I_h, alpha, e)
 
     # return values in m/s and BTU/ft/min
-    return r_list, I_list, flame_len_m
+    return r_list, I_list
 
 def crown_loading_burned(cell, cfb):
     cbd = cell.canopy_bulk_density
@@ -252,9 +251,7 @@ def crown_intensity(R, sfc, clb):
     R = m_s_to_ft_min(R)/60 # m/s to ft/s
 
     I_h = np.abs(R * (sfc + clb) * 1586.01) # btu/ft/s
-    flame_len = (0.2 * (I_h ** (2/3))) # in feet
-    flame_len_m = ft_to_m(flame_len) # flame length in meters
 
     I_h *= 60 # convert to btu/ft/min
 
-    return I_h, flame_len_m
+    return I_h
