@@ -252,7 +252,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
     start_iso_datetime = config["Weather"].get("start_datetime", None)
 
     if start_iso_datetime is None:
-        raise ValueError(f"Error in {cfg_path}:'start_datetime' must be specified in the [Weather] section.") # TODO: if using File input type, this is not needed
+        raise ValueError(f"Error in {cfg_path}:'start_datetime' must be specified in the [Weather] section.")
 
     start_datetime = datetime.fromisoformat(start_iso_datetime)
 

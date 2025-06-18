@@ -504,6 +504,7 @@ class BaseFireSim:
         # TODOtoday: is there a way to prevent distances that are done from being computed?
         intersections = np.where(cell.fire_spread > cell.distances)[0]
 
+        # TODOtoday: ignite neighbors should only be called once per intersection
         # Check where fire spread has reached edge of cell
         if len(intersections) >= int(len(cell.distances)):
             # Set cell to fully burning when all edges reached
@@ -760,13 +761,10 @@ class BaseFireSim:
                 self._long_term_retardants.remove(cell)
 
     def generate_burn_history_entry(self, cell, fuel_loads):
-        # TODOtoday: this assumes that any live fuel will be totally consumed
-        # TODOtoday: verify this assumption
-
         entry = [0] * len(cell.fuel.w_0)
         j = 0
         for i in range(len(cell.fuel.w_0)):
-            if i in cell.fuel.burnup_indices:
+            if i in cell.fuel.rel_indices:
                 entry[i] = fuel_loads[j]
                 j += 1
 
@@ -792,8 +790,8 @@ class BaseFireSim:
 
             I_r = cell.reaction_intensity  # BTU/ft2/min
 
-            # TODOtoday: should we add wind speed to the burnup model?
-            u = 0   #wind_speed * cell.wind_adj_factor
+            # Calculate wind speed at midflame height
+            u = wind_speed * cell.wind_adj_factor
             
             # Get fuel bed depth
             depth = cell.fuel.fuel_depth_ft

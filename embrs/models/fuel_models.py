@@ -121,9 +121,7 @@ class Fuel:
                     self.rel_indices.append(i)
 
             self.rel_indices = np.array(self.rel_indices)
-            self.burnup_indices = self.rel_indices
-            # self.burnup_indices = self.rel_indices[self.rel_indices <= 3] # Don't include live fuels in Burnup (TODO: decide if we want to include live fuels in burnup or not)
-            self.num_classes = len(self.burnup_indices)
+            self.num_classes = len(self.rel_indices)
 
     def set_fuel_loading(self, w_n):
         self.w_n = w_n

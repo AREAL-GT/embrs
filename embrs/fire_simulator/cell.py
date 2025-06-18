@@ -217,8 +217,8 @@ class Cell:
         """
         indices = self._fuel.rel_indices
 
-        self.wdry = self._fuel.w_n[self._fuel.burnup_indices]
-        self.sigma = self._fuel.s[self._fuel.burnup_indices]
+        self.wdry = self._fuel.w_n[self._fuel.rel_indices]
+        self.sigma = self._fuel.s[self._fuel.rel_indices]
 
         self.dfms = []
         fmois = np.zeros(6)
