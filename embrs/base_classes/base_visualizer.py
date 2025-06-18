@@ -252,7 +252,6 @@ class BaseVisualizer:
                 fire_patches.append(polygon)
                 alpha_arr.append(entry.I_ss)
 
-
             else:
                 burnt_patches.append(polygon)
 
@@ -260,7 +259,7 @@ class BaseVisualizer:
 
         if fire_patches:
             fire_coll = PatchCollection(fire_patches, edgecolor='none',  facecolor='#F97306')
-            norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
+            norm = mcolors.LogNorm(vmin=1e-3, vmax=25000)
             fire_coll.set_array(alpha_arr)
             fire_coll.set_cmap(mpl.colormaps["gist_heat"])
             fire_coll.set_norm(norm)
@@ -361,7 +360,7 @@ class BaseVisualizer:
             fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306', zorder=3)
 
             if max(alpha_arr) > min(alpha_arr):
-                norm = mcolors.LogNorm(vmin=max(min(alpha_arr), 1e-3), vmax=max(alpha_arr))
+                norm = mcolors.LogNorm(vmin=1e-3, vmax=25000)
                 fire_coll.set_array(alpha_arr)
                 fire_coll.set_cmap(mpl.colormaps["gist_heat"])
                 fire_coll.set_norm(norm)
