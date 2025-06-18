@@ -36,7 +36,7 @@ def surface_fire(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarray, np.ndarra
     e = calc_eccentricity(cell.fuel, R_h, R_0)
 
     r_list, I_list = calc_vals_for_all_directions(cell, R_h, I_r, alpha, e)
-    
+
     cell.r_ss = r_list
     cell.I_ss = I_list
 
@@ -53,6 +53,7 @@ def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
 
         r_list.append(r_gamma)
         I_list.append(I_gamma)
+
     return np.array(r_list), np.array(I_list)
 
 def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:

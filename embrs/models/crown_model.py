@@ -63,16 +63,17 @@ def crown_fire(cell: Cell, fmc: float):
             # Actual active crown fire spread rate
             r_actual = R + cfb * (R_cmax - R) # m/min
 
-            # TODO: should we use the mixed ROS model as is done in Canada paper?
-            # TODO: should use the same checks farsite has for values of R_cmax etc.
+            # TODOtoday: should use the same checks farsite has for values of R_cmax etc.
             if r_actual >= rac:
                 # Active crown fire
                 cell._crown_status = CrownStatus.ACTIVE
-                cell.r_ss, cell.I_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
 
             else:
                 # Passive crown fire
                 cell._crown_status = CrownStatus.PASSIVE
+            
+            # Set rate of spread based on crown fire equations
+            cell.r_ss, cell.I_ss, cell.crown_flame_len_m = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
 
         else:
             cell._crown_status = CrownStatus.NONE
