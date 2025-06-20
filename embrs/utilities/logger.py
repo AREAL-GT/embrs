@@ -289,6 +289,9 @@ class Logger:
             'wind_ypad': fire_obj.wind_ypad,
             'wind_forecast': encoded_wind,
             'wind_resolution': fire_obj._wind_res,
+            'temp_forecast': [entry.temp for entry in fire_obj._weather_stream.stream],
+            'rh_forecast': [entry.rel_humidity for entry in fire_obj._weather_stream.stream],
+            'forecast_t_step': fire_obj.weather_t_step,
             'elevation': fire_obj.coarse_elevation,
             'start_datetime': fire_obj._start_datetime,
             'north_dir_deg': fire_obj._north_dir_deg

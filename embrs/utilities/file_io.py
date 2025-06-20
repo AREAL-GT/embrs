@@ -872,6 +872,11 @@ class VizFolderSelector(FileSelectBase):
         self.show_wind_field = tk.BooleanVar()
         self.show_wind_field.set(True)
         self.show_wind_field.trace_add("write", self.wind_field_toggled)
+        self.show_weather_data = tk.BooleanVar()
+        self.show_weather_data.set(True)
+        self.show_weather_data.trace_add("write", self.show_weather_data_toggled)
+        self.temp_units = tk.StringVar()
+        self.temp_units.set("Fahrenheit")
         self.show_compass = tk.BooleanVar()
         self.show_compass.set(True)
         self.save_video = tk.BooleanVar()
@@ -941,6 +946,12 @@ class VizFolderSelector(FileSelectBase):
 
         tk.Checkbutton(display_frame, text="Show wind field", variable=self.show_wind_field).grid(row=1, column=0, sticky='w')
         tk.Checkbutton(display_frame, text="Show compass", variable=self.show_compass).grid(row=1, column=1, sticky='w')
+        tk.Checkbutton(display_frame, text="Show weather data", variable=self.show_weather_data).grid(row=2, column=0, sticky='w')
+
+        tk.Label(display_frame, text="Temperature units:").grid(row=2, column=1, sticky='w')
+        self.temp_units = tk.StringVar(value="Fahrenheit")
+        self.temp_units_menu = tk.OptionMenu(display_frame, self.temp_units, "Fahrenheit", "Celsius")
+        self.temp_units_menu.grid(row=2, column=2, sticky='w')
 
         # === Submit Button ===
         self.submit_button = tk.Button(frame, text='Submit', command=self.submit, state='disabled')
@@ -1026,6 +1037,11 @@ class VizFolderSelector(FileSelectBase):
             self.show_wind_cbar.set(True)
             self.wind_cbar_checkbox.config(state='normal')
 
+    def show_weather_data_toggled(self, *args):
+        if not self.show_weather_data.get():
+            self.temp_units_menu.config(state='disabled')
+        else:
+            self.temp_units_menu.config(state='normal')
 
     def get_run_sub_folders(self, folderpath: str) -> list:
         """Function that retrieves all the runs contained within a log folder. Returns a list of
@@ -1082,6 +1098,9 @@ class VizFolderSelector(FileSelectBase):
             self.render_visualization.set(True)
             video_filename = ""
 
+        show_temp_in_F = self.temp_units.get() == "Fahrenheit"
+
+
         self.result = PlaybackVisualizerParams(
             cell_file= self.viz_file,
             init_location=self.init_location,
@@ -1097,8 +1116,10 @@ class VizFolderSelector(FileSelectBase):
             show_legend=self.legend.get(),
             show_wind_cbar=self.show_wind_cbar.get(),
             show_wind_field=self.show_wind_field.get(),
+            show_weather_data=self.show_weather_data.get(),
             show_compass=self.show_compass.get(),
-            show_visualization=self.render_visualization.get()
+            show_visualization=self.render_visualization.get(),
+            show_temp_in_F=show_temp_in_F
         )
 
         if self.has_agents:

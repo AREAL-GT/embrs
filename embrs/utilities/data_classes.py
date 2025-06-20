@@ -124,8 +124,10 @@ class PlaybackVisualizerParams:
     show_legend: Optional[bool] = True
     show_wind_cbar: Optional[bool] = True
     show_wind_field: Optional[bool] = True
+    show_weather_data: Optional[bool] = True
     show_compass: Optional[bool] = True
     show_visualization: Optional[bool] = True
+    show_temp_in_F: Optional[bool] = True
 
 @dataclass
 class VisualizerInputs:
@@ -139,6 +141,9 @@ class VisualizerInputs:
     wind_t_step: float
     wind_xpad: float
     wind_ypad: float
+    temp_forecast: np.ndarray
+    rh_forecast: np.ndarray
+    forecast_t_step: float
     elevation: np.ndarray
     roads: list
     fire_breaks: list
@@ -149,6 +154,8 @@ class VisualizerInputs:
     show_legend: Optional[bool] = True
     show_wind_cbar: Optional[bool] = True
     show_wind_field: Optional[bool] = True
+    show_weather_data: Optional[bool] = True
+    show_temp_in_F: Optional[bool] = True
     show_compass: Optional[bool] = True
 
 @dataclass

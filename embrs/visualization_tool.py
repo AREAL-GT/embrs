@@ -17,7 +17,6 @@ import base64
 from datetime import datetime
 import numpy as np
 
-
 class PlaybackVisualizer(BaseVisualizer):
     def __init__(self, params: PlaybackVisualizerParams):
 
@@ -87,6 +86,9 @@ class PlaybackVisualizer(BaseVisualizer):
             wind_t_step=meta_dict['wind_time_step'],
             wind_xpad=meta_dict['wind_xpad'],
             wind_ypad=meta_dict['wind_ypad'],
+            temp_forecast=meta_dict['temp_forecast'],
+            rh_forecast=meta_dict['rh_forecast'],
+            forecast_t_step=meta_dict['forecast_t_step'],
             elevation=meta_dict['elevation'],
             roads=meta_dict['roads'],
             fire_breaks=meta_dict['fire_breaks'],
@@ -95,7 +97,9 @@ class PlaybackVisualizer(BaseVisualizer):
             show_legend=self.show_legend,
             show_wind_cbar=self.config_params.show_wind_cbar,
             show_wind_field=self.config_params.show_wind_field,
-            show_compass=self.config_params.show_compass
+            show_weather_data=self.config_params.show_weather_data,
+            show_compass=self.config_params.show_compass,
+            show_temp_in_F=self.config_params.show_temp_in_F
         )
 
         return params

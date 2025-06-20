@@ -2,6 +2,8 @@ from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.data_classes import VisualizerInputs
 
+import numpy as np
+
 class RealTimeVisualizer(BaseVisualizer):
 
     def __init__(self, sim: FireSim):
@@ -37,6 +39,9 @@ class RealTimeVisualizer(BaseVisualizer):
             wind_t_step=self.sim.weather_t_step,
             wind_xpad=self.sim.wind_xpad,
             wind_ypad=self.sim.wind_ypad,
+            temp_forecast=np.array([entry.temp for entry in self.sim._weather_stream.stream]),
+            rh_forecast=np.array([entry.rel_humidity for entry in self.sim._weather_stream.stream]),
+            forecast_t_step=self.sim.weather_t_step,
             elevation=self.sim.coarse_elevation,
             roads=self.sim.roads,
             fire_breaks=self.sim.fire_breaks,

@@ -4,7 +4,7 @@ from embrs.utilities.data_classes import VisualizerInputs
 from embrs.utilities.fire_util import RoadConstants as rc, CellStates, CrownStatus
 from embrs.models.fuel_models import FuelConstants as fc
 from embrs.utilities.fire_util import UtilFuncs as util
-
+from embrs.utilities.unit_conversions import F_to_C
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -22,7 +22,6 @@ from datetime import timedelta
 import copy
 
 # TODO: Implement and improve fully burning visualization?
-# TODOtoday: Worth adding temperature and other weather conditions?
 
 class BaseVisualizer:
     def __init__(self, params: VisualizerInputs, render=True):
@@ -50,6 +49,11 @@ class BaseVisualizer:
         self.wind_xpad = params.wind_xpad
         self.wind_ypad = params.wind_ypad
 
+        self.temp_forecast = params.temp_forecast
+        self.rh_forecast = params.rh_forecast
+        self.forecast_t_step = params.forecast_t_step
+        self.forecast_idx = -1
+
         self.north_dir_deg = params.north_dir_deg
         self._start_datetime = params.start_datetime
 
@@ -57,6 +61,8 @@ class BaseVisualizer:
         self.show_legend = params.show_legend
         self.show_wind_cbar = params.show_wind_cbar
         self.show_wind_field = params.show_wind_field
+        self.show_weather_data = params.show_weather_data
+        self.show_temp_in_F = params.show_temp_in_F
 
         self.retardant_art = None
         self.water_drop_art = None
@@ -65,7 +71,7 @@ class BaseVisualizer:
 
         init_entries = params.init_entries
 
-        self._process_wind()
+        self._process_weather()
         self._setup_figure()
         self._setup_grid(init_entries)
 
@@ -75,12 +81,16 @@ class BaseVisualizer:
 
         self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
 
-    def _process_wind(self):
+    def _process_weather(self):
         if self.show_wind_field:
             all_speeds = [forecast[:, :, 0] for forecast in self.wind_forecast]
             self.global_max_speed = max(np.max(s) for s in all_speeds)
 
             self.wind_norm = mcolors.Normalize(vmin=0, vmax=self.global_max_speed)
+
+        if self.show_weather_data:
+            if not self.show_temp_in_F:
+                self.temp_forecast = [np.round(F_to_C(temp), 1) for temp in self.temp_forecast]
 
     def _setup_figure(self):
         if self.render:
@@ -107,15 +117,34 @@ class BaseVisualizer:
                                 self.coarse_elevation, colors='k')
         self.h_ax.clabel(cont, inline=True, fontsize=10, zorder=2)
 
+        if self.show_weather_data:
+            self.weather_box = mpatches.FancyBboxPatch((0.02, 0.90), 0.25, 0.0000125/2, transform=self.h_ax.transAxes,
+                                                   boxstyle='square,pad=0.02',
+                                                    facecolor='white', edgecolor='black',
+                                                    linewidth=1, zorder=3, alpha=0.75)
+
+            self.weather_text = self.h_ax.text(0.03, 0.90, '',
+                                        transform=self.h_ax.transAxes,
+                                        ha='left', va='center',
+                                        fontsize=10, zorder=4)
+            
+            self.h_ax.add_patch(self.weather_box)
+
         if self.show_compass:
             # === Compass ===
-            self.compass_box = mpatches.FancyBboxPatch((0.02, 0.84), 0.06, 0.06,
+            lx = 0.02
+            ly = 0.84
+
+            if self.show_weather_data:
+                ly -= 0.04
+
+            self.compass_box = mpatches.FancyBboxPatch((lx, ly), 0.06, 0.06,
                                                     transform=self.h_ax.transAxes,
                                                     boxstyle='square,pad=0.02',
                                                     facecolor='white', edgecolor='black',
                                                     linewidth=1, zorder=3, alpha=0.75)
             self.h_ax.add_patch(self.compass_box)
-            cx, cy = 0.02 + 0.03, 0.84 + 0.03  # center of box
+            cx, cy = lx + 0.03, ly + 0.03  # center of box
         
             # Compass arrow
             arrow_len = 0.025
@@ -130,21 +159,19 @@ class BaseVisualizer:
                                                 ha='center', va='center',
                                                 fontsize=10, weight='bold', color='red')
 
-        self.datetime_box = mpatches.FancyBboxPatch((0.02, 0.98), 0.2, 0.0000125/2, transform=self.h_ax.transAxes,
+        self.datetime_box = mpatches.FancyBboxPatch((0.02, 0.98), 0.25, 0.0000125/2, transform=self.h_ax.transAxes,
                                                     boxstyle='square,pad=0.02',
                                                     facecolor='white', edgecolor='black',
                                                     linewidth=1, zorder=3, alpha=0.75)
 
         self.h_ax.add_patch(self.datetime_box)
-
-
+        
         # # === Date/time box ===
-        self.datetime_text = self.h_ax.text(0.02, 0.98, '', transform=self.h_ax.transAxes,
+        self.datetime_text = self.h_ax.text(0.045, 0.98, '', transform=self.h_ax.transAxes,
                                             ha='left', va='center',
                                             fontsize=10, zorder=4)
-
+        
         # === Elapsed time ===
-
         self.elapsed_box = mpatches.FancyBboxPatch((0.02, 0.94), 0.25, 0.0000125/2, transform=self.h_ax.transAxes,
                                                    boxstyle='square,pad=0.02',
                                                     facecolor='white', edgecolor='black',
@@ -281,18 +308,20 @@ class BaseVisualizer:
         Args:
             entries (list): _description_
         """
-
         fire_patches = []
         tree_patches = []
         burnt_patches = []
         crown_patches = []
         alpha_arr = []
 
-        soak_xs = []
-        soak_ys = []
-        c_vals = []
-
         wind_idx = int(np.floor((sim_time_s / self.wind_t_step)))
+        weather_idx = int(np.floor((sim_time_s / self.forecast_t_step)))
+
+        if self.show_weather_data and weather_idx != self.forecast_idx and weather_idx < len(self.temp_forecast):
+            self.forecast_idx = weather_idx
+            temp_unit = "F" if self.show_temp_in_F else "C"
+            weather_str = f"Temp: {self.temp_forecast[self.forecast_idx]} \u00b0{temp_unit}, RH: {self.rh_forecast[self.forecast_idx]} %"
+            self.weather_text.set_text(weather_str)
 
         if self.show_wind_field and wind_idx != self.wind_idx and wind_idx < len(self.wind_forecast):
             self.wind_idx = wind_idx
