@@ -975,7 +975,6 @@ class BaseFireSim:
             all_cells.extend(cells)
 
         for cell in all_cells:
-            cell._set_state(CellStates.FIRE)
             self.starting_ignitions.add((cell, 0))
 
     def _set_initial_burnt_region(self, geometries: list):
