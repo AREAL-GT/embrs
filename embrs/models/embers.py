@@ -366,7 +366,7 @@ class Embers:
                         if dist > self.min_spot_dist_m:
                             
                             if curr_cell.state == CellStates.FUEL:
-                                spots.add((curr_cell, 0)) # Add to a set that will handle igniting spot fires
+                                spots.add(curr_cell) # Add to a set that will handle igniting spot fires
                                 curr_cell.directions, curr_cell.distances, end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
                                 curr_cell.end_pts = copy.deepcopy(end_pts)
                                 curr_cell._set_state(CellStates.FIRE)

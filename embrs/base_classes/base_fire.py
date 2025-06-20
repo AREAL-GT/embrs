@@ -584,7 +584,7 @@ class BaseFireSim:
 
                     # Check that ignition ros is greater than no wind no slope ros
                     if 0 < r_0 < r_ign:
-                        self._new_ignitions.append((neighbor, n_loc))
+                        self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor.end_pts = copy.deepcopy(end_pts)
                         neighbor._set_state(CellStates.FIRE)
@@ -732,7 +732,7 @@ class BaseFireSim:
                     
                     for spot in new_spots:
                         self._new_ignitions.append(spot)
-                        self.updated_cells[spot[0].id] = spot[0]
+                        self.updated_cells[spot.id] = spot
 
                     del self._scheduled_spot_fires[time]
 
@@ -789,7 +789,7 @@ class BaseFireSim:
 
         dt = self._time_step
 
-        for cell, _ in new_ignitions:
+        for cell in new_ignitions:
             # Reset cell burn history
             cell.burn_history = []
 
@@ -1015,6 +1015,7 @@ class BaseFireSim:
                 cell._set_state(state)
 
             elif state == CellStates.FIRE and cell._fuel.burnable:
+                # TODO: this should add to burning_cells and get cell spread params directly here
                 self.starting_ignitions.add((cell, 0))
 
     @property
@@ -1048,8 +1049,8 @@ class BaseFireSim:
         :rtype: Tuple[float, float]
         """
 
-        x_coords = np.array([cell.x_pos for cell, _ in self._burning_cells])
-        y_coords = np.array([cell.y_pos for cell, _ in self._burning_cells])
+        x_coords = np.array([cell.x_pos for cell in self._burning_cells])
+        y_coords = np.array([cell.y_pos for cell in self._burning_cells])
 
         return np.mean(x_coords), np.mean(y_coords)
 

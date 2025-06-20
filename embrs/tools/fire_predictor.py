@@ -61,7 +61,7 @@ class FirePredictor(BaseFireSim):
         sim_params.model_spotting = params.model_spotting
 
         # Set the currently burning cells as the initial ignition region
-        burning_cells = [cell for cell, _ in self.fire._burning_cells]
+        burning_cells = [cell for cell in self.fire._burning_cells]
 
         # Get the merged polygon representing burning cells
         sim_params.map_params.scenario_data.initial_ign = UtilFuncs.get_cell_polygons(burning_cells)
@@ -110,9 +110,9 @@ class FirePredictor(BaseFireSim):
         if self._iters == 0:
 
             self.weather_changed = True
-            self._new_ignitions = self.starting_ignitions
+            self._new_ignitions = []
 
-            for cell, loc in self._new_ignitions:
+            for cell, loc in self.starting_ignitions:
                 self._set_prediction_forecast(cell)
                 cell.directions, cell.distances, end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell.end_pts = copy.deepcopy(end_pts)
@@ -127,10 +127,10 @@ class FirePredictor(BaseFireSim):
                 cell.I_t = cell.I_ss
 
                 self._updated_cells[cell.id] = cell
-
+                self._new_ignitions.append(cell)
 
         else:
-            for cell, loc in self._new_ignitions:
+            for cell in self._new_ignitions:
                 self._set_prediction_forecast(cell)
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
@@ -183,7 +183,7 @@ class FirePredictor(BaseFireSim):
         while self._init_iteration():
             fires_still_burning = []
             
-            for cell, loc in self._burning_cells:
+            for cell in self._burning_cells:
                 if self.weather_changed or not cell.has_steady_state:
                     cell._update_weather(self._curr_weather_idx, self._weather_stream, True)
 
@@ -199,7 +199,7 @@ class FirePredictor(BaseFireSim):
                 if cell.fully_burning:
                     self.set_state_at_cell(cell, CellStates.BURNT)
                 else:
-                    fires_still_burning.append((cell, loc))
+                    fires_still_burning.append(cell)
 
                 self.updated_cells[cell.id] = cell
 
@@ -264,7 +264,7 @@ class FirePredictor(BaseFireSim):
                     # Ignite the fires scheduled for this time step
                     new_spots = self._scheduled_spot_fires[time]
                     for spot in new_spots:
-                        self._new_ignitions.append((spot, 0))
+                        self._new_ignitions.append(spot)
                         spot.directions, spot.distances, end_pts = UtilFuncs.get_ign_parameters(0, spot.cell_size)
                         spot.end_pts = copy.deepcopy(end_pts)
                         spot._set_state(CellStates.FIRE)
@@ -308,7 +308,7 @@ class FirePredictor(BaseFireSim):
             self._set_state_from_geometries(burnt_region, CellStates.BURNT)
 
         # Set the burning cells based on fire state
-        burning_cells = [cell for cell, _ in self.fire._burning_cells]
+        burning_cells = [cell for cell in self.fire._burning_cells]
         burning_region = UtilFuncs.get_cell_polygons(burning_cells)
         self._set_state_from_geometries(burning_region, CellStates.FIRE)
 

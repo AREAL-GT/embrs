@@ -142,9 +142,9 @@ class FireSim(BaseFireSim):
             return
         
         # Loop over surface fires
-        for cell, loc in self._burning_cells:
+        for cell in self._burning_cells:
             if cell.fully_burning:
-                self.update_fuel_in_burning_cell(cell, loc)
+                self.update_fuel_in_burning_cell(cell)
                 # No need to compute spread for these cells
                 continue
 
@@ -228,8 +228,8 @@ class FireSim(BaseFireSim):
                                      desc='Current sim ', position=0, leave=False)
 
             self.weather_changed = True
-            self._new_ignitions = self.starting_ignitions
-            for cell, loc in self._new_ignitions:
+            self._new_ignitions = []
+            for cell, loc in self.starting_ignitions:
                 cell.directions, cell.distances, end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell.end_pts = copy.deepcopy(end_pts)
                 cell._set_state(CellStates.FIRE)
@@ -241,9 +241,10 @@ class FireSim(BaseFireSim):
                 cell.set_real_time_vals()
 
                 self._updated_cells[cell.id] = cell
+                self._new_ignitions.append(cell)
         
         else:
-            for cell, loc in self._new_ignitions:
+            for cell in self._new_ignitions:
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
 
@@ -296,7 +297,7 @@ class FireSim(BaseFireSim):
         return False
 
 
-    def update_fuel_in_burning_cell(self, cell: Cell, loc: int):
+    def update_fuel_in_burning_cell(self, cell: Cell):
         # TODO: Need to figure out how we want to visualize this state
         cell.burn_idx += 1
 
@@ -314,7 +315,7 @@ class FireSim(BaseFireSim):
                 self.set_state_at_cell(cell, CellStates.FUEL)
                                 
             # remove from burning cells
-            self._burning_cells.remove((cell, loc))
+            self._burning_cells.remove(cell)
             
             cell.burn_idx = -1
 
