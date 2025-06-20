@@ -248,11 +248,11 @@ class BaseFireSim:
         self._add_cell_neighbors()
 
         # Set initial ignitions
-        self._set_state_from_geometries(self.initial_ignition, CellStates.FIRE)
+        self._set_initial_ignition(self.initial_ignition)
         
         # Set burnt cells
         if burnt_region is not None:
-            self._set_state_from_geometries(burnt_region, CellStates.BURNT)
+            self._set_initial_burnt_region(burnt_region)
         
         # Overwrite urban cells to their neighbors (road modelling handles fire spread through roads)
         for cell in self._urban_cells:
@@ -952,71 +952,42 @@ class BaseFireSim:
             self._apply_firebreak(line, break_width)
 
     def _apply_firebreak(self, line: LineString, break_width: float):
-        length = line.length
 
-        step_size = self._cell_size / 4.0
-        num_steps = int(length/step_size) + 1
+        cells = self.get_cells_at_geometry(line)
 
-        curr_break_cells = set()
+        if not cells:
+            return
+        
+        for cell in cells:
+            if cell not in self._fire_break_cells:
+                self._fire_break_cells.append(cell)
+            
+            cell._break_width += break_width
+            if cell._break_width > self._cell_size:
+                cell._set_fuel_type(self.FuelClass(91))
 
-        for i in range(num_steps):
-            point = line.interpolate(i * step_size)
 
-            cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
-
-            if cell is not None and cell not in curr_break_cells:
-                if cell not in self._fire_break_cells:
-                    self._fire_break_cells.append(cell)
-
-                if break_width > self._cell_size:
-                    cell._set_fuel_type(self.FuelClass(91))
-
-                curr_break_cells.add(cell)
-                cell._break_width += break_width
-
-    def _set_state_from_geometries(self, geometries: list, state: CellStates):
-        """Updates the state of grid cells within given polygons.
-
-        This method iterates over a list of polygons and updates the state of 
-        grid cells that fall within each polygon's boundaries. It is primarily 
-        used for marking cells as burnt or ignited.
-
-        Args:
-            polygons (list): A list of polygon geometries (Shapely Polygon objects).
-            state (CellStates): The state to assign to the affected grid cells 
-                (e.g., `CellStates.BURNT` or `CellStates.FIRE`).
-
-        Behavior:
-            - Determines the bounding box of each polygon to limit the search space.
-            - Iterates over grid cells within the bounding box and checks if 
-            they fall inside the polygon.
-            - If `state == CellStates.BURNT`, directly sets the cell's state.
-            - If `state == CellStates.FIRE` and the cell has burnable fuel, 
-            adds it to `starting_ignitions`.
-
-        Notes:
-            - Uses hexagonal grid indexing, adjusting row and column calculations
-            based on the hex cell structure.
-            - Ensures that all row and column indices remain within bounds.
-
-        Side Effects:
-            - Modifies `_cell_grid` by updating cell states.
-            - Appends new ignitions to `starting_ignitions` when applicable.
-        """
+    def _set_initial_ignition(self, geometries: list):
 
         all_cells = []
-
         for geom in geometries:
             cells = self.get_cells_at_geometry(geom)
             all_cells.extend(cells)
 
         for cell in all_cells:
-            if state == CellStates.BURNT:
-                cell._set_state(state)
+            cell._set_state(CellStates.FIRE)
+            self.starting_ignitions.add((cell, 0))
 
-            elif state == CellStates.FIRE and cell._fuel.burnable:
-                # TODO: this should add to burning_cells and get cell spread params directly here
-                self.starting_ignitions.add((cell, 0))
+    def _set_initial_burnt_region(self, geometries: list):
+
+        all_cells = []
+        for geom in geometries:
+            cells = self.get_cells_at_geometry(geom)
+            all_cells.extend(cells)
+
+        for cell in all_cells:
+            cell._set_state(CellStates.BURNT)
+
 
     @property
     def frontier(self) -> list:
@@ -1456,7 +1427,7 @@ class BaseFireSim:
         elif isinstance(geom, LineString):
                 length = geom.length
 
-                step_size = 0.5
+                step_size = self._cell_size / 4.0
                 num_steps = int(length/step_size) + 1
 
                 for i in range(num_steps):
