@@ -240,11 +240,14 @@ class ScottBurgan40(Fuel):
             if not dynamic:
                 f_ij = np.array(self._fuel_models["f_ij"][model_id])
                 g_ij = f_ij
+                f_i = np.array(self._fuel_models["f_i"][model_id])
                 w_0 = np.array(self._fuel_models["w_0"][model_id])
             else:
                 T = self.calc_curing_level(live_h_mf)
                 f_ij_by_curing = self._fuel_models["f_ij"][model_id]
                 f_ij = self.get_dynamic_weights(f_ij_by_curing, T)
+                f_i_by_curing = self._fuel_models["f_i"][model_id]
+                f_i = self.get_dynamic_weights(f_i_by_curing, T)
                 g_ij_by_curing = self._fuel_models["g_ij"][model_id]
                 g_ij = self.get_dynamic_weights(g_ij_by_curing, T)
                 w_0 = np.array(self._fuel_models["w_0"][model_id])
@@ -256,7 +259,6 @@ class ScottBurgan40(Fuel):
                 w_0[4] = live_h_new 
 
             s = np.array(self._fuel_models["s"][model_id])
-            f_i = np.array(self._fuel_models["f_i"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
             mx_dead = self._fuel_models["mx_dead"][model_id]
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
