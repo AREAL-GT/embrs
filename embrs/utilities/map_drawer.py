@@ -2,14 +2,20 @@
 """
 
 from embrs.models.fuel_models import FuelConstants as fc
+from embrs.utilities.data_classes import LandscapeData
 
 from typing import Tuple
 import rasterio
 import numpy as np
-from shapely.geometry import Polygon, Point, LineString
+from shapely.geometry import shape, Polygon, Point, LineString
+from shapely.ops import transform
 from PyQt5.QtWidgets import QApplication, QInputDialog
+from tkinter.filedialog import askopenfilename
+import shapefile
+import tkinter as tk
 from matplotlib.widgets import Button, RectangleSelector
 from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.patches import Polygon as MplPolygon
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('TkAgg')
@@ -103,9 +109,12 @@ class PolygonDrawer:
     :param fig: matplotlib figure object used to draw on top of
     :type fig: matplotlib.figure.Figure
     """
-    def __init__(self, fig: matplotlib.figure.Figure):
+    def __init__(self, lcp_data: LandscapeData, fig: matplotlib.figure.Figure):
         """Constructor method that initializes all variables and sets up the GUI
         """
+        self.raster_tranform = lcp_data.transform
+        self.raster_height_px = lcp_data.rows
+
         self.fig = fig
 
         if fig.axes:
@@ -178,6 +187,10 @@ class PolygonDrawer:
         self.clear_button.set_active(False)
         self.clear_button.color = '0.85'
         self.clear_button.hovercolor = self.clear_button.color
+
+        self.ax_shapefile_button = plt.axes([0.345, 0.93, 0.15, 0.04])
+        self.shapefile_button = Button(self.ax_shapefile_button, 'Load Shapefile')
+        self.shapefile_button.on_clicked(self.load_shapefile)
 
         # Create no fire breaks button but keep it invisible until polygons are specified
         self.no_fire_breaks_button.on_clicked(self.skip_fire_breaks)
@@ -493,6 +506,85 @@ class PolygonDrawer:
 
         self.fig.canvas.draw_idle()
 
+    def load_shapefile(self, event=None):
+
+        DIV_FACTOR = 3
+
+        root = tk.Tk()
+        root.withdraw()
+        shp_path = askopenfilename(filetypes=[("Shapefiles", '*.shp')])
+
+        if not shp_path:
+            return
+
+        inverse_transform = ~self.raster_tranform
+
+        def world_to_raster_coords(geom):
+            return transform(lambda x, y: inverse_transform * (x, y), geom)
+
+        sf = shapefile.Reader(shp_path)
+
+        for record in sf.shapeRecords():
+            geom_raw = shape(record.shape.__geo_interface__)
+            geom = world_to_raster_coords(geom_raw)
+
+            # Fire-break mode
+            if self.mode == 'fire-breaks':
+                if isinstance(geom, LineString):
+                    coords = [(x / DIV_FACTOR, (self.raster_height_px - y) / DIV_FACTOR) for x, y in geom.coords]
+                    self.line_segments.append(coords)
+
+                    # Prompt for width
+                    width = self.get_break_width()
+                    self.fire_break_widths.append(width)
+
+                    # Plot blue line with width
+                    x, y = zip(*coords)
+                    line_artist, = self.ax.plot(x, y, color='blue', linewidth=width*0.25)
+                    self.lines.append(line_artist)
+
+                else:
+                    print("Only LineString geometries are supported for fire breaks. Skipping.")
+                    continue
+
+            # Ignition mode
+            elif self.mode == 'ignition':
+                if isinstance(geom, Polygon):
+                    try:
+                        coords = list(geom.exterior.coords)
+                        coords = [(x / DIV_FACTOR, (self.raster_height_px - y) / DIV_FACTOR) for x, y in coords]
+
+                        poly = Polygon(coords)
+                        self.polygons.append(poly)
+
+                        if len(coords) < 3:
+                            print("Polygon has fewer than 3 points. Skipping.")
+                            continue
+
+                        mpl_poly = MplPolygon(coords, closed=True, facecolor='red', edgecolor='None', alpha=0.5)
+                        self.ax.add_patch(mpl_poly)
+
+                    except Exception as e:
+                        print(f"Failed to plot polygon: {e}")
+                        continue
+
+                elif isinstance(geom, LineString):
+                    coords = [(x / DIV_FACTOR, (self.raster_height_px - y) / DIV_FACTOR) for x, y in geom.coords]
+                    self.ignition_lines.append(list(coords))
+                    x, y = zip(*coords)
+                    self.ax.plot(x, y, 'r')
+
+                elif isinstance(geom, Point):
+                    x, y = geom.x / DIV_FACTOR, (self.raster_height_px - geom.y) / DIV_FACTOR
+                    self.ignition_points.append((x, y))
+                    artist = self.ax.scatter(x, y, edgecolors='r', facecolors='r', marker='o')
+                    self.point_artists.append(artist)
+
+        self.set_button_status(True, True)
+        self.ax.set_title("Shapefile geometries loaded. Click 'Apply' to continue or draw more.")
+        self.fig.canvas.draw()
+
+                
     def set_button_status(self, apply_active: bool, clear_active: bool):
         """Set the status of the 'apply' and 'clear' buttons to set whether they are active or not
 

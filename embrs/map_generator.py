@@ -26,6 +26,10 @@ from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.models.fuel_models import FuelConstants as fc
 from embrs.utilities.data_classes import MapParams, MapDrawerData, GeoInfo, LandscapeData
 
+PX_RES = 30
+DATA_RES = 10
+
+
 def generate_map_from_file(map_params: MapParams):
     """_summary_
 
@@ -65,7 +69,7 @@ def generate_map_from_file(map_params: MapParams):
         raster_roads = interpolate_roads(raster_roads)
 
         # Only keep parts of roads within sim boundaries
-        map_params.roads = trim_roads(map_params, raster_roads)
+        map_params.roads = trim_and_transform_roads(map_params, raster_roads)
         
     else:
         map_params.roads = None
@@ -122,7 +126,7 @@ def interpolate_roads(roads: List, spacing_m: float = 0.5):
 
     return interpolated_roads
 
-def trim_roads(map: MapParams, raster_roads: List) -> List:
+def trim_and_transform_roads(map: MapParams, raster_roads: List) -> List:
     """_summary_
 
     Args:
@@ -136,19 +140,18 @@ def trim_roads(map: MapParams, raster_roads: List) -> List:
     for road, road_type, road_width in raster_roads:
         x_trimmed, y_trimmed = [], []
         x, y = zip(*road)
+        x_adj = np.array(x) / (PX_RES/DATA_RES)
+        y_adj = np.array(y) / (PX_RES/DATA_RES)
 
         for i in range(len(x)):
-            if 0 < x[i] < map.lcp_data.width_m and 0 < y[i] < map.lcp_data.height_m:
-                x_trimmed.append(x[i])
-                y_trimmed.append(y[i])
+            if 0 < x[i]*DATA_RES< map.lcp_data.width_m and 0 < y[i]*DATA_RES < map.lcp_data.height_m:
+                x_trimmed.append(x_adj[i])
+                y_trimmed.append(y_adj[i])
 
         if x_trimmed and y_trimmed:
-            trimmed_roads.append(((x_trimmed, y_trimmed), road_type, road_width))
-        
-        x_display = np.array(x_trimmed) / 30
-        y_display = np.array(y_trimmed) / 30
+            trimmed_roads.append(((np.array(x_trimmed)*PX_RES, np.array(y_trimmed)*PX_RES), road_type, road_width))
 
-        plt.plot(x_display, y_display, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25)
+        plt.plot(x_trimmed, y_trimmed, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25)
 
     return trimmed_roads
 
@@ -186,9 +189,9 @@ def world_to_pixel(x: float, y: float, transform: rasterio.Affine, raster_height
     Returns:
         (int, int): (col, row) in raster coordinates.
     """
-    col, row = ~transform * (x, y)
-    row = raster_height - int(round(row)) - 1  
-    return int(round(col)), int(round(row))
+    x, y = ~transform * (x, y)
+    y = raster_height - y  
+    return x, y
 
 def find_warping_angle(array: np.ndarray) -> float:
     """_summary_
@@ -581,7 +584,7 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
             else:
                 # Use bilinear resampling for continuous data
                 resampling_method = Resampling.bilinear
-            resampled_band, transform = resample_raster(array[i], src.crs, new_transform, 1, resampling_method)
+            resampled_band, transform = resample_raster(array[i], src.crs, new_transform, DATA_RES, resampling_method)
             resampled_bands.append(resampled_band)
 
         resampled_array = np.stack(resampled_bands, axis=0)
@@ -600,9 +603,9 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         fccs_map=resampled_array[8],
         rows=rows,
         cols=cols,
-        resolution=1,
-        width_m=cols,
-        height_m=rows,
+        resolution=DATA_RES,
+        width_m=cols*DATA_RES,
+        height_m=rows*DATA_RES,
         transform=transform,
         crs = src.crs
 
@@ -617,7 +620,7 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
 
     return src.bounds
 
-def get_user_data(fig: matplotlib.figure.Figure) -> dict:
+def get_user_data(fig: matplotlib.figure.Figure, lcp_data: LandscapeData) -> dict:
     """Function that generates GUI for user to specify initial ignitions and fire-breaks. Returns
     dictionary containing user inputs.
 
@@ -629,7 +632,7 @@ def get_user_data(fig: matplotlib.figure.Figure) -> dict:
     user_data = {}
 
     # display map
-    drawer = PolygonDrawer(fig)
+    drawer = PolygonDrawer(lcp_data, fig)
     plt.show()
 
     if not drawer.valid:
@@ -656,17 +659,17 @@ def transform_geometries(geometries: list) -> list:
 
     for geo in geometries:
         if isinstance(geo, Point):
-            transformed_pt = Point(geo.x * 30, geo.y * 30)
+            transformed_pt = Point(geo.x * PX_RES, geo.y * PX_RES)
             transformed_geometries.append(transformed_pt)
 
         elif isinstance(geo, LineString):
-            scaled_coords = [(x * 30, y * 30) for x, y in geo.coords]
+            scaled_coords = [(x * PX_RES, y * PX_RES) for x, y in geo.coords]
             scaled_coords = remove_consec_duplicates(scaled_coords)
             transformed_line = LineString(scaled_coords)
             transformed_geometries.append(transformed_line)
 
         elif isinstance(geo, Polygon):
-            scaled_coords = [(x * 30, y * 30) for x, y in geo.exterior.coords]
+            scaled_coords = [(x * PX_RES, y * PX_RES) for x, y in geo.exterior.coords]
             transformed_polygon = Polygon(scaled_coords)
             transformed_geometries.append(transformed_polygon)
 
@@ -741,7 +744,7 @@ def main():
                     labelbottom = False)
 
     generate_map_from_file(map_params)
-    user_data = get_user_data(fig)
+    user_data = get_user_data(fig, map_params.lcp_data)
     save_to_file(map_params, user_data)
 
 if __name__ == "__main__":
