@@ -262,21 +262,12 @@ def load_sim_params(cfg_path: str) -> SimParams:
         if weather_file is None:
             raise ValueError(f"Error in {cfg_path}: 'file' must be specified in the [Weather] section when using 'File' input type.")
         
-        with open(weather_file, "rb") as f:
-            weather = json.load(f)
+        end_iso_datetime = config["Weather"].get("end_datetime", None)
+        end_datetime = datetime.fromisoformat(end_iso_datetime)
+        duration_s = (end_datetime - start_datetime).total_seconds()
 
-        # get duration from number of entries
-        weather_time_step_min = weather['time_step_min']
-        weather_time_step_hr = weather_time_step_min / 60
-
-        weather_len = len(weather['weather_entries']["wind_speed"])
-
-        for key in weather['weather_entries']:
-            if len(weather['weather_entries'][key]) != weather_len:
-                raise ValueError(f"Error in {cfg_path}: All weather entries must have the same number of entries.")
-
-        duration_s = weather_time_step_hr * weather_len * 3600
-        end_datetime = start_datetime + timedelta(seconds=duration_s)
+        if duration_s <= 0:
+            raise ValueError(f"End datetime must come after start datetime")
 
     elif weather_input_type == "OpenMeteo":
         end_iso_datetime = config["Weather"].get("end_datetime", None)
@@ -290,7 +281,6 @@ def load_sim_params(cfg_path: str) -> SimParams:
             end_datetime = datetime.fromisoformat(end_iso_datetime)
             duration_s = (end_datetime - start_datetime).total_seconds()
 
-
     if start_datetime >= end_datetime:
         raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
 
@@ -302,7 +292,8 @@ def load_sim_params(cfg_path: str) -> SimParams:
         end_datetime=end_datetime
     )
 
-    init_mf = config["Weather"].getfloat("init_mf", 0.08)
+    init_mf_list_str = config["Weather"].get("init_mf_list", "0.06, 0.07, 0.08")
+    init_mf_list = [float(val.strip()) for val in init_mf_list_str.split(",")]
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
     log_folder = config["Simulation"].get("log_folder", None)
@@ -343,7 +334,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
         weather_input=weather_params,
         t_step_s=t_step_s,
         cell_size=cell_size,
-        init_mf=init_mf,
+        init_mf=init_mf_list,
         model_spotting=model_spotting,
         canopy_species=canopy_species,
         dbh_cm=dbh_cm,

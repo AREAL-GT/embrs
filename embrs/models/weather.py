@@ -23,7 +23,7 @@ class WeatherStream:
             self.get_stream_from_openmeteo()
         elif input_type == "File":
             if geo is not None:
-                self.get_stream_from_file()
+                self.get_stream_from_wxs()
             else:
                 self.get_uniform_stream()
         else:
@@ -148,182 +148,177 @@ class WeatherStream:
         self.input_wind_vel_units = "mps"
         self.input_temp_units = "F"
 
-    def get_stream_from_file(self):
 
+    def get_stream_from_wxs(self):
         file = self.params.file
-        with open(file) as f:
-            data = json.load(f)
 
-        # Get the time step, used to resample if necessary
-        time_step_hr = data["time_step_min"] / 60
+        weather_data = {
+            "datetime": [],
+            "temperature": [],
+            "rel_humidity": [],
+            "rain": [],
+            "wind_speed": [],
+            "wind_direction": [],
+            "cloud_cover": [],
+        }
 
-        # Setup the Open-Meteo API client with cache and retry on error
-        cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
-        retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
-        openmeteo = openmeteo_requests.Client(session = retry_session)
         local_tz = pytz.timezone(self.geo.timezone)
+        units = "english"
 
-        # Buffer times and format for OpenMeteo
-        start_datetime = self.params.start_datetime
-        start_datetime = local_tz.localize(start_datetime)
+        # ── Step 1: Parse WXS line-by-line ───────────────────────────
+        with open(file, "r") as f:
+            header_found = False
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("RAWS_UNITS:"):
+                    units = line.split(":")[1].strip().lower()
+                    continue
+                elif line.startswith("RAWS_ELEVATION:"):
+                    continue
+                elif line.startswith("RAWS:"):
+                    continue
+                elif line.startswith("Year") and not header_found:
+                    header_found = True
+                    continue
+                if not header_found:
+                    continue
+
+                parts = line.split()
+                if len(parts) != 10:
+                    continue
+                try:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    hour = int(parts[3].zfill(4)[:2])
+                    dt = local_tz.localize(datetime(year, month, day, hour))
+                    weather_data["datetime"].append(dt)
+                    weather_data["temperature"].append(float(parts[4]))
+                    weather_data["rel_humidity"].append(float(parts[5]))
+                    weather_data["rain"].append(float(parts[6]))
+                    weather_data["wind_speed"].append(float(parts[7]))
+                    weather_data["wind_direction"].append(float(parts[8]))
+                    weather_data["cloud_cover"].append(float(parts[9]))
+                except Exception as e:
+                    print(f"Skipping malformed line: {line} ({e})")
+                    continue
+
+        df = pd.DataFrame(weather_data).set_index("datetime")
+
+        if len(df.index) < 2:
+            raise ValueError("WXS file does not contain enough data to determine time step.")
+
+        # ── Step 2: Infer time step and apply unit conversions ───────
+        time_step_min = int((df.index[1] - df.index[0]).total_seconds() / 60)
+        if units == "english":
+            df["rain"] *= 2.54
+            df["wind_speed"] *= 0.44704
+        elif units == "metric":
+            df["temperature"] = df["temperature"] * 9 / 5 + 32
+            df["rain"] /= 10
+        else:
+            raise ValueError(f"Unknown units: {units}")
+
+        # ── Step 3: Fetch irradiance from Open-Meteo ─────────────────
+        # Use buffer around sim dates
+        start_datetime = local_tz.localize(self.params.start_datetime)
+        end_datetime = local_tz.localize(self.params.end_datetime)
+
+        # Check bounds
+        wxs_start = df.index.min()
+        wxs_end = df.index.max()
+
+        if start_datetime < wxs_start:
+            raise ValueError(f"Start datetime {start_datetime} is before WXS data begins at {wxs_start}.")
+
+        if end_datetime > wxs_end:
+            raise ValueError(f"End datetime {end_datetime} is after WXS data ends at {wxs_end}.")
+
         buffered_start = start_datetime - timedelta(days=1)
-        start_datetime_utc = buffered_start.astimezone(pytz.utc)
-
-        end_datetime = self.params.end_datetime
-        end_datetime = local_tz.localize(end_datetime)
         buffered_end = end_datetime + timedelta(days=1)
-        end_datetime_utc = buffered_end.astimezone(pytz.utc)
+
+        cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
+        retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+        openmeteo = openmeteo_requests.Client(session=retry_session)
 
         url = "https://archive-api.open-meteo.com/v1/archive"
         api_input = {
             "latitude": self.geo.center_lat,
             "longitude": self.geo.center_lon,
-            "start_date": start_datetime_utc.date().strftime("%Y-%m-%d"),
-            "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
-            "hourly": ["cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
+            "start_date": buffered_start.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
+            "end_date": buffered_end.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
+            "hourly": ["shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
             "timezone": "auto"
         }
+
         responses = openmeteo.weather_api(url, params=api_input)
         response = responses[0]
-
         self.ref_elev = response.Elevation()
+
         hourly = response.Hourly()
-        hourly_cloud_cover = hourly.Variables(0).ValuesAsNumpy()
-        hourly_ghi = hourly.Variables(1).ValuesAsNumpy()
-        hourly_dhi = hourly.Variables(2).ValuesAsNumpy()
-        hourly_dni = hourly.Variables(3).ValuesAsNumpy()
+        hourly_data = {
+            "ghi": hourly.Variables(0).ValuesAsNumpy(),
+            "dhi": hourly.Variables(1).ValuesAsNumpy(),
+            "dni": hourly.Variables(2).ValuesAsNumpy(),
+            "date": pd.date_range(
+                start=pd.to_datetime(hourly.Time(), unit="s"),
+                end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
+                freq=pd.Timedelta(seconds=hourly.Interval()),
+                inclusive="left"
+            ).tz_localize(local_tz)
+        }
 
-        hourly_data = {}
+        irradiance_df = pd.DataFrame(hourly_data).set_index("date")
 
-        hourly_data["date"] = pd.date_range(
-            start=pd.to_datetime(hourly.Time(), unit="s"),
-            end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
-            freq=pd.Timedelta(seconds=hourly.Interval()),
-            inclusive="left"
-        ).tz_localize(local_tz)
+        # ── Step 4: Resample Open-Meteo irradiance to WXS resolution ─
+        target_freq = f"{time_step_min}T"
+        if time_step_min < 60:
+            irradiance_df = irradiance_df.resample(target_freq).interpolate(method="linear")
+        elif time_step_min > 60:
+            irradiance_df = irradiance_df.resample(target_freq).mean()
 
-        self.times = pd.date_range(hourly_data["date"][0], hourly_data["date"][-1], freq='h', tz=local_tz)
+        # ── Step 5: Align WXS and Open-Meteo data on datetime index ──
+        df = df.loc[(df.index >= start_datetime) & (df.index <= end_datetime)]
+        irradiance_df = irradiance_df.loc[df.index]
 
-        hourly_data["cloud_cover"] = hourly_cloud_cover
-        hourly_data["ghi"] = hourly_ghi
-        hourly_data["dhi"] = hourly_dhi
-        hourly_data["dni"] = hourly_dni
-        
-        solpos = pvlib.solarposition.get_solarposition(self.times, self.geo.center_lat, self.geo.center_lon)
-        
-        hourly_data["solar_zenith"] = solpos["zenith"].values
-        hourly_data["solar_azimuth"] = solpos["azimuth"].values
+        df["ghi"] = irradiance_df["ghi"].values
+        df["dhi"] = irradiance_df["dhi"].values
+        df["dni"] = irradiance_df["dni"].values
 
-        # Convert Open-Meteo hourly data into DataFrame
-        df_hourly = pd.DataFrame({
-            "date": hourly_data["date"],
-            "cloud_cover": hourly_data["cloud_cover"],
-            "ghi": hourly_data["ghi"],
-            "dhi": hourly_data["dhi"],
-            "dni": hourly_data["dni"],
-            "solar_zenith": hourly_data["solar_zenith"],
-            "solar_azimuth": hourly_data["solar_azimuth"],
-        })
+        # ── Step 6: Add solar geometry ───────────────────────────────
+        solpos = pvlib.solarposition.get_solarposition(df.index, self.geo.center_lat, self.geo.center_lon)
+        df["solar_zenith"] = solpos["zenith"].values
+        df["solar_azimuth"] = solpos["azimuth"].values
 
-        # Set index for resampling
-        df_hourly.set_index("date", inplace=True)
+        # ── Step 7: Daily stats for GSI ──────────────────────────────
+        daily_morning_rh = df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
+        daily_afternoon_rh = df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
+        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
+        daily_avg_temp = df["temperature"].resample('D').mean()
 
-        # Define the target frequency
-        target_freq = f"{int(time_step_hr * 60)}T"  # Convert hours to minutes
-
-        # Only resample Open-Meteo data if `time_step_hr` differs from 1 hour
-        if time_step_hr < 1:  # Upsampling: interpolate missing values
-            df_resampled = df_hourly.resample(target_freq).interpolate(method="linear")
-        elif time_step_hr > 1:  # Downsampling: aggregate with mean
-            df_resampled = df_hourly.resample(target_freq).mean()
-        else:  # time_step_hr == 1: Use the original data
-            df_resampled = df_hourly.copy()
-
-        # Convert resampled Open-Meteo data to dictionary
-        resampled_hourly_data = {col: df_resampled[col].values for col in df_resampled.columns}
-        resampled_hourly_data["date"] = df_resampled.index
-        
-        resampled_hourly_data = filter_hourly_data(resampled_hourly_data, start_datetime, end_datetime)
-
-        # File-based data is already at the correct time step, so use it directly
-        resampled_hourly_data["wind_speed"] = data["weather_entries"]["wind_speed"]
-        resampled_hourly_data["wind_direction"] = data["weather_entries"]["wind_direction"]
-        resampled_hourly_data["temperature"] = data["weather_entries"]["temperature"]
-        resampled_hourly_data["rel_humidity"] = data["weather_entries"]["rel_humidity"]
-
-        # Apply rain unit conversion if necessary
-        rain_units = data["rain_units"]
-        if rain_units == "mm":
-            resampled_hourly_data["rain"] = np.array(data["weather_entries"]["rain"]) * 0.1
-        elif rain_units == "in":
-            resampled_hourly_data["rain"] = np.array(data["weather_entries"]["rain"]) * 2.54
-        elif rain_units == "cm":
-            resampled_hourly_data["rain"] = np.array(data["weather_entries"]["rain"])
-        else:
-            raise ValueError("Rain units invalid, must be one of 'mm', 'in', or 'cm'")
-
-        # Update times after filtering
-        self.times = resampled_hourly_data["date"]
-
-        # Ensure all resampled data arrays have the same length
-        min_length = min(len(arr) for arr in resampled_hourly_data.values() if isinstance(arr, np.ndarray))
-
-        # Trim all arrays to the minimum length
-        for key in resampled_hourly_data:
-            if isinstance(resampled_hourly_data[key], np.ndarray):
-               resampled_hourly_data[key] = resampled_hourly_data[key][:min_length]
-
-        # Convert resampled data into a DataFrame
-        resampled_df = pd.DataFrame(resampled_hourly_data).set_index("date")
-
-        # Extract morning (08:00) and afternoon (14:00) values
-        daily_morning_rh = resampled_df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
-        daily_afternoon_rh = resampled_df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
-
-        # Compute daily RH average as per NFDRS convention
-        daily_avg_rh = pd.DataFrame({
-            "morning": daily_morning_rh,
-            "afternoon": daily_afternoon_rh
-        }).mean(axis=1)
-
-        # Compute daily temperature mean (can use max/min if needed)
-        daily_avg_temp = resampled_df.resample('D')["temperature"].mean()  # Alternative: (Tmax + Tmin) / 2
-
-        # Ensure temperature and rel_humidity have the same length
-        min_length = min(len(daily_avg_rh), len(daily_avg_temp))
-
-        # Trim both to the minimum length
-        daily_avg_rh = daily_avg_rh.iloc[:min_length]
-        daily_avg_temp = daily_avg_temp.iloc[:min_length]
-
-        # Ensure date index also matches
-        daily_index = daily_avg_rh.index  # Use RH index (since RH is usually limiting)
-        daily_avg_temp = daily_avg_temp.reindex(daily_index)  # Align temp to RH
-
-        # Create final daily DataFrame
+        min_len = min(len(daily_avg_rh), len(daily_avg_temp))
         daily_data = pd.DataFrame({
-            "date": daily_avg_rh.index,
-            "temperature": daily_avg_temp.values,
-            "rel_humidity": daily_avg_rh.values
+            "date": daily_avg_rh.index[:min_len],
+            "temperature": daily_avg_temp.values[:min_len],
+            "rel_humidity": daily_avg_rh.values[:min_len]
         }).reset_index(drop=True)
 
         gsi = self.calc_GSI(daily_data)
-
-        # Use GSI information to determine what live fuel moisture is
         self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
-
-        # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
 
-        # Generate stream with final data
-        self.stream = list(self.generate_stream(resampled_hourly_data))
+        # ── Step 8: Package final stream ─────────────────────────────
+        hourly_data = {col: df[col].values for col in df.columns}
+        hourly_data["date"] = df.index
+        self.times = df.index
+        self.stream = list(self.generate_stream(hourly_data))
 
-        # Set units and time step based on OpenMeteo params
-        self.time_step = data["time_step_min"]
-        self.input_wind_ht = data["wind_height"]
-        self.input_wind_ht_units = data["wind_height_units"]
-        self.input_wind_vel_units = data["wind_speed_units"]
-        self.input_temp_units = data["temperature_units"]
+        # ── Step 9: Set metadata attributes ──────────────────────────
+        self.time_step = time_step_min
+        self.input_wind_ht = 6.1
+        self.input_wind_ht_units = "m"
+        self.input_wind_vel_units = "mps"
+        self.input_temp_units = "F"
 
     def get_uniform_stream(self):
         file = self.params.file

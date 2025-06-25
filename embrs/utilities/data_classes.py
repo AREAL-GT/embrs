@@ -187,7 +187,7 @@ class SimParams:
     weather_input: Optional[WeatherParams] = None
     t_step_s: Optional[int] = None
     cell_size: Optional[int] = None
-    init_mf: Optional[float] = 0.08
+    init_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
     model_spotting: Optional[bool] = False
     canopy_species: Optional[int] = 5
     dbh_cm: Optional[float] = 20.0

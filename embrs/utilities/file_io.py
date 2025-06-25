@@ -407,7 +407,9 @@ class SimFolderSelector(FileSelectBase):
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.weather_file = tk.StringVar()
-        self.init_mf = tk.DoubleVar(value=8)
+        self.init_mf_1hr = tk.DoubleVar(value=6)
+        self.init_mf_10hr = tk.DoubleVar(value=7)
+        self.init_mf_100hr = tk.DoubleVar(value=8)
         self.time_step = tk.IntVar(value=5)
         self.cell_size = tk.IntVar(value=10)
         self.model_spotting = tk.BooleanVar(value=True)
@@ -489,11 +491,13 @@ class SimFolderSelector(FileSelectBase):
         tk.Spinbox(self.open_meteo_frame, from_=0, to=59, width=5, textvariable=self.end_min).grid(row=1, column=4)
         ttk.Combobox(self.open_meteo_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.end_ampm).grid(row=1, column=5)
 
-        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(self.weather_tab, "Weather file:", self.weather_file, [("JSON Files", "*.json")])
+        _, self.weather_entry, self.weather_button, self.weather_file_frame = self.create_file_selector(self.weather_tab, "Weather file:", self.weather_file, [("Weather Stream Files", "*.wxs")])
 
         weather_settings = self.create_frame(self.weather_tab)
         self.create_spinbox_with_two_labels(weather_settings, "Wind Mesh Resolution:", np.inf, self.mesh_resolution, "meters", row=0, column=0)
-        self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture:", 100, self.init_mf, "%", row=0, column=1)
+        self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture: 1 hr:", 100, self.init_mf_1hr, "%", row=1, column=0)
+        self.create_spinbox_with_two_labels(weather_settings, "10 hr:", 100, self.init_mf_10hr, "%", row=1, column=1)
+        self.create_spinbox_with_two_labels(weather_settings, "100 hr:", 100, self.init_mf_100hr, "%", row=1, column=2)
 
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
@@ -826,7 +830,7 @@ class SimFolderSelector(FileSelectBase):
                 log_folder = self.log_folder.get(),
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
-                init_mf = self.init_mf.get()/100,
+                init_mf = [self.init_mf_1hr.get()/100, self.init_mf_10hr.get()/100, self.init_mf_100hr.get()/100],
                 model_spotting = self.model_spotting.get(),
                 canopy_species = self.canopy_species,
                 dbh_cm = self.dbh_cm.get(),

@@ -223,17 +223,17 @@ class Cell:
         if 0 in indices:
             self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
             self.dfms.append(self.dfm1)
-            fmois[0] = self.init_dead_mf
+            fmois[0] = self.init_dead_mf[0]
         if 1 in indices:
             self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
             self.dfms.append(self.dfm10)
-            fmois[1] = self.init_dead_mf
+            fmois[1] = self.init_dead_mf[1]
         if 2 in indices:
             self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
             self.dfms.append(self.dfm100)
-            fmois[2] = self.init_dead_mf
+            fmois[2] = self.init_dead_mf[2]
         if 3 in indices:
-            fmois[3] = self.init_dead_mf
+            fmois[3] = self.init_dead_mf[0]
         if 4 in indices:
             fmois[4] = self.init_live_h_mf
         if 5 in indices:
@@ -326,7 +326,7 @@ class Cell:
         t_f_celsius, h_f_frac = apply_site_specific_correction(self, elev_ref, curr_weather)
         solar_radiation = calc_local_solar_radiation(self, curr_weather)
 
-        for dfm in self.dfms:
+        for i, dfm in enumerate(self.dfms):
             if not dfm.initialized():
                 dfm.initializeEnvironment(
                     t_f_celsius, # Intial ambient air temeperature
@@ -335,7 +335,7 @@ class Cell:
                     0, # Initial cumulative rainfall (cm)
                     t_f_celsius, # Initial stick temperature (degrees C)
                     h_f_frac, # Intial stick surface relative humidity (g/g)
-                    self.init_dead_mf, # Initial stick fuel moisture fraction (g/g)
+                    self.init_dead_mf[0], # Initial stick fuel moisture fraction (g/g)
                     bp0) # Initial stick barometric pressure (cal/cm^3)
 
             dfm.update_internal(
