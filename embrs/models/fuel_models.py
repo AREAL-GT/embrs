@@ -328,56 +328,56 @@ class FuelConstants:
 
     # Color mapping for each fuel type
     fuel_color_mapping = {
-                1: 'xkcd:pale green', 2:'xkcd:lime', 3: 'xkcd:bright green',
-                4: 'xkcd:teal', 5: 'xkcd:bluish green', 6: 'xkcd:greenish teal',
-                7: 'xkcd:light blue green', 8: 'xkcd:pale olive' , 9: 'xkcd:olive',
-                10: 'xkcd:light forest green', 11: 'xkcd:bright olive',
-                12: 'xkcd:tree green', 13: 'xkcd:avocado green', 91: '#830089',
-                92: '#9ea1ef' , 93: "#e872ff", 98: '#0000ff',
-                99: 'xkcd:black', -100: 'xkcd:red', 
-                101: "#ffebbe",             # GR1
-                102: "#ffd273",             # GR2
-                103: "#ffeb8b",             # GR3
-                104: "#ffff73",             # GR4
-                105: "#f4dd28",             # GR5
-                106: "#e6e640",             # GR6
-                107: "#ccc573",             # GR7
-                108: "#8b854d",             # GR8
-                109: "xkcd:drab green",     # GR9
+                1: '#ffff00', 2:'#00e0e0', 3: '#ffb900',
+                4: '#801010', 5: '#985a1b', 6: '#80302f',
+                7: '#a26415', 8: '#6699cb' , 9: '#008484',
+                10: '#82c160', 11: '#ff84ff',
+                12: '#bf57bf', 13: '#7f2b7f', 91: '#cdcdcd',
+                92: '#999999' , 93: "#666666", 98: '#0600ff',
+                99: '#000000', -100: 'xkcd:red', 
+                101: "#ffff98",             # GR1
+                102: "#ffff40",             # GR2
+                103: "#ffff5f",             # GR3
+                104: "#ffe500",             # GR4
+                105: "#ffff20",             # GR5
+                106: "#ffcc01",             # GR6
+                107: "#fca401",             # GR7
+                108: "#fa8b00",             # GR8
+                109: "#f96600",     # GR9
 
-                121: "#ffaa00",             # GS1
-                122: "#ffa67e",             # GS2
-                123: "#ff6300",             # GS3
-                124: "#cc6600",             # GS4
+                121: "#99994f",             # GS1
+                122: "#77771a",             # GS2
+                123: "#888833",             # GS3
+                124: "#666600",             # GS4
 
-                141: "#d7c19d",             # SH1
-                142: "#d7af9d",             # SH2
-                143: "#cc8966",             # SH3
-                144: "#895a44",             # SH4
-                145: "#ccaa66",             # SH5
-                146: "#ed7044",             # SH6
-                147: "#cc7c39",             # SH7
-                148: "#a83700",             # SH8
-                149: "#731a00",             # SH9
+                141: "#c38402",             # SH1
+                142: "#c38402",             # SH2
+                143: "#b87900",             # SH3
+                144: "#8d5022",             # SH4
+                145: "#8d5022",             # SH5
+                146: "#793c30",             # SH6
+                147: "#804040",             # SH7
+                148: "#802020",             # SH8
+                149: "#660000",             # SH9
 
-                161: "#e8ffbe",             # TU1
-                162: "#aaff00",             # TU2
-                163: "#b3d79d",             # TU3
-                164: "#70a800",             # TU4
-                165: "#257300",             # TU5
+                161: "#d9fea0",             # TU1
+                162: "#addf80",             # TU2
+                163: "#2b8420",             # TU3
+                164: "#56a240",             # TU4
+                165: "#006600",             # TU5
 
-                181: "#beffe8",             # TL1
-                182: "#00ffc5",             # TL2
-                183: "#bed2ff",             # TL3
-                184: "#7a68ed",             # TL4
-                185: "#bee8ff",             # TL5
-                186: "#00c5ff",             # TL6
-                187: "#0084a8",             # TL7
-                188: "#005be6",             # TL8
-                189: "#4d6e90",             # TL9
+                181: "#aad5ff",             # TL1
+                182: "#02ffff",             # TL2
+                183: "#88b7e5",             # TL3
+                184: "#447bb2",             # TL4
+                185: "#235d99",             # TL5
+                186: "#01c1c1",             # TL6
+                187: "#004080",             # TL7
+                188: "#00a3a3",             # TL8
+                189: "#006565",             # TL9
 
-                201: "#e8beff",             # SB1
-                202: "#c500ff",             # SB2
-                203: "#ffbee8",             # SB3
-                204: "#ff7e7e",             # SB4
+                201: "#df6ddf",             # SB1
+                202: "#9f419f",             # SB2
+                203: "#5f145f",             # SB3
+                204: "#3f003f",             # SB4
     }
