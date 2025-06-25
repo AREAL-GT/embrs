@@ -470,7 +470,7 @@ class SimFolderSelector(FileSelectBase):
         weather_option_frame = self.create_frame(self.weather_tab)
         tk.Label(weather_option_frame, text="Weather Option:").grid(row=0, column=0)
         tk.Checkbutton(weather_option_frame, text='Import OpenMeteo Weather', variable=self.use_open_meteo, command=self.open_meteo_toggled).grid(row=0, column=1)
-        tk.Checkbutton(weather_option_frame, text='Import Weather .json File', variable=self.use_weather_file, command=self.weather_file_toggled).grid(row=0, column=2)
+        tk.Checkbutton(weather_option_frame, text='Import Weather Stream File (.wxs)', variable=self.use_weather_file, command=self.weather_file_toggled).grid(row=0, column=2)
 
         self.open_meteo_frame = self.create_frame(self.weather_tab)
         tk.Label(self.open_meteo_frame, text="Start Date:").grid(row=0, column=0)
@@ -518,13 +518,11 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(self.model_content_frame, "Time Step (s):", np.inf, self.time_step, "seconds", row=0, column=0)
         self.create_spinbox_with_two_labels(self.model_content_frame, "Cell Size (m):", np.inf, self.cell_size, "meters", row=0, column=1)
 
-        self.create_spinbox_with_two_labels(self.model_content_frame, "Duration (hours):", self.max_duration, self.duration, "hours", row=1, column=0)
+        self.duration_spinbox = self.create_spinbox_with_two_labels(self.model_content_frame, "Duration (hours):", self.max_duration, self.duration, "hours", row=1, column=0)
         self.create_spinbox_with_two_labels(self.model_content_frame, "Iterations:", np.inf, self.num_runs, None, row=1, column=1)
 
         self.viz_frame = self.create_frame(self.model_tab)
         tk.Checkbutton(self.viz_frame, text = "Visualize in Real-time", variable=self.viz_on, onvalue=True, offvalue=False).grid(row = 0, column=0, pady=10)
-
-
 
         # Spotting toggle
         self.spotting_frame = self.create_frame(self.model_tab)
@@ -583,17 +581,12 @@ class SimFolderSelector(FileSelectBase):
             self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
-            # Enable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='normal')
+            self.duration_spinbox.configure(state='normal')
         else:
             self.use_weather_file.set(True)
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='disabled')
-
             self.weather_button.configure(state='normal')
             self.weather_entry.configure(state='normal')
-            self.max_duration = np.inf # No limit on duration when using a file
+            self.duration_spinbox.configure(state='disabled')
 
         self.validate_fields()
 
@@ -602,12 +595,10 @@ class SimFolderSelector(FileSelectBase):
         if self.use_weather_file.get():
             # Turn off OpenMeteo option
             self.use_open_meteo.set(False)
-            # Disable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='disabled')
             # Enable weather file widgets
             self.weather_button.configure(state='normal')
             self.weather_entry.configure(state='normal')
+            self.duration_spinbox.configure(state='disabled')
         else:
             # Prevent both options from being off
             self.use_open_meteo.set(True)
@@ -616,10 +607,7 @@ class SimFolderSelector(FileSelectBase):
             self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
-            # Enable OpenMeteo widgets
-            for widget in self.open_meteo_frame.winfo_children():
-                widget.configure(state='normal')
-
+            self.duration_spinbox.configure(state='normal')
 
     def canopy_species_changed(self, *args):        
         self.canopy_species = CanopySpecies.species_ids[self.canopy_species_name.get()]
@@ -680,28 +668,43 @@ class SimFolderSelector(FileSelectBase):
         filepath = self.weather_file.get()
 
         if os.path.exists(filepath):
-            with open(filepath, "rb") as f:
-                weather = json.load(f)
+            # lightweight line-by-line parse to get first and last timestamps
+            times = []
+            with open(filepath, "r") as f:
+                header_found = False
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("Year") and not header_found:
+                        header_found = True
+                        continue
+                    if not header_found or not line or line.startswith("RAWS_"):
+                        continue
 
-            # get wind duration and set max_duration
-            weather_time_step_min = weather['time_step_min']
-            weather_time_step_hr = weather_time_step_min / 60
-            num_entries = len(weather['weather_entries']["wind_speed"])
-            self.start_datetime = datetime.fromisoformat(weather["start_datetime"])
-            weather_duration = weather_time_step_hr * num_entries
-            self.end_datetime = self.start_datetime + timedelta(hours=weather_duration)
-            self.max_duration = weather_duration
-            self.duration.set(self.max_duration)
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                        hour = int(parts[3].zfill(4)[:2])
+                        dt = datetime(year, month, day, hour)
+                        times.append(dt)
 
-        elif filepath == "":
-            pass
+            if len(times) >= 2:
+                start_dt = times[0]
+                end_dt = times[-1]
+                self.start_cal.set_date(start_dt.date())
+                self.start_hour.set(start_dt.hour % 12 or 12)
+                self.start_min.set(0)
+                self.start_ampm.set("AM" if start_dt.hour < 12 else "PM")
 
-        else:
-            self.wind_forecast.set("")
-            window = tk.Tk()
-            window.withdraw()
-            tk.messagebox.showwarning("Error", "Selected folder does not contain a valid wind forecast!")
-            window.destroy()
+                self.end_cal.set_date(end_dt.date())
+                self.end_hour.set(end_dt.hour % 12 or 12)
+                self.end_min.set(0)
+                self.end_ampm.set("AM" if end_dt.hour < 12 else "PM")
+
+                # Update internal datetime values
+                self.update_datetime()
+
+            else:
+                print("WXS file has too few entries to determine time bounds.")
 
 
     def user_path_changed(self, *args):
@@ -763,7 +766,7 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", "User class must be instance of ControlClass!")
             window.destroy()
 
-    def update_datetime(self):
+    def update_datetime(self, *args):
         """Update datetime values whenever any input field changes"""
         start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
         start_time = time(start_hr, self.start_min.get())

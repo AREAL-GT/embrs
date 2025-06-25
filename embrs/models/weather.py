@@ -11,6 +11,11 @@ from typing import Iterator
 
 from embrs.utilities.data_classes import *
 
+
+# TODO: In certain cases the GSI calculation may be a bit off because only the morning or afternoon RH is being used 
+# TODO: This occurs in the case where a sim is exactly 24 hours and starts and ends at noon
+
+
 # TODO: Document this file
 
 class WeatherStream:
@@ -293,14 +298,26 @@ class WeatherStream:
         # ── Step 7: Daily stats for GSI ──────────────────────────────
         daily_morning_rh = df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
         daily_afternoon_rh = df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
-        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
-        daily_avg_temp = df["temperature"].resample('D').mean()
 
+        daily_avg_rh = pd.DataFrame({
+            "morning": daily_morning_rh,
+            "afternoon": daily_afternoon_rh
+        }).mean(axis=1)
+
+        daily_avg_temp = df["temperature"].resample('D').mean()
+    
         min_len = min(len(daily_avg_rh), len(daily_avg_temp))
+
+        daily_avg_rh = daily_avg_rh.iloc[:min_len]
+        daily_avg_temp = daily_avg_temp.iloc[:min_len]
+
+        daily_index = daily_avg_rh.index
+        daily_avg_temp = daily_avg_temp.reindex(daily_index)
+
         daily_data = pd.DataFrame({
-            "date": daily_avg_rh.index[:min_len],
-            "temperature": daily_avg_temp.values[:min_len],
-            "rel_humidity": daily_avg_rh.values[:min_len]
+            "date": daily_avg_rh.index,
+            "temperature": daily_avg_temp.values,
+            "rel_humidity": daily_avg_rh.values
         }).reset_index(drop=True)
 
         gsi = self.calc_GSI(daily_data)
