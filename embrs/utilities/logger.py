@@ -321,15 +321,20 @@ def serialize_array(array: np.ndarray) -> str:
     encoded = base64.b64encode(compressed).decode('utf-8')
     return encoded
         
-def make_json_serializable(d: dict):
-    for k, v in d.items():
-        if isinstance(v, dict):
-            make_json_serializable(v)
-        elif isinstance(v, datetime.datetime):
-            d[k] = v.isoformat()
-        elif isinstance(v, np.ndarray):
-            d[k] = v.tolist()
-        elif hasattr(v, '__dict__'):
-            # fallback if nested object was not handled by asdict (rare)
-            d[k] = str(v)  # or raise warning
-    return d
+def make_json_serializable(obj):
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(make_json_serializable(item) for item in obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.date):
+        return obj.isoformat()
+    elif hasattr(obj, '__dict__'):
+        return str(obj)
+    else:
+        return obj

@@ -22,6 +22,7 @@ class CellLogEntry:
     wind_speed: float
     wind_dir: float
     retardant: bool
+    arrival_time: float
 
     def to_dict(self):
         return asdict(self)

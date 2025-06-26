@@ -212,6 +212,8 @@ class FirePredictor(BaseFireSim):
 
             self._iters += 1
 
+        self._finished = True
+
     def _ignite_spots(self):
         # Decay constant for ignition probability
         lambda_s = 0.005

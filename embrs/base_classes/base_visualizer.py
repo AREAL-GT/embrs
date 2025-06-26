@@ -123,7 +123,7 @@ class BaseVisualizer:
                                                     facecolor='white', edgecolor='black',
                                                     linewidth=1, zorder=3, alpha=0.75)
 
-            self.weather_text = self.h_ax.text(0.03, 0.90, '',
+            self.weather_text = self.h_ax.text(0.01, 0.90, '',
                                         transform=self.h_ax.transAxes,
                                         ha='left', va='center',
                                         fontsize=10, zorder=4)

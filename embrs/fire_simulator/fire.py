@@ -87,11 +87,11 @@ class FireSim(BaseFireSim):
         self._agent_list = []
         self._agents_added = False
 
-        # Boolean indicating if sim is finished
-        self._finished = False
-
         # Reference to visualizer
         self._visualizer = None
+
+        # Reference to active prediction
+        self.curr_prediction = None
 
         super().__init__(sim_params)
         
@@ -245,6 +245,7 @@ class FireSim(BaseFireSim):
         
         else:
             for cell in self._new_ignitions:
+                cell._arrival_time = self.curr_time_m
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
 

@@ -652,7 +652,7 @@ class SimFolderSelector(FileSelectBase):
         """
         folderpath = self.log_folder.get()
 
-        if os.path.exists(folderpath + '/init_fire_state.pkl') or os.path.exists(folderpath + '/run_0'):
+        if os.path.exists(folderpath + '/init_state.parquet') or os.path.exists(folderpath + '/run_0'):
             window = tk.Tk()
             window.withdraw()
             msg = """Warning: Selected folder already contains log files, these will be overwritten

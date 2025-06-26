@@ -95,6 +95,8 @@ class Cell:
         # Weak reference to parent BaseFire object
         self._parent = None
 
+        self._arrival_time = -999
+
     def set_parent(self, parent):
         """Sets the parent BaseFire object for this cell.
         
@@ -737,7 +739,8 @@ class Cell:
             I_ss=I_ss,
             wind_speed=self.curr_wind[0],
             wind_dir=self.curr_wind[1],
-            retardant=self._retardant
+            retardant=self._retardant,
+            arrival_time=self._arrival_time
         )
 
         return entry
