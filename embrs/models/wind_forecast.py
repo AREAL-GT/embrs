@@ -86,6 +86,7 @@ def run_windninja_single(task: WindNinjaTask):
         "--num_threads", "4",
         "--output_wind_height", "6.1",
         "--units_output_wind_height", "m",
+        "--output_speed_units", "mps",
         "--input_speed", str(task.entry.wind_speed),
         "--input_speed_units", task.input_speed_units,
         "--input_direction", str(wind_dir),

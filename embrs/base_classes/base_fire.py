@@ -497,7 +497,7 @@ class BaseFireSim:
                         r_0 *= neighbor._retardant_factor
 
                     # Check that ignition ros is greater than no wind no slope ros
-                    if 0 < r_0 < r_ign:
+                    if 0 < r_ign:
                         self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor.end_pts = copy.deepcopy(end_pts)

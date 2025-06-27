@@ -124,7 +124,11 @@ def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) ->
     y = d_w * np.sin(angle)
     vec_mag = np.sqrt(x**2 + y**2)
 
-    vec_dir = np.arcsin(y/vec_mag)
+    if vec_mag == 0:
+        vec_dir = 0
+
+    else:
+        vec_dir = np.arcsin(y/vec_mag)
 
     return vec_mag, vec_dir
 
@@ -400,8 +404,13 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
         float: _description_
     """
     E, B, C = calc_E_B_C(fuel)
-    phi_e = calc_effective_wind_factor(R_h, R_0)
 
+
+    if R_h <= R_0:
+        phi_e = 0
+
+    else: 
+        phi_e = calc_effective_wind_factor(R_h, R_0)
 
     u_e = ((phi_e * (fuel.rel_packing_ratio**E))/C) ** (1/B)
 

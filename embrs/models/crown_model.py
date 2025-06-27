@@ -60,10 +60,11 @@ def crown_fire(cell: Cell, fmc: float):
                     cell._crown_status = CrownStatus.NONE
                     return
 
+            r_actual = R + cfb * (R_cmax - R) # m/min
+            
             if r_actual >= rac:
                 # Active crown fire
                 # Actual active crown fire spread rate
-                r_actual = R + cfb * (R_cmax - R) # m/min
                 cell._crown_status = CrownStatus.ACTIVE
 
             else:
