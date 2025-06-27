@@ -60,15 +60,16 @@ def crown_fire(cell: Cell, fmc: float):
                     cell._crown_status = CrownStatus.NONE
                     return
 
-            # Actual active crown fire spread rate
-            r_actual = R + cfb * (R_cmax - R) # m/min
-
             if r_actual >= rac:
                 # Active crown fire
+                # Actual active crown fire spread rate
+                r_actual = R + cfb * (R_cmax - R) # m/min
                 cell._crown_status = CrownStatus.ACTIVE
 
             else:
                 # Passive crown fire
+                # Passive crown fire rate set to surface rate of spread
+                r_actual = cell.r_h_ss
                 cell._crown_status = CrownStatus.PASSIVE
             
             # Set rate of spread based on crown fire equations
@@ -79,7 +80,7 @@ def crown_fire(cell: Cell, fmc: float):
 
 def set_accel_constant(cell, cfb):
     # Set the acceleration constant for the cell
-    a = 0.115 - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)
+    a = 0.3 - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)
 
     cell.a_a = a
 
