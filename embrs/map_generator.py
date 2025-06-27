@@ -249,7 +249,7 @@ def crop_map_data(map_params: MapParams) -> float:
     fccs_path = map_params.fccs_filepath
 
     # Add the FCCS layer to the landscape file
-    merge_tiffs(lcp_path, fccs_path, lcp_output_path)
+    merge_tiffs(lcp_path, fccs_path, lcp_output_path, map_params.include_fccs)
 
     while not crop_done:
 
@@ -266,32 +266,34 @@ def crop_map_data(map_params: MapParams) -> float:
     map_params.geo_info = GeoInfo()
     map_params.geo_info.north_angle_deg = np.rad2deg(angle)
 
-def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str) -> None:
+def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str, include_fccs: bool) -> None:
     # Open the LCP file and read its data and metadata
     with rasterio.open(lcp_path) as lcp_src:
         lcp_data = lcp_src.read()  # shape: (bands, height, width)
         meta = lcp_src.meta.copy()
+        height, width = lcp_data.shape[1:]
 
-    # Open the FCCS file and read its data (assuming a single band)
-    with rasterio.open(fccs_path) as fccs_src:
-        fccs_data = fccs_src.read(1)  # shape: (height, width)
+    if include_fccs:
+        # Open and read the FCCS file
+        with rasterio.open(fccs_path) as fccs_src:
+            fccs_data = fccs_src.read(1)  # shape: (height, width)
 
-    # Ensure the spatial dimensions match
-    if lcp_data.shape[1:] != fccs_data.shape:
-        raise ValueError("The dimensions of LCP and FCCS images do not match.")
+        if (height, width) != fccs_data.shape:
+            raise ValueError("The dimensions of LCP and FCCS images do not match.")
+    else:
+        # Create a dummy FCCS band with -1s
+        fccs_data = np.full((height, width), fill_value=-1, dtype=np.float32)
 
-    # Expand FCCS data to add a new band
+    # Expand FCCS to match band format
     fccs_data = fccs_data[np.newaxis, :, :]
 
-    # Concatenate LCP bands with the new FCCS band along the band axis
+    # Concatenate bands
     merged_data = np.concatenate([lcp_data, fccs_data], axis=0)
-
-    # Update metadata: new count is actual bands (excluding empty ones) plus FCCS band
     meta.update(count=merged_data.shape[0])
 
-    # Write the combined data to a new TIFF file
     with rasterio.open(output_path, "w", **meta) as dst:
         dst.write(merged_data)
+
 
 def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
     """_summary_

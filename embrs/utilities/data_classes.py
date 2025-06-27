@@ -85,6 +85,7 @@ class MapParams:
     uniform_data: Optional[UniformMapParams] = None
     folder: Optional[str] = None
     lcp_filepath: Optional[str] = None
+    include_fccs: Optional[bool] = True
     fccs_filepath: Optional[str] = None
     cropped_lcp_path: Optional[str] = None
     import_roads: Optional[bool] = None

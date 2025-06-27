@@ -332,6 +332,8 @@ class MapGenFileSelector(FileSelectBase):
         self.output_map_folder = tk.StringVar()
         self.lcp_filename = tk.StringVar()
         self.fccs_filename = tk.StringVar()
+        self.include_fccs = tk.BooleanVar()
+        self.include_fccs.set(True)
         self.import_roads = tk.BooleanVar()
         self.import_roads.set(False)
 
@@ -346,7 +348,7 @@ class MapGenFileSelector(FileSelectBase):
                                                 [("Tagged Image File Format","*.tif"),
                                                 ("Tagged Image File Format","*.tiff")])
         
-        _, _, self.fccs_button, self.fccs_frame = self.create_file_selector(frame, "FCCS File:         ",
+        _, self.fccs_entry, self.fccs_button, self.fccs_frame = self.create_file_selector(frame, "FCCS File:         ",
                                                 self.fccs_filename,
                                                 [("Tagged Image File Format","*.tif"),
                                                 ("Tagged Image File Format","*.tiff")])
@@ -361,6 +363,16 @@ class MapGenFileSelector(FileSelectBase):
 
         self.import_roads_button.grid(row=5, column=0)
 
+        # Create frame for fccs option
+        include_fccs_frame = tk.Frame(frame)
+        include_fccs_frame.grid(pady=10)
+
+        self.include_fccs_button = tk.Checkbutton(include_fccs_frame,
+                                   text='Include FCCS for Duff Loading',
+                                   variable = self.include_fccs, anchor="center")
+
+        self.include_fccs_button.grid(row=6, column=0)
+
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
         self.submit_button.grid(pady=10)
@@ -368,13 +380,25 @@ class MapGenFileSelector(FileSelectBase):
         
         self.output_map_folder.trace_add("write", self.validate_fields)
         self.lcp_filename.trace_add("write", self.validate_fields)
+        self.include_fccs.trace_add("write", self.toggle_fccs)
+
+
+    def toggle_fccs(self, *args):
+        if self.include_fccs.get():
+            self.fccs_button.configure(state='normal')
+            self.fccs_entry.configure(state='normal')
+        else:
+            self.fccs_button.configure(state='disabled')
+            self.fccs_entry.configure(state='disabled')
+
+        self.validate_fields()
 
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
         # Check that all fields are filled before enabling submit button
-        if self.lcp_filename.get() and self.output_map_folder.get() and self.fccs_filename.get():
+        if self.lcp_filename.get() and self.output_map_folder.get() and (self.fccs_filename.get() or not self.include_fccs.get()):
             self.submit_button.config(state='normal')
 
         else:
@@ -389,7 +413,14 @@ class MapGenFileSelector(FileSelectBase):
         map_params.uniform_map = False
         map_params.folder = self.output_map_folder.get()
         map_params.lcp_filepath = self.lcp_filename.get()
-        map_params.fccs_filepath = self.fccs_filename.get()
+        map_params.include_fccs = self.include_fccs.get()
+
+        if not self.include_fccs.get():
+            map_params.fccs_filepath = ''
+
+        else:
+            map_params.fccs_filepath = self.fccs_filename.get()
+        
         map_params.import_roads = self.import_roads.get()
 
         self.result = map_params
