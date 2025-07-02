@@ -19,61 +19,8 @@ import json
 from embrs.utilities.unit_conversions import *
 
 class Fuel:
-    """Represents a generic fuel type with physical and combustion properties.
-
-    This class serves as a base for defining fuel models, including their 
-    loading parameters, fuel moisture, and combustion characteristics.
-
-    Args:
-        name (str): Name of the fuel model.
-        model_num (int): Fuel model number (e.g., Anderson 13 fuel model ID).
-        fuel_load_params (dict): Fuel load parameters for different time-lag classes 
-                                 (e.g., 1-hour, 10-hour fuels).
-        sav_ratio (int): Surface-area-to-volume ratio (cm²/cm³) of the dominant fuel.
-        fuel_depth (float): Fuel bed depth in meters.
-        m_x (float): Moisture content of extinction (fraction).
-        rel_packing_ratio (float): Packing ratio relative to optimal.
-        rho_b (float): Bulk density of the fuel bed (kg/m³).
-        burnable (bool): Indicates if the fuel type is burnable.
-
-    Attributes:
-        heat_content (float): Heat content of the fuel (BTU/lb).
-        fuel_moisture (float): Initial fuel moisture content (default = 0.01).
-        net_fuel_load (float): Computed net fuel load (lb/ft²).
-
-    Methods:
-        - set_net_fuel_load(): Computes the net fuel load based on the fuel properties.
-        - set_fuel_moisture(moisture): Placeholder for updating fuel moisture dynamically.
-    """
-    def __init__(self, name: str, model_num: int, burnable: bool, dynamic: bool, f_i: np.ndarray, f_ij: np.ndarray, g_ij: np.ndarray, w_0: np.ndarray,
-                 s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float,
-                 rho_b: float, rel_packing_ratio: float):
-        """Initializes a generic fuel model with its physical and combustion properties.
-
-        This constructor defines the primary attributes of a fuel model, including 
-        its loading parameters, packing ratio, and moisture content. 
-
-        Args:
-            name (str): The name of the fuel model (e.g., "Short Grass").
-            model_num (int): The model number (e.g., Anderson 13 fuel model ID).
-            fuel_load_params (dict): A dictionary of fuel load parameters for different 
-                                    fuel classes (e.g., `{"1-h": (fuel_load, sav_ratio)}`).
-            sav_ratio (int): The surface-area-to-volume ratio of fine fuels (cm²/cm³).
-            fuel_depth (float): The depth of the fuel bed (meters).
-            m_x (float): The moisture content of extinction (fraction, 0 to 1).
-            rel_packing_ratio (float): The relative packing ratio of the fuel.
-            rho_b (float): The bulk density of the fuel bed (kg/m³).
-            burnable (bool): Whether this fuel model is burnable (`True`) or not (`False`).
-
-        Attributes:
-            heat_content (float): Heat content of the fuel (BTU/lb), default = `8000`.
-            fuel_moisture (float): Initial fuel moisture content, default = `0.01`.
-            net_fuel_load (float): Computed net fuel load (lb/ft²), set to `0` if non-burnable.
-
-        Behavior:
-            - Computes `net_fuel_load` automatically for burnable fuels using `set_net_fuel_load()`.
-            - Defines standard physical parameters such as mineral content (`s_T = 0.0555`).
-        """
+    def __init__(self, name: str, model_num: int, burnable: bool, dynamic: bool, w_0: np.ndarray,
+                 s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float):
         
         self.name = name
         self.model_num = model_num
@@ -82,40 +29,51 @@ class Fuel:
         self.rel_indices = []
 
         if self.burnable:
+            # Standard constants
             self.s_T = 0.055
             self.s_e = 0.010
             self.rho_p = 32
+            self.heat_content = 8000 # btu/lb (used for live and dead)
 
-            self.f_i = f_i
-            self.f_ij = f_ij
-            self.g_ij = g_ij
+            # Load data defining the fuel type
+            self.load = w_0
+            self.s = s
+            self.sav_ratio = s_total
+            self.fuel_depth_ft = fuel_depth
+            self.dead_mx = dead_mx
+            
+            # Compute weighting factors
+            self.compute_f_and_g_weights()
 
+            # Compute f live and f dead
             self.f_dead_arr = self.f_ij[0, 0:4]
             self.f_live_arr = self.f_ij[1, 4:]
 
+            # Compute g live and g dead
             self.g_dead_arr = self.g_ij[0, 0:4]
             self.g_live_arr = self.g_ij[1, 4:]
 
-            self.w_0 = TPA_to_Lbsft2(w_0) # convert to lbs/ft^2 
+            # Compute the net fuel loading
+            self.w_0 = TPA_to_Lbsft2(self.load)
             w_n = self.w_0 * (1 - self.s_T)
             self.set_fuel_loading(w_n)
 
+            # Store nominal net dead loading
             self.w_n_dead_nominal = self.w_n_dead
 
-            self.s = s
+            # Compute helpful constants for rothermel equations
+            self.beta = np.sum(self.w_0) / 32 / self.fuel_depth_ft
+            self.beta_op = 3.348 / (self.sav_ratio ** 0.8189)
+            self.rat = self.beta / self.beta_op
+            self.A = 133 * self.sav_ratio ** (-0.7913)
+            self.gammax = (self.sav_ratio ** 1.5) / (495 + 0.0594 * self.sav_ratio ** 1.5)
+            self.gamma = self.gammax * (self.rat ** self.A) * np.exp(self.A*(1-self.rat))
+            self.rho_b = np.sum(self.w_0) / self.fuel_depth_ft
+            self.flux_ratio = self.calc_flux_ratio()
+            self.E, self.B, self.C = self.calc_E_B_C()
+            self.W = self.calc_W(w_0)
 
-            self.sav_ratio = s_total
-
-            self.W = self.calc_W()
-
-            self.fuel_depth_ft = fuel_depth
-            self.dead_mx = dead_mx
-
-            self.heat_content = 8000 # btu/lb
-
-            self.rel_packing_ratio = rel_packing_ratio
-            self.rho_b = rho_b
-
+            # Mark indices that are relevant for this fuel model
             for i in range(6):
                 if self.w_0[i] > 0:
                     self.rel_indices.append(i)
@@ -123,20 +81,112 @@ class Fuel:
             self.rel_indices = np.array(self.rel_indices)
             self.num_classes = len(self.rel_indices)
 
+    def calc_flux_ratio(self):
+        packing_ratio = self.rho_b / self.rho_p
+        flux_ratio = (192 + 0.2595*self.sav_ratio)**(-1) * np.exp((0.792 + 0.681*np.sqrt(self.sav_ratio))*(packing_ratio + 0.1))
+
+        return flux_ratio
+
+    def calc_E_B_C(self):
+        """_summary_
+
+        Args:
+            fuel (Fuel): _description_
+
+        Returns:
+            Tuple[float, float, float]: _description_
+        """
+
+        sav_ratio = self.sav_ratio
+
+        E = 0.715 * np.exp(-3.59e-4 * sav_ratio)
+        B = 0.02526 * sav_ratio ** 0.54
+        C = 7.47 * np.exp(-0.133 * sav_ratio**0.55)
+
+        return E, B, C
+
+    def compute_f_and_g_weights(self):
+        """
+        Compute f_ij and g_ij values from self.w_0 and self.s (6×1), keeping native format.
+        Updates self.f_ij and self.g_ij directly.
+        """
+        f_ij = np.zeros((2, 6))
+        g_ij = np.zeros((2, 6))
+        f_i = np.zeros(2)
+        
+        # ── Class grouping ─────────────────────────────────────────────
+        dead_indices = [0, 1, 2, 3]  # 1h, 10h, 100h, dead herb
+        live_indices = [4, 5]       # live herb, live woody
+        
+        # ── Compute a[i] = load[i] * SAV[i] / 32 ──────────────────────
+        a_dead = np.array([
+            self.load[i] * self.s[i] / 32.0 for i in dead_indices
+        ])
+        a_live = np.array([
+            self.load[i] * self.s[i] / 32.0 for i in live_indices
+        ])
+
+        a_sum_dead = np.sum(a_dead)
+        a_sum_live = np.sum(a_live)
+
+        # ── f_ij (fractional weights) ─────────────────────────────────
+        for idx in dead_indices:
+            f_ij[0, idx] = a_dead[dead_indices.index(idx)] / a_sum_dead if a_sum_dead > 0 else 0.0
+        for idx in live_indices:
+            f_ij[1, idx] = a_live[live_indices.index(idx)] / a_sum_live if a_sum_live > 0 else 0.0
+
+        # ── g_ij (SAV bin-based moisture weighting) ───────────────────
+        def sav_bin(sav):
+            if sav >= 1200.0: return 0
+            elif sav >= 192.0: return 1
+            elif sav >= 96.0: return 2
+            elif sav >= 48.0: return 3
+            elif sav >= 16.0: return 4
+            else: return -1
+
+        # Dead gx bin sums
+        gx_dead = np.zeros(5)
+        for i in dead_indices:
+            bin_idx = sav_bin(self.s[i])
+            if bin_idx >= 0:
+                gx_dead[bin_idx] += f_ij[0, i]
+
+        # Live gx bin sums
+        gx_live = np.zeros(5)
+        for i in live_indices:
+            bin_idx = sav_bin(self.s[i])
+            if bin_idx >= 0:
+                gx_live[bin_idx] += f_ij[1, i]
+
+        for i in dead_indices:
+            bin_idx = sav_bin(self.s[i])
+            g_ij[0, i] = gx_dead[bin_idx] if bin_idx >= 0 else 0.0
+
+        for i in live_indices:
+            bin_idx = sav_bin(self.s[i])
+            g_ij[1, i] = gx_live[bin_idx] if bin_idx >= 0 else 0.0
+
+        f_i[0] = a_sum_dead / (a_sum_dead + a_sum_live)
+        f_i[1] = 1.0 - f_i[0]
+
+        self.f_ij = f_ij
+        self.g_ij = g_ij
+        self.f_i = f_i
+
     def set_fuel_loading(self, w_n):
         self.w_n = w_n
         self.w_n_dead = np.dot(self.g_dead_arr, self.w_n[0:4])
         self.w_n_live = np.dot(self.g_live_arr, self.w_n[4:])
 
-    def calc_W(self):
-
-        w = self.w_0
+    def calc_W(self, w_0_tpa):
+        w = w_0_tpa
         s = self.s
 
         num = 0
 
-        for i in range(3):
-            num += w[i] * np.exp(-138/s[i])
+        for i in range(4):
+            if s[i] != 0:
+                num += w[i] * np.exp(-138/s[i])
 
         den = 0
         for i in range(4, 6):
@@ -175,30 +225,20 @@ class Anderson13(Fuel):
         dynamic = False
 
         if not burnable:
-            f_i = None
-            f_ij = None
-            g_ij = None
             w_0 = None
             s = None
             s_total = None
             mx_dead = None
             fuel_bed_depth = None
-            rho_b = None
-            rel_packing_ratio = None
 
         else:
-            f_i = np.array(self._fuel_models["f_i"][model_id])
-            f_ij = np.array(self._fuel_models["f_ij"][model_id])
-            g_ij = f_ij
             w_0 = np.array(self._fuel_models["w_0"][model_id])
             s = np.array(self._fuel_models["s"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
             mx_dead = self._fuel_models["mx_dead"][model_id]
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
-            rho_b = self._fuel_models["rho_b"][model_id]
-            rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
 
-        super().__init__(name, model_number, burnable, dynamic, f_i, f_ij, g_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
 
 class ScottBurgan40(Fuel):
     _fuel_models = None # class-level cache
@@ -223,33 +263,19 @@ class ScottBurgan40(Fuel):
         name = self._fuel_models["names"][model_id]
 
         if not burnable: 
-            f_i = None
-            f_ij = None
-            g_ij = None
             w_0 = None
             s = None
             s_total = None
             mx_dead = None
             fuel_bed_depth = None
-            rho_b = None
-            rel_packing_ratio = None
             dynamic = False
 
         else:
             dynamic = self._fuel_models["dynamic"][model_id]
             if not dynamic:
-                f_ij = np.array(self._fuel_models["f_ij"][model_id])
-                g_ij = f_ij
-                f_i = np.array(self._fuel_models["f_i"][model_id])
                 w_0 = np.array(self._fuel_models["w_0"][model_id])
             else:
                 T = self.calc_curing_level(live_h_mf)
-                f_ij_by_curing = self._fuel_models["f_ij"][model_id]
-                f_ij = self.get_dynamic_weights(f_ij_by_curing, T)
-                f_i_by_curing = self._fuel_models["f_i"][model_id]
-                f_i = self.get_dynamic_weights(f_i_by_curing, T)
-                g_ij_by_curing = self._fuel_models["g_ij"][model_id]
-                g_ij = self.get_dynamic_weights(g_ij_by_curing, T)
                 w_0 = np.array(self._fuel_models["w_0"][model_id])
 
                 dead_herb_new = T * w_0[4]
@@ -261,34 +287,14 @@ class ScottBurgan40(Fuel):
             s = np.array(self._fuel_models["s"][model_id])
             s_total = self._fuel_models["s_total"][model_id]
             mx_dead = self._fuel_models["mx_dead"][model_id]
-            fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]
-            rho_b = self._fuel_models["rho_b"][model_id]
-            rel_packing_ratio = self._fuel_models["rel_packing_ratio"][model_id]
+            fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]    
 
-        super().__init__(name, model_number, burnable, dynamic, f_i, f_ij, g_ij, w_0, s, s_total, mx_dead, fuel_bed_depth, rho_b, rel_packing_ratio)
+        super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
 
     def calc_curing_level(self, live_h_mf: float):
         T = -1.11 * live_h_mf + 1.33
         T = min(max(T, 0), 1)
         return T
-    
-    def get_dynamic_weights(self, weights_by_curing: dict, T: float) -> np.ndarray:
-        curing = T * 100
-
-        levels = sorted(map(int, weights_by_curing.keys()))
-
-        if int(curing) in levels:
-            key = str(int(curing))
-            return np.array(weights_by_curing[key])
-
-        lower = max(l for l in levels if l <= curing)
-        upper = min(l for l in levels if l >= curing)
-
-        f_lower = np.array(weights_by_curing[str(lower)])
-        f_upper = np.array(weights_by_curing[str(upper)])
-        alpha = (curing - lower) / (upper - lower)
-
-        return (1 - alpha) * f_lower + alpha * f_upper
 
 class FuelConstants:
     """_summary_

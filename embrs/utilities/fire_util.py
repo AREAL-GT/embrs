@@ -170,6 +170,13 @@ class HexGridMath:
                              'C': (0, -1),
                              'D': (-1, -1),
                              'E': (-1, 0)}
+    
+    even_neighor_rev_letters = {(-1, 1): 'F',
+                                (0, 1): 'A',
+                                (1, 0): 'B',
+                                (0, -1): 'C',
+                                (-1, -1): 'D',
+                                (-1, 0): 'E'}
 
     odd_neighborhood = [(1,0), (1,1), (0,1), (-1,0), (0,-1), (1, -1)]
     odd_neighbor_letters = {'B': (1, 0),
@@ -178,6 +185,13 @@ class HexGridMath:
                             'E': (-1, 0),
                             'D': (0, -1),
                             'C': (1, -1)}
+    
+    odd_neighbor_rev_letters = {(1, 0): 'B',
+                                (1, 1): 'A',
+                                (0, 1): 'F',
+                                (-1, 0): 'E',
+                                (0, -1): 'D',
+                                (1, -1): 'C'}
 
 class UtilFuncs:
     """Various utility functions that are useful across numerous files.

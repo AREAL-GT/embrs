@@ -190,7 +190,6 @@ class Cell:
         # Heading rate of spread and fireline intensity
         self.r_h_ss = None
         self.I_h_ss = None
-        self.I_h_t = None
 
         # Variables that keep track of elliptical spread within cell
         self.r_t = [0]

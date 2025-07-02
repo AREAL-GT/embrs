@@ -140,9 +140,16 @@ def TPA_to_KiSq(f_tpa: float) -> float:
     return f
 
 def TPA_to_Lbsft2(f_tpa: float) -> float:
-    f_kisq = TPA_to_KiSq(f_tpa)
+    g = 0.04591
+    f = f_tpa * g
 
-    return KiSq_to_Lbsft2(f_kisq)
+    return f
+
+def Lbsft2_to_TPA(f_lbsft2: float) -> float:
+    g = 1 / TPA_to_Lbsft2(1)
+    f = f_lbsft2 * g
+
+    return f
 
 
 def KiSq_to_TPA(f_kisq: float) -> float:

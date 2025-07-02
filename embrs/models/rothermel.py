@@ -7,7 +7,7 @@ from typing import Tuple
 
 # TODO: fill in docstrings
 
-def surface_fire(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarray, np.ndarray]:
+def surface_fire(cell: Cell):
     """_summary_
 
     Args:
@@ -26,9 +26,6 @@ def surface_fire(cell: Cell, R_h_in:float = None) -> Tuple[np.ndarray, np.ndarra
         return np.array(r_list), np.array(I_list)
 
     cell.reaction_intensity = I_r
-
-    if R_h_in is not None:
-        R_h = R_h_in
 
     t_r = 384 / cell.fuel.sav_ratio # Residence time
     H_a = I_r * t_r
@@ -128,7 +125,7 @@ def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) ->
         vec_dir = 0
 
     else:
-        vec_dir = np.arcsin(y/vec_mag)
+        vec_dir = np.arctan2(y, x)
 
     return vec_mag, vec_dir
 
@@ -149,11 +146,10 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     live_moisture_damping = calc_moisture_damping(live_mf, live_mx)
     dead_moisture_damping = calc_moisture_damping(dead_mf, fuel.dead_mx)
 
-    flux_ratio = calc_flux_ratio(fuel)
     I_r = calc_I_r(fuel, dead_moisture_damping, live_moisture_damping)
     heat_sink = calc_heat_sink(fuel, m_f)
 
-    R_0 = (I_r * flux_ratio)/heat_sink
+    R_0 = (I_r * fuel.flux_ratio)/heat_sink
 
     return R_0, I_r # ft/min, BTU/ft^2-min
 
@@ -176,8 +172,8 @@ def calc_live_mx(fuel: Fuel, m_f: float):
     den = 0
     for i in range(4):
         if fuel.s[i] != 0:
-            num += m_f * fuel.w_0[i] * np.exp(-138/fuel.s[i])
-            den += fuel.w_0[i] * np.exp(-138/fuel.s[i])
+            num += m_f * fuel.load[i] * np.exp(-138/fuel.s[i])
+            den += fuel.load[i] * np.exp(-138/fuel.s[i])
 
     mf_dead = num/den
 
@@ -198,36 +194,12 @@ def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -
 
     mineral_damping = calc_mineral_damping()
 
-    A = 133 * fuel.sav_ratio ** (-0.7913)
-
-    max_reaction_vel = (fuel.sav_ratio ** 1.5) / (495 + 0.0594 * fuel.sav_ratio ** 1.5)
-    opt_reaction_vel = max_reaction_vel * (fuel.rel_packing_ratio ** A) * np.exp(A*(1-fuel.rel_packing_ratio))
-
     dead_calc = fuel.w_n_dead * fuel.heat_content * dead_moist_damping * mineral_damping
     live_calc = fuel.w_n_live * fuel.heat_content * live_moist_damping * mineral_damping
 
-    I_r = opt_reaction_vel * (dead_calc + live_calc)
+    I_r = fuel.gamma * (dead_calc + live_calc)
 
     return I_r
-
-def calc_flux_ratio(fuel: Fuel) -> float:
-    """_summary_
-
-    Args:
-        fuel (Fuel): _description_
-
-    Returns:
-        float: _description_
-    """
-
-    rho_b = fuel.rho_b
-    rho_p = fuel.rho_p
-    sav_ratio = fuel.sav_ratio
-
-    packing_ratio = rho_b / rho_p
-    flux_ratio = (192 + 0.2595*sav_ratio)**(-1) * np.exp((0.792 + 0.681*sav_ratio**0.5)*(packing_ratio + 0.1))
-
-    return flux_ratio
 
 def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
     """_summary_
@@ -240,8 +212,6 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
         float: _description_
     """
 
-    rho_b = fuel.rho_b
-
     Q_ig = 250 + 1116 * m_f
 
 
@@ -251,7 +221,7 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
     dead_sum = 0
     for j in range(4):
         if fuel.s[j] != 0:
-                dead_sum += fuel.f_dead_arr[j] * np.exp(-138/fuel.s[j]) * Q_ig[j]
+            dead_sum += fuel.f_dead_arr[j] * np.exp(-138/fuel.s[j]) * Q_ig[j]
 
     heat_sink += fuel.f_i[0] * dead_sum
 
@@ -261,7 +231,7 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
             live_sum += fuel.f_live_arr[j] * np.exp(-138/fuel.s[4+j]) * Q_ig[4+j]
         
     heat_sink += fuel.f_i[1] * live_sum
-    heat_sink *= rho_b
+    heat_sink *= fuel.rho_b
 
     return heat_sink
 
@@ -294,24 +264,6 @@ def calc_r_and_i_along_dir(cell: Cell, decomp_dir: float, R_h: float, I_r: float
 
     return R_gamma, I_gamma
 
-def calc_E_B_C(fuel:Fuel) -> Tuple[float, float, float]:
-    """_summary_
-
-    Args:
-        fuel (Fuel): _description_
-
-    Returns:
-        Tuple[float, float, float]: _description_
-    """
-
-    sav_ratio = fuel.sav_ratio
-
-    E = 0.715 * np.exp(-3.59e-4 * sav_ratio)
-    B = 0.02526 * sav_ratio ** 0.54
-    C = 7.47 * np.exp(-0.133 * sav_ratio**0.55)
-
-    return E, B, C
-
 def calc_wind_factor(fuel:Fuel , wind_speed: float) -> float:
     """_summary_
 
@@ -322,9 +274,7 @@ def calc_wind_factor(fuel:Fuel , wind_speed: float) -> float:
     Returns:
         float: _description_
     """
-
-    E, B, C = calc_E_B_C(fuel)
-    phi_w = C * (wind_speed ** B) * fuel.rel_packing_ratio ** (-E)
+    phi_w = fuel.C * (wind_speed ** fuel.B) * fuel.rat ** (-fuel.E)
 
     return phi_w
 
@@ -338,8 +288,7 @@ def calc_slope_factor(fuel: Fuel, phi: float) -> float:
     Returns:
         float: _description_
     """
-
-    packing_ratio = fuel.rho_b / 32
+    packing_ratio = fuel.rho_b / fuel.rho_p
 
     phi_s = 5.275 * (packing_ratio ** (-0.3)) * (np.tan(phi)) ** 2
 
@@ -403,7 +352,6 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
     Returns:
         float: _description_
     """
-    E, B, C = calc_E_B_C(fuel)
 
 
     if R_h <= R_0:
@@ -412,7 +360,7 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
     else: 
         phi_e = calc_effective_wind_factor(R_h, R_0)
 
-    u_e = ((phi_e * (fuel.rel_packing_ratio**E))/C) ** (1/B)
+    u_e = ((phi_e * (fuel.rat**fuel.E))/fuel.C) ** (1/fuel.B)
 
     return u_e
 
@@ -430,9 +378,10 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
 
     u_e = calc_effective_wind_speed(fuel, R_h, R_0)
 
-    u_e_mph = u_e * 0.0113636
+    u_e_ms = ft_min_to_m_s(u_e)
+    z = 0.936 * np.exp(0.2566 * u_e_ms) + 0.461 * np.exp(-0.1548 * u_e_ms) - 0.397
+    z = np.min([z, 8.0])
 
-    z = 1 + 0.25 * u_e_mph
     e = ((z**2 - 1)**0.5)/z
 
     return e

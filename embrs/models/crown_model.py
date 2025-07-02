@@ -178,12 +178,11 @@ def get_wind_slope_vector(cell, phi_w, phi_s, slope_speed):
     return vec_speed, vec_mag, vec_dir # ft/min, degrees
 
 def calc_slope_speed(cell, phi_s):
+    
+    fuel = cell.fuel
 
-    e, b, c = calc_E_B_C(cell.fuel)
-
-    part1 = c * cell.fuel.sav_ratio ** -e
-
-    slope_speed = (phi_s/part1) ** (1/b)
+    part1 = fuel.C * fuel.sav_ratio ** -fuel.E
+    slope_speed = (phi_s/part1) ** (1/fuel.B)
     
     return slope_speed # ft/min
 
