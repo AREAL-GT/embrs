@@ -146,18 +146,34 @@ class Logger:
             sys.exit(0)
 
     def _merge_parquet_files(self, folder_path: str, output_file: str):
-
         parquet_files = sorted(glob.glob(os.path.join(folder_path, "part-*.parquet")))
+        writer = None
 
-        if not parquet_files:
-            print(f"No parquet files found in {folder_path}")
-            return
-        
-        dfs = [pd.read_parquet(f) for f in parquet_files]
-        combined_df = pd.concat(dfs, ignore_index=True)
+        for i, file in enumerate(parquet_files):
+            print(f"Processing {i+1}/{len(parquet_files)}: {file}")
+            df = pd.read_parquet(file)
 
-        table = pa.Table.from_pandas(combined_df)
-        pq.write_table(table, output_file, compression='snappy')
+            # Force arrival_time and other numerical fields to float64
+            float_cols = [
+                "x", "y", "w_n_dead", "w_n_dead_start", "w_n_live",
+                "dfm_1hr", "dfm_10hr", "dfm_100hr",
+                "ros", "I_ss", "wind_speed", "wind_dir", "arrival_time"
+            ]
+
+            for col in float_cols:
+                if col in df.columns:
+                    df[col] = df[col].astype("float64")
+
+            # Create arrow table
+            table = pa.Table.from_pandas(df)
+
+            if writer is None:
+                writer = pq.ParquetWriter(output_file, table.schema, compression='brotli')
+            writer.write_table(table)
+
+        if writer:
+            writer.close()
+            print(f"Merged {len(parquet_files)} files to {output_file}")
 
     def generate_session_folder(self) -> str:
         """Generates the path for the current sim's log files based on current datetime
@@ -301,7 +317,7 @@ class Logger:
         meta_json = json.dumps(make_json_serializable(dict))
         table = table.replace_schema_metadata({"init_metadata": meta_json})
 
-        pq.write_table(table, os.path.join(self._session_folder, "init_state.parquet"), compression='snappy')
+        pq.write_table(table, os.path.join(self._session_folder, "init_state.parquet"), compression='brotli')
 
 
     def log_message(self, message: str):
