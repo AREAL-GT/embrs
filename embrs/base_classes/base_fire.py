@@ -405,10 +405,6 @@ class BaseFireSim:
             for n_id in neighbors_to_rem:
                 del cell.burnable_neighbors[n_id]
 
-        if len(cell.burnable_neighbors) == 0:
-            # Set cell to fully burning when no burnable neighbors remain
-            cell.fully_burning = True        
-
     def update_steady_state(self, cell: Cell):
         """_summary_
 
@@ -441,6 +437,7 @@ class BaseFireSim:
         """
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
             cell.fully_burning = True
+            return
 
         # Update extent of fire spread along each direction
         cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
@@ -452,15 +449,8 @@ class BaseFireSim:
             # Check if ignition signal should be sent to each intersecting neighbor
             if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
                 self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
-    
-            cell.r_t = np.delete(cell.r_t, idx)
-            cell.r_ss = np.delete(cell.r_ss, idx)
-            cell.r_prev_list = np.delete(cell.r_prev_list, idx)
-            cell.I_ss = np.delete(cell.I_ss, idx)
-            cell.directions = np.delete(cell.directions, idx)
-            cell.distances = np.delete(cell.distances, idx)
-            cell.end_pts.remove(cell.end_pts[idx])
-            cell.fire_spread = np.delete(cell.fire_spread, idx)
+
+        self._remove_spread_elements_by_indices(cell, intersections)
             
         if len(cell.distances) == 0:
             cell.fully_burning = True
@@ -489,15 +479,17 @@ class BaseFireSim:
                     if self.is_firesim():
                         neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
 
+                    # TODO: deterrmine if we even need to do this
                     r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
                     r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
 
                     if neighbor._retardant:
+                        # TODO: This does not do anything right now
                         r_ign *= neighbor._retardant_factor
                         r_0 *= neighbor._retardant_factor
 
                     # Check that ignition ros is greater than no wind no slope ros
-                    if 0 < r_ign:
+                    if r_ign > 0:
                         self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor.end_pts = copy.deepcopy(end_pts)
@@ -506,7 +498,7 @@ class BaseFireSim:
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
                             neighbor._crown_status = CrownStatus.ACTIVE
 
-                        surface_fire(neighbor, r_ign)
+                        surface_fire(neighbor)
 
                         neighbor.r_prev_list = neighbor.r_ss.copy()
                         self._updated_cells[neighbor.id] = neighbor
@@ -517,6 +509,19 @@ class BaseFireSim:
                     else:
                         if neighbor.id not in self._frontier:
                             self._frontier.add(neighbor.id)
+
+    def _remove_spread_elements_by_indices(self, cell: Cell, indices_to_remove: set):
+        """Removes spread-related attributes for a cell in the given index set."""
+        keep_mask = np.array([i not in indices_to_remove for i in range(len(cell.r_t))])
+        cell.r_t = cell.r_t[keep_mask]
+        cell.r_ss = cell.r_ss[keep_mask]
+        cell.r_prev_list = cell.r_prev_list[keep_mask]
+        cell.I_ss = cell.I_ss[keep_mask]
+        cell.directions = cell.directions[keep_mask]
+        cell.distances = cell.distances[keep_mask]
+        cell.fire_spread = cell.fire_spread[keep_mask]
+        cell.end_pts = [ep for i, ep in enumerate(cell.end_pts) if i not in indices_to_remove]
+
 
 
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
