@@ -19,17 +19,14 @@ def surface_fire(cell: Cell):
     """
     R_h, R_0, I_r, alpha = calc_r_h(cell)
     spread_directions = np.deg2rad(cell.directions)
+    
     if R_h < R_0 or R_0 == 0:
-        I_list = [0] * len(spread_directions)
-        r_list = [0] * len(spread_directions)
+        I_list = np.zeros_like(spread_directions)
+        r_list = np.zeros_like(spread_directions)
 
         return np.array(r_list), np.array(I_list)
 
     cell.reaction_intensity = I_r
-
-    t_r = 384 / cell.fuel.sav_ratio # Residence time
-    H_a = I_r * t_r
-    I_h = H_a * R_h
 
     e = calc_eccentricity(cell.fuel, R_h, R_0)
 
@@ -41,18 +38,17 @@ def surface_fire(cell: Cell):
 def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
     spread_directions = np.deg2rad(cell.directions)
 
-    r_list = []
-    I_list = []
-    for decomp_dir in spread_directions:
-        # rate of spread along gamma in ft/min, fireline intensity along gamma in Btu/ft/min
-        r_gamma, I_gamma = calc_r_and_i_along_dir(cell, decomp_dir, R_h, I_r, alpha, e)
+    gamma = np.abs(((alpha + np.deg2rad(cell.aspect)) - spread_directions) % (2*np.pi))
+    gamma = np.minimum(gamma, 2*np.pi - gamma)
 
-        r_gamma = ft_min_to_m_s(r_gamma) # convert to m/s
+    R_gamma = R_h * ((1 - e)/(1 - e * np.cos(gamma)))
 
-        r_list.append(r_gamma)
-        I_list.append(I_gamma)
+    t_r = 384 / cell.fuel.sav_ratio
+    H_a = I_r * t_r
+    I_gamma = H_a * R_gamma
 
-    return np.array(r_list), np.array(I_list)
+    r_list = ft_min_to_m_s(R_gamma)
+    return r_list, I_gamma
 
 def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
     wind_speed_m_s, wind_dir_deg = cell.curr_wind
@@ -235,34 +231,6 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
 
     return heat_sink
 
-def calc_r_and_i_along_dir(cell: Cell, decomp_dir: float, R_h: float, I_r: float, alpha: float, e: float) -> Tuple[float, float]:
-    """_summary_
-
-    Args:
-        cell (Cell): _description_
-        decomp_dir (float): _description_
-        R_h (float): _description_
-        I_r (float): _description_
-        alpha (float): _description_
-        e (float): _description_
-
-    Returns:
-        Tuple[float, float]: _description_
-    """
-
-    fuel = cell.fuel
-    slope_dir = np.deg2rad(cell.aspect)
-
-    gamma = abs((alpha + slope_dir) - decomp_dir) % (2*np.pi)
-    gamma = np.min([gamma, 2*np.pi - gamma])
-
-    R_gamma = R_h * ((1 - e)/(1 - e * np.cos(gamma)))
-
-    t_r = 384 / fuel.sav_ratio # Residence time
-    H_a = I_r * t_r
-    I_gamma = H_a * R_gamma
-
-    return R_gamma, I_gamma
 
 def calc_wind_factor(fuel:Fuel , wind_speed: float) -> float:
     """_summary_
@@ -377,11 +345,9 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
     """
 
     u_e = calc_effective_wind_speed(fuel, R_h, R_0)
-
     u_e_ms = ft_min_to_m_s(u_e)
     z = 0.936 * np.exp(0.2566 * u_e_ms) + 0.461 * np.exp(-0.1548 * u_e_ms) - 0.397
     z = np.min([z, 8.0])
-
     e = ((z**2 - 1)**0.5)/z
 
     return e

@@ -491,8 +491,7 @@ class BaseFireSim:
                     # Check that ignition ros is greater than no wind no slope ros
                     if r_ign > 0:
                         self._new_ignitions.append(neighbor)
-                        neighbor.directions, neighbor.distances, end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
-                        neighbor.end_pts = copy.deepcopy(end_pts)
+                        neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
 
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
@@ -663,7 +662,7 @@ class BaseFireSim:
         Returns:
             List[float]: _description_
         """
-        entry = [0] * len(cell.fuel.w_0)
+        entry = np.zeros_like(cell.fuel.w_0)
         j = 0
         for i in range(len(cell.fuel.w_0)):
             if i in cell.fuel.rel_indices:

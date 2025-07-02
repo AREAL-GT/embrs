@@ -142,9 +142,11 @@ class FireSim(BaseFireSim):
             return
         
         # Loop over surface fires
-        for cell in self._burning_cells:
+        for cell in copy.copy(self._burning_cells):
             if cell.fully_burning:
-                self.update_fuel_in_burning_cell(cell)
+                cell._set_state(CellStates.BURNT)
+                self._burning_cells.remove(cell)
+                # self.update_fuel_in_burning_cell(cell)
                 # No need to compute spread for these cells
                 continue
 
@@ -230,8 +232,7 @@ class FireSim(BaseFireSim):
             self.weather_changed = True
             self._new_ignitions = []
             for cell, loc in self.starting_ignitions:
-                cell.directions, cell.distances, end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
-                cell.end_pts = copy.deepcopy(end_pts)
+                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
                 surface_fire(cell)
@@ -278,8 +279,8 @@ class FireSim(BaseFireSim):
         if self.progress_bar:
             self.progress_bar.update()
 
-        # Compute the fuel consumption over time for each new ignition
-        self.compute_burn_histories(self._new_ignitions)
+        # # Compute the fuel consumption over time for each new ignition
+        # self.compute_burn_histories(self._new_ignitions)
 
         # Add any new ignitions to the current set of burning cells
         self._burning_cells.extend(self._new_ignitions)
