@@ -17,7 +17,6 @@ class FirePredictor(BaseFireSim):
         self.c_size = -1
 
         self.set_params(params)
-        self.nom_ign_prob = self._calc_nominal_prob() # TODO: move this to set_params
 
     def set_params(self, params: PredictorParams):
 
@@ -38,6 +37,9 @@ class FirePredictor(BaseFireSim):
         self.beta = self.wind_uncertainty_factor * params.max_beta
         self.wnd_spd_std = params.base_wind_spd_std * self.wind_uncertainty_factor
         self.wnd_dir_std = params.base_wind_dir_std * self.wind_uncertainty_factor
+        
+        # Nominal ignition probability for spotting
+        self.nom_ign_prob = self._calc_nominal_prob()
 
         # If cell size has changed since last set params, regenerate cell grid
         cell_size = params.cell_size_m
