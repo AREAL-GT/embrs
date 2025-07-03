@@ -355,6 +355,7 @@ class BaseFireSim:
             self.wind_forecast = create_uniform_wind(self._weather_stream)
 
         self.model_spotting = sim_params.model_spotting
+        self._spot_ign_prob = 0.0
 
         if self.model_spotting:
             self._canopy_species = sim_params.canopy_species
@@ -479,17 +480,8 @@ class BaseFireSim:
                     if self.is_firesim():
                         neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
 
-                    # TODO: deterrmine if we even need to do this
-                    r_ign = self.calc_ignition_ros(cell, neighbor, r_gamma) # ft/min
-                    r_0, _ = calc_r_0(neighbor.fuel, neighbor.fmois) # ft/min
-
-                    if neighbor._retardant:
-                        # TODO: This does not do anything right now
-                        r_ign *= neighbor._retardant_factor
-                        r_0 *= neighbor._retardant_factor
-
                     # Check that ignition ros is greater than no wind no slope ros
-                    if r_ign > 0:
+                    if neighbor._retardant_factor > 0:
                         self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
                         neighbor._set_state(CellStates.FIRE)
@@ -520,33 +512,6 @@ class BaseFireSim:
         cell.distances = cell.distances[keep_mask]
         cell.fire_spread = cell.fire_spread[keep_mask]
         cell.end_pts = [ep for i, ep in enumerate(cell.end_pts) if i not in indices_to_remove]
-
-
-
-    def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
-        """_summary_
-
-        Args:
-            cell (Cell): _description_
-            neighbor (Cell): _description_
-            r_gamma (float): _description_
-
-        Returns:
-            float: _description_
-        """
-        # Get the rate of spread in ft/min
-        r_ft_min = m_s_to_ft_min(r_gamma)
-
-        # Get the heat source in the direction of question by eliminating denominator
-        heat_source = r_ft_min * calc_heat_sink(cell.fuel, cell.fmois)
-
-        # Get the heat sink using the neighbors fuel and moisture content
-        heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)
-        
-        # Calculate a ignition rate of spread
-        r_ign = heat_source / heat_sink
-
-        return r_ign
     
     def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple[int, str]) -> Cell:
         """_summary_
