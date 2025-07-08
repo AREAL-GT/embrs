@@ -13,6 +13,8 @@ import numpy as np
 class FirelineConstruction(ControlClass):
 
     def __init__(self, fire: FireSim):
+        self.fire = fire
+
         # TODO: change according to scenario
         self.pos = (500, 500) 
 
@@ -59,12 +61,11 @@ class FirelineConstruction(ControlClass):
         pass
 
     def choose_nominal_plan(self, x_vals):
-
         best_line = None
         min_time = np.inf
 
         for x in x_vals:
-            x, y = get_xy_from(x) # TODO this function should find the point on anchor corresponding to x
+            x, y = self.get_xy_from(x)
 
             line, time = self.construct_valid_line_from((x, y))
 
@@ -74,6 +75,21 @@ class FirelineConstruction(ControlClass):
 
         return best_line, time
 
+    def get_xy_from(self, x):
+        # TODO: this only works for horizontal anchors lines, # need to generalize for all orientations
+
+        vert_line = LineString([(x, 0), (x, self.fire.y_lim)])
+
+        intersection = self.anchor_line.intersection(vert_line)
+        if intersection.is_empty:
+            return None, None
+        elif intersection.geom_type == 'Point':
+            return intersection.x, intersection.y
+        elif intersection.geom_type == 'MultiPoint':
+            # If there are multiple intersection points, return the first one
+            return intersection.geoms[0].x, intersection.geoms[0].y
+        else:
+            raise ValueError("Unexpected intersection type: {}".format(intersection.geom_type))
 
     def construct_valid_line_from(self, start_pos: tuple):
         dist = Point(start_pos).distance(Point(self.pos))
@@ -163,18 +179,3 @@ class FirelineConstruction(ControlClass):
                 gap = 0
 
         return LineString(path), time
-                
-                
-            
-
-            
-
-
-
-
-            
-            
-
-
-
-
