@@ -37,9 +37,6 @@ class FirePredictor(BaseFireSim):
         self.beta = self.wind_uncertainty_factor * params.max_beta
         self.wnd_spd_std = params.base_wind_spd_std * self.wind_uncertainty_factor
         self.wnd_dir_std = params.base_wind_dir_std * self.wind_uncertainty_factor
-        
-        # Nominal ignition probability for spotting
-        self.nom_ign_prob = self._calc_nominal_prob()
 
         # If cell size has changed since last set params, regenerate cell grid
         cell_size = params.cell_size_m
@@ -58,7 +55,7 @@ class FirePredictor(BaseFireSim):
         sim_params.cell_size = params.cell_size_m
         sim_params.t_step_s = params.time_step_s
         sim_params.duration_s = self.time_horizon_hr * 3600
-        sim_params.init_mf = params.dead_mf
+        sim_params.init_mf = [params.dead_mf, params.dead_mf, params.dead_mf]
         sim_params.spot_delay_s = params.spot_delay_s
         sim_params.model_spotting = params.model_spotting
 
@@ -68,6 +65,9 @@ class FirePredictor(BaseFireSim):
         # Get the merged polygon representing burning cells
         sim_params.map_params.scenario_data.initial_ign = UtilFuncs.get_cell_polygons(burning_cells)
         burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+        
+        # Nominal ignition probability for spotting
+        self.nom_ign_prob = self._calc_nominal_prob()
 
         if generate_cell_grid:
             super().__init__(sim_params, burnt_region=burnt_region)
@@ -138,7 +138,7 @@ class FirePredictor(BaseFireSim):
 
                 if cell._break_width > 0:
                     # Determine if fire will breach fireline contained within cell
-                    flame_len_ft = calc_flame_len(np.max(cell.I_ss))
+                    flame_len_ft = calc_flame_len(cell)
                     flame_len_m = ft_to_m(flame_len_ft)
                     hold_prob = cell.calc_hold_prob(flame_len_m)
                     rand = np.random.random()
@@ -307,12 +307,12 @@ class FirePredictor(BaseFireSim):
         # Set the burnt cells based on fire state
         if self.fire._burnt_cells:
             burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
-            self._set_state_from_geometries(burnt_region, CellStates.BURNT)
+            self._set_initial_burnt_region(burnt_region)
 
         # Set the burning cells based on fire state
         burning_cells = [cell for cell in self.fire._burning_cells]
         burning_region = UtilFuncs.get_cell_polygons(burning_cells)
-        self._set_state_from_geometries(burning_region, CellStates.FIRE)
+        self._set_initial_ignition(burning_region)
 
         # Create a erroneous wind forecast 
         self._predict_wind()
