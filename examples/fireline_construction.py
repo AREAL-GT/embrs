@@ -1,73 +1,216 @@
 from embrs.base_classes.control_base import ControlClass
 from embrs.fire_simulator.fire import FireSim
+from embrs.base_classes.agent_base import AgentBase
 
 from embrs.utilities.data_classes import PredictorParams
 from embrs.tools.fire_predictor import FirePredictor
 
+
+from scipy.spatial import KDTree
 
 from shapely.geometry import LineString, Point
 from shapely.affinity import translate
 
 import numpy as np
 
+TRAVEL, CONSTRUCTION, PLANNING, ADAPT, IDLE = 0, 1, 2, 3, 4
+
+
 class FirelineConstruction(ControlClass):
 
     def __init__(self, fire: FireSim):
         self.fire = fire
 
-        # TODO: change according to scenario
-        self.pos = (500, 500) 
+        self.state = PLANNING
 
-        # TODO: these can likely be grabbed directly from the map_params
-        self.anchor_line = LineString() # TODO: grab the anchor line, this is where the firefighters are starting from
-        self.target_line = LineString() # TODO: grab the target control line
+        # Get the target and anchor fire breaks
+        self.target_line = fire.fire_break_dict["target"][0]
+        self.anchor_line = fire.fire_break_dict["anchor"][0]
 
-        self.transit_speed_ms = 1.34 # Equivalent to 3 mph (walking speed)
-        self.ln_prod_rate_ms = 0.5 # TODO: find a citable value for this (https://www.frames.gov/documents/behaveplus/publications/NWCG_2021_FireLineProductionRates.pdf)
+        # Get the starting coordinate of the crew (set to midpoint of anchor line for now)
+        xs, ys = self.anchor_line.xy
+        min_x = min(xs)
+        max_x = max(xs)
+        x_pos = (min_x + max_x) / 4
+        x, y = self.get_xy_from(x_pos)
+        self.pos = (x,y)
 
-        self.fire_buffer_dist = 100 # TODO: find a citable value for this
+        self.agent = AgentBase(0, x, y)
 
-        # Incremental distance to build lines by
-        self.d = 10 # meters
+        fire.add_agent(self.agent)
+
+        self.transit_speed_ms = 1.34/3 # Equivalent to 3 mph (walking speed)
+        self.ln_prod_rate_ms = 0.04 # TODO: find a citable value for this (https://www.frames.gov/documents/behaveplus/publications/NWCG_2021_FireLineProductionRates.pdf)
+
+        self.plan_buffer = 500 # TODO: find a citable value for this
+        self.adapt_buffer = 1000
+        self.abs_min = 100
+        self.k = 4
+
+        # TODO: maybe implement ability to reduce line_width and increase speed in real-time (talk to Rogers first)
+        self.line_width = 10
         
-        self.dtheta = np.pi / 2 / 10
+    def process_state(self, fire: FireSim):
+
+        if self.state == PLANNING:
+            self.plan()
+
+        elif self.state == TRAVEL:
+            self.travel()
+
+        elif self.state == CONSTRUCTION:
+            self.construct()
+
+        elif self.state == ADAPT:
+            self.adapt()
+
+        elif self.state == IDLE:
+            pass
+
+
+    def adapt(self):
+        d = self.fire.time_step * self.ln_prod_rate_ms
+
+        prev_line = self.fire.fire_break_dict[self.line_id][0]
+
+        self.pos = prev_line.coords[-1]
+        self.agent.x = self.pos[0]
+        self.agent.y = self.pos[1]
         
+        if prev_line.intersects(self.target_line):
+            self.state = IDLE
+
+        # Apply the potential field approach in real-time
+        closest_point = self.target_line.interpolate(self.target_line.project(Point(self.pos)))
+        direction_vector = np.array([closest_point.x - self.pos[0], closest_point.y - self.pos[1]])
+        norm = np.linalg.norm(direction_vector)
+
+        if norm != 0:
+            atr_vec = direction_vector / norm
+        else:
+            atr_vec = direction_vector  # Zero vector if point is on line
+
+        if self.fire._burning_cells:
+            burning_locs = [(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells]
+            tree = KDTree(burning_locs)
+            fire_dist, idx = tree.query(self.pos, k=1) # TODO: maybe play around with averagign the closest 5 points or something
+            closest_point = burning_locs[idx]
+
+            vec_from_fire = np.array([self.pos[0] - closest_point[0], self.pos[1] - closest_point[1]])
+            norm = np.linalg.norm(vec_from_fire)
+            if norm != 0:
+                rep_vec = vec_from_fire / norm
+            else:
+                rep_vec = vec_from_fire
+
+            # Compute the mixing constant
+            r = np.exp(-self.k * (fire_dist - self.abs_min)/(self.adapt_buffer - self.abs_min))
+            r = min(r, 1)
+
+            vec = (1 - r) * atr_vec + r * rep_vec
+            
+            # Direction that minimizes distance to target
+            theta = np.arctan2(vec[1], vec[0])
+
+            # D length vector pointing towards target
+            dx = d * np.cos(theta)
+            dy = d * np.sin(theta)
+
+            next_pos = translate(Point(self.pos), xoff=dx, yoff=dy)
+            
+            line = LineString([Point(self.pos), Point(next_pos)])
+
+            self.line_id = self.fire.construct_fireline(line, self.line_width)
+
+        
+    def plan(self):
         time_est = Point(self.pos).distance(self.target_line) / self.ln_prod_rate_ms # time to nearest point on target line in seconds
 
-        time_horizon = (time_est / 3600) + 1 # add an hour buffer to the estimated time
-        time_step = self.d / self.ln_prod_rate_ms
+        time_horizon = (time_est / 3600) + 2 # add 2 hours buffer to the estimated time # TODO: should come up with a way to determine this buffer
+        time_step = self.fire.time_step
         
         # TODO: play with the bias parameters and such
         pred_input = PredictorParams(
             time_horizon_hr=time_horizon,
             time_step_s=time_step,
-            cell_size_m=fire.cell_size
+            cell_size_m=self.fire.cell_size,
+            dead_mf=0.06,
+            wind_bias_factor=-0.25
         )
 
-        self.pred_model = FirePredictor(pred_input, fire)
-        self.curr_prediction = self.pred_model.run()
+        self.pred_model = FirePredictor(pred_input, self.fire)
+        self.curr_prediction = self.pred_model.run(visualize=True)
 
         # Construct nominal plan for control line
-        # TODO: this assumes fire is moving left to right
-        # TODO: will want a smarter approach to choosing start and stop here
-        x_arr = np.linspace(self.pos[0], fire.x_lim, 10)
+        # Note: this assumes fire is moving left to right
+        x_arr = np.linspace(self.pos[0], self.fire.x_lim, 10)
         
-        nominal_line, eta = self.choose_nominal_plan(x_arr)
+        self.nominal_line, self.eta = self.choose_nominal_plan(x_arr)
+        self.prev_progress = self.anchor_line.project(Point(self.pos))
+        self.state = TRAVEL
 
-    def process_state(self, fire: FireSim):
-        # TODO: this should essentially construct segments of the fireline step by step
-        # TODO: this should force replanning if the fire is approaching the crew
+    def travel(self):
+        progress = self.prev_progress + self.transit_speed_ms * self.fire.time_step
 
-        pass
+        point = self.anchor_line.interpolate(progress)
+
+        if point.x > self.nominal_line.xy[0][0]:
+            
+            self.pos = self.nominal_line.coords[0]
+            self.state = CONSTRUCTION
+
+            self.agent.x = self.pos[0]
+            self.agent.y = self.pos[1]
+
+            self.line_id = self.fire.construct_fireline(self.nominal_line, self.line_width, self.ln_prod_rate_ms)
+            
+            return
+
+        self.pos = (point.x, point.y)
+        self.agent.x = point.x
+        self.agent.y = point.y
+
+        self.prev_progress = progress
+
+    def construct(self):
+        # If no active firelines, mission is complete
+        if self.fire._active_firelines.get(self.line_id) is None:
+            self.state = IDLE
+            return
+
+        line = self.fire._active_firelines[self.line_id]
+
+        line_so_far = line["partial_line"]
+        if line_so_far.coords:
+            self.pos = line_so_far.coords[-1]
+
+            self.agent.x = self.pos[0]
+            self.agent.y = self.pos[1]
+
+        # Check if the new location is still outside safe buffer
+        if self.fire._burning_cells:
+            burning_locs = [(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells]
+            tree = KDTree(burning_locs)
+            fire_dist, _ = tree.query(self.pos, k=1)
+
+            if fire_dist < self.adapt_buffer:
+                # Need to stop and replan
+                self.fire.stop_fireline_construction(self.line_id)
+                self.state = ADAPT
 
     def choose_nominal_plan(self, x_vals):
         best_line = None
         min_time = np.inf
 
-        for x in x_vals:
-            x, y = self.get_xy_from(x)
+        for x_start in x_vals:
+            x, y = self.get_xy_from(x_start)
 
-            line, time = self.construct_valid_line_from((x, y))
+            if x is None or y is None:
+                time = np.inf
+                line = None
+
+            else:
+                line, time = self.construct_valid_line_from((x, y))
 
             if time < min_time:
                 min_time = time
@@ -76,8 +219,7 @@ class FirelineConstruction(ControlClass):
         return best_line, time
 
     def get_xy_from(self, x):
-        # TODO: this only works for horizontal anchors lines, # need to generalize for all orientations
-
+        # Note: this only works for 2 control lines roughly horizontal
         vert_line = LineString([(x, 0), (x, self.fire.y_lim)])
 
         intersection = self.anchor_line.intersection(vert_line)
@@ -92,90 +234,74 @@ class FirelineConstruction(ControlClass):
             raise ValueError("Unexpected intersection type: {}".format(intersection.geom_type))
 
     def construct_valid_line_from(self, start_pos: tuple):
-        dist = Point(start_pos).distance(Point(self.pos))
-        time = dist / self.transit_speed_ms
-        pos = Point(start_pos)
+        # Get start point
+        x0, y0 = start_pos
 
-        # Distance remaining to target anchor line
-        gap = pos.distance(self.target_line)
+        # Left line end
+        x1, y1 = self.target_line.coords[0]
 
-        path = [pos]
+        # Right line end
+        x2, y2 = self.target_line.coords[-1]
 
-        fires = []
+        # Compute angles
+        angle_left = np.atan2(y1 - y0, x1 - x0)
+        angle_right = np.atan2(y2 - y0, x2 - x0)
 
-        while gap > 0:
-            fires.extend(self.curr_prediction[time]) # TODO: need to round this time to the nearest time-step
+        # Normalize to [0, 2*pi) if you want
+        angle_left = angle_left % (2 * np.pi)
+        angle_right = angle_right % (2 * np.pi)
 
-            # Find the unit vector pointing to the closest point on the target line from current position
-            closest_point = self.target_line.interpolate(self.target_line.project(pos))
-            direction_vector = np.array([closest_point.x - pos.x, closest_point.y - pos.y])
-            norm = np.linalg.norm(direction_vector)
-            if norm != 0:
-                unit_vector = direction_vector / norm
-            else:
-                unit_vector = direction_vector  # Zero vector if point is on line
+        # Find min and max
+        min_angle = min(angle_left, angle_right) + 0.01
+        max_angle = max(angle_left, angle_right) - 0.01
 
-            # Direction that minimizes distance to target
-            theta = np.arctan2(unit_vector[1], unit_vector[0])
+        angles = np.linspace(min_angle, max_angle, 10)
 
-            # D length vector pointing towards target
-            dx = self.d * np.cos(theta)
-            dy = self.d * np.sin(theta)
+        artificial_line_length = self.fire.y_lim * 10
 
-            tmp_pos = translate(pos, xoff=dx, yoff=dy)
+        travel_dist = Point(start_pos).distance(Point(self.pos))
+        travel_time = travel_dist / self.transit_speed_ms
+        
+        min_dist = np.inf
+        min_time = np.inf
+        best_line = None
 
-            # TODO: can probably use that optimized search for the nearest point can't remember the library rn
-            fire_dist = np.inf
-            closest_point = None
-            for fire in fires:
-                fire_pt = Point(fire)
-                dist = fire_pt.distance(tmp_pos)
+        for theta in angles:
+            dx = artificial_line_length * np.cos(theta)
+            dy = artificial_line_length * np.sin(theta)
 
-                if dist < fire_dist:
-                    fire_dist = dist
-                    closest_point = fire_pt
-
-            if fire_dist < self.fire_buffer_dist:
-                
-                vecx = tmp_pos.x - closest_point.x
-                vecy = tmp_pos.y - closest_point.y
-
-                vec = np.array([vecx, vecy])
-
-                # TODO: should watchout for cases where the unit vector is sending us toward the fire
-                cross = np.cross(unit_vector, vec)
-
-                if cross > 0:
-                    inc = False
-
-                else:
-                    inc = True
-
-            delta_theta = 0
-            while fire_dist < self.fire_buffer_dist:
-                if inc:
-                    theta += self.dtheta
-                else:
-                    theta -= self.dtheta
-                
-                delta_theta += self.dtheta
-
-                dx = self.d * np.cos(theta)
-                dy = self.d * np.sin(theta)
-
-                tmp_pos = translate(pos, xoff=dx, yoff=dy)
-
-                fire_dist = tmp_pos.distance(closest_point)
-
-                if delta_theta >= np.pi/2:
-                    return None, np.inf
+            art_line = LineString([start_pos, (start_pos[0] + dx, start_pos[1] + dy)])
             
-            path.append(tmp_pos)
-            pos = tmp_pos
-            time += self.d/self.ln_prod_rate_ms
-            gap = pos.distance(self.target_line)
+            point = art_line.intersection(self.target_line)
 
-            if LineString(path).intersects(self.target_line):
-                gap = 0
+            act_line = LineString([Point(start_pos), point])
 
-        return LineString(path), time
+            if act_line.length >= min_dist:
+                # No need to compute if distance already worse than current best
+                continue
+
+            fires = []
+
+            valid = True
+            for t_step in list(self.curr_prediction.keys()):
+                fires.extend(self.curr_prediction[t_step])
+                
+                travel_adj_time = min(t_step - travel_time, 0)
+
+                progress = travel_adj_time * self.ln_prod_rate_ms
+
+                point_at_t = act_line.interpolate(progress)
+
+                tree = KDTree(fires)
+                fire_dist, idx = tree.query(point_at_t.coords, k=1)
+
+                if fire_dist < self.plan_buffer:
+                    valid = False
+                    break
+
+            if valid:
+                    min_dist = act_line.length
+                    min_time = (act_line.length / self.ln_prod_rate_ms) + travel_time
+                    best_line = act_line
+
+        return best_line, min_time
