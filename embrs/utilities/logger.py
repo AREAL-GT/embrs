@@ -5,6 +5,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.data_classes import SimParams
+from shapely.geometry import LineString, mapping
 import datetime
 import numpy as np
 import json
@@ -336,7 +337,7 @@ def serialize_array(array: np.ndarray) -> str:
     compressed = zlib.compress(buffer.getvalue())
     encoded = base64.b64encode(compressed).decode('utf-8')
     return encoded
-        
+    
 def make_json_serializable(obj):
     if isinstance(obj, dict):
         return {k: make_json_serializable(v) for k, v in obj.items()}
@@ -350,6 +351,8 @@ def make_json_serializable(obj):
         return obj.isoformat()
     elif isinstance(obj, datetime.date):
         return obj.isoformat()
+    elif isinstance(obj, LineString):
+        return mapping(obj)
     elif hasattr(obj, '__dict__'):
         return str(obj)
     else:

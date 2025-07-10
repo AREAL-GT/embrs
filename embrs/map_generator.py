@@ -644,12 +644,13 @@ def get_user_data(fig: matplotlib.figure.Figure, lcp_data: LandscapeData) -> dic
     ignitions = drawer.get_ignitions()
     initial_ignitions = transform_geometries(ignitions)
 
-    breaks, break_widths = drawer.get_fire_breaks()
+    breaks, break_widths, break_ids = drawer.get_fire_breaks()
     fire_breaks = transform_geometries(breaks)
 
     user_data = MapDrawerData(
         fire_breaks = fire_breaks,
         break_widths = break_widths,
+        break_ids = break_ids,
         initial_ign = initial_ignitions
     )
 

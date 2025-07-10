@@ -59,13 +59,15 @@ class BaseVisualizer:
 
         self.scale_bar_km = params.scale_bar_km
         self.show_legend = params.show_legend
-        self.show_wind_cbar = params.show_wind_cbar
-        self.show_wind_field = params.show_wind_field
+        self.show_wind_cbar =  False #params.show_wind_cbar
+        self.show_wind_field = False #params.show_wind_field
         self.show_weather_data = params.show_weather_data
         self.show_temp_in_F = params.show_temp_in_F
 
         self.retardant_art = None
         self.water_drop_art = None
+        self.agent_art = None
+        self.agent_labels = None
 
         self.show_compass = params.show_compass
 
@@ -199,7 +201,7 @@ class BaseVisualizer:
                                                             label=f"Road - {road_type}"))
 
         # === Firebreaks ===
-        for fire_break, break_width in self.fire_breaks:
+        for fire_break, break_width, _ in self.fire_breaks:
             if isinstance(fire_break, LineString):
                 x, y = fire_break.xy
                 self.h_ax.plot(x, y, color='blue', linewidth=self.meters_to_points(break_width))
@@ -424,8 +426,8 @@ class BaseVisualizer:
 
             self.agent_art = []
             for agent_entry in agents:
-                a = self.h_ax.scatter(agent_entry.x, agent_entry.y, marker=agent_entry.marker, color=agent_entry.color)
-                self.agents.append(a)
+                a = self.h_ax.scatter(agent_entry.x, agent_entry.y, marker=agent_entry.marker, color=agent_entry.color, zorder=5)
+                self.agent_art.append(a)
 
             self.agent_labels = []
             for agent_entry in agents:

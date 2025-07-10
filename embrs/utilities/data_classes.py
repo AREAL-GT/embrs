@@ -14,6 +14,7 @@ from embrs.models.fuel_models import Fuel
 class MapDrawerData:
     fire_breaks: Optional[Dict] = field(default_factory=dict)
     break_widths: Optional[List] = field(default_factory=list)
+    break_ids: Optional[List] = field(default_factory=list)
     initial_ign: Optional[List] = field(default_factory=list)
 
 @dataclass

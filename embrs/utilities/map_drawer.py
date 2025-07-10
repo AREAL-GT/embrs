@@ -212,6 +212,7 @@ class PolygonDrawer:
         self.temp_line_segments = []  # For storing temporary line segments
         self.lines = []
         self.fire_break_widths = []
+        self.break_ids = []
 
         # Parameter to track whether in ignition or fire-break mode
         self.mode = 'ignition'
@@ -535,8 +536,9 @@ class PolygonDrawer:
                     self.line_segments.append(coords)
 
                     # Prompt for width
-                    width = self.get_break_width()
+                    width, id = self.get_break_width()
                     self.fire_break_widths.append(width)
+                    self.break_ids.append(id)
 
                     # Plot blue line with width
                     x, y = zip(*coords)
@@ -808,9 +810,10 @@ class PolygonDrawer:
                 self.temp_line_segments = []
                 self.set_button_status(True, True)
 
-                val = self.get_break_width()
+                val, id = self.get_break_width()
 
                 self.fire_break_widths.append(val)
+                self.break_ids.append(id)
 
                 self.no_fire_breaks_button.ax.set_visible(False)
 
@@ -845,11 +848,14 @@ class PolygonDrawer:
         :return: float fuel value entered by the user
         :rtype: float
         """
+        break_ctr = len(self.break_ids)
         app = QApplication([])
         request  = "Enter fire break width in meters:"
-        value, ok = QInputDialog.getDouble(None, "Input Dialog", request)
-        if ok:
-            return value
+        width, ok_1 = QInputDialog.getDouble(None, "Input Dialog", request)
+        request = "Enter break id string:"
+        id, ok_2 = QInputDialog.getText(None, "Input Dialog", request, text=str(break_ctr))
+        if ok_1 and ok_2:
+            return width, id
 
         return None
 
@@ -924,4 +930,4 @@ class PolygonDrawer:
         for ln in self.line_segments:
             fire_breaks.append(LineString(ln))
 
-        return fire_breaks, self.fire_break_widths
+        return fire_breaks, self.fire_break_widths, self.break_ids

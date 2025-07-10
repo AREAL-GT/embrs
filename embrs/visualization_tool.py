@@ -4,6 +4,7 @@ from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInp
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry, PredictionEntry
 from embrs.utilities.file_io import VizFolderSelector
 
+from shapely.geometry import LineString
 import matplotlib.animation as animation
 import pyarrow.parquet as pq
 import pandas as pd
@@ -75,6 +76,11 @@ class PlaybackVisualizer(BaseVisualizer):
 
         decoded_wind = self.deserialize_array(meta_dict['wind_forecast'])
 
+        fire_breaks = []
+        for fb in meta_dict['fire_breaks']:
+            ls_dict = fb[0]
+            fire_breaks.append((LineString(ls_dict['coordinates']), fb[1], fb[2]))
+
         params = VisualizerInputs(
             cell_size=meta_dict['cell_size'],
             sim_shape=(meta_dict['rows'], meta_dict['cols']),
@@ -91,7 +97,7 @@ class PlaybackVisualizer(BaseVisualizer):
             forecast_t_step=meta_dict['forecast_t_step'],
             elevation=meta_dict['elevation'],
             roads=meta_dict['roads'],
-            fire_breaks=meta_dict['fire_breaks'],
+            fire_breaks=fire_breaks,
             init_entries=self.get_init_entries(init_path),     
             scale_bar_km=self.config_params.scale_km,
             show_legend=self.show_legend,
@@ -169,6 +175,7 @@ class PlaybackVisualizer(BaseVisualizer):
         if self.has_agents:
             df = pd.read_parquet(self.agent_file)
             filtered = df[(df["timestamp"] >= start_time) & (df["timestamp"] < end_time)]
+            filtered = filtered.sort_values("timestamp").groupby("id", as_index=False).tail(1)
             agents = [AgentLogEntry(**row.to_dict()) for _, row in filtered.iterrows()]
         
         if self.has_actions:

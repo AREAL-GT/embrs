@@ -77,7 +77,7 @@ class BaseFireSim:
         self._burnt_cells = set()
         self._frontier = set()
         self._fire_break_cells = []
-        self._active_firelines = []
+        self._active_firelines = {}
         self._new_fire_break_cache = []
         self.starting_ignitions = set()
         self._urban_cells = []
@@ -128,6 +128,9 @@ class BaseFireSim:
                 for j in range(self._shape[0]):
                     # Initialize cell object
                     new_cell = Cell(id, i, j, self._cell_size)
+
+                    # Set cell's parent reference to the current sim instance
+                    new_cell.set_parent(self)
 
                     # Initialize cell data class
                     cell_data = CellData()
@@ -212,9 +215,6 @@ class BaseFireSim:
                     self._cell_grid[j,i] = new_cell
                     self._cell_dict[id] = new_cell
 
-                    # Set cell's parent reference to the current sim instance
-                    new_cell.set_parent(self)
-
                     # Increment id counter
                     id +=1
                     pbar.update(1)
@@ -293,7 +293,9 @@ class BaseFireSim:
 
         # Load scenario specific data
         scenario = map_params.scenario_data
-        self._fire_breaks = list(zip(scenario.fire_breaks, scenario.break_widths))
+        self._fire_breaks = list(zip(scenario.fire_breaks, scenario.break_widths, scenario.break_ids))
+        self.fire_break_dict = {id: (fire_break, break_width) 
+                                for fire_break, break_width, id in list(zip(scenario.fire_breaks, scenario.break_widths, scenario.break_ids))}
         self._initial_ignition = scenario.initial_ign
 
         # Grab starting datetime
@@ -799,7 +801,7 @@ class BaseFireSim:
     def _set_firebreaks(self):
         """_summary_
         """
-        for line, break_width in self.fire_breaks:
+        for line, break_width, _ in self.fire_breaks:
             self._apply_firebreak(line, break_width)
 
     def _apply_firebreak(self, line: LineString, break_width: float):
@@ -1256,7 +1258,7 @@ class BaseFireSim:
             self._active_water_drops.append(cell)
             self._updated_cells[cell.id] = cell
 
-    def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None) -> None:
+    def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None, id: str = None) -> str:
         """_summary_
 
         Args:
@@ -1268,10 +1270,16 @@ class BaseFireSim:
         if construction_rate is None:
             # Add fire break instantly
             self._apply_firebreak(line, width_m)
-            self._fire_breaks.append((line, width_m))
+
+            if id is None:
+                id = str(len(self.fire_breaks) + 1)
+                
+            self._fire_breaks.append((line, width_m, id))
+            self.fire_break_dict[id] = (line, width_m)
             
             # Add to a cache for visualization and logging
             cache_entry = {
+                "id": id,
                 "line": line,
                 "width": width_m,
                 "time": self.curr_time_s,
@@ -1282,15 +1290,31 @@ class BaseFireSim:
             self._new_fire_break_cache.append(cache_entry)
 
         else:
+            if id is None:
+                id = str(len(self.fire_breaks) + len(self._active_firelines) + 1)
+
             # Create an active fireline to be updated over time
-            self._active_firelines.append({
+            self._active_firelines[id] = {
                 "line": line,
                 "width": width_m,
                 "rate": construction_rate,
                 "progress": 0.0,
                 "partial_line": LineString([]),
                 "cells": set()
-            })
+            }
+
+        return id
+
+    def stop_fireline_construction(self, fireline_id: str):
+
+        if self._active_firelines.get(fireline_id) is not None:
+            fireline = self._active_firelines[fireline_id]
+            partial_line = fireline["partial_line"]
+            self._fire_breaks.append((partial_line, fireline["width"], fireline_id))
+            self.fire_break_dict[fireline_id] = (partial_line, fireline["width"])
+            del self._active_firelines[fireline_id]
+
+        # TODO: do we want to throw an error here if an invalid id is passed in
 
     def _update_active_firelines(self) -> None:
         """_summary_
@@ -1299,7 +1323,9 @@ class BaseFireSim:
         step_size = self._cell_size / 4.0
         firelines_to_remove = []
 
-        for fireline in self._active_firelines:
+        for id in list(self._active_firelines.keys()):
+            fireline = self._active_firelines[id]
+
             full_line = fireline["line"]
             length = full_line.length
             
@@ -1337,20 +1363,21 @@ class BaseFireSim:
                         if cell._break_width > self._cell_size:
                             cell._set_fuel_type(self.FuelClass(91))
                     
-                    # If line has met its full length we can add it to the permanent fire lines 
-                    # and remove it from active
-                    if fireline["progress"] == length:
-                        fireline["partial_line"] = full_line
-                        self._fire_breaks.append((full_line, fireline["width"]))
-                        firelines_to_remove.append(fireline)
+            # If line has met its full length we can add it to the permanent fire lines 
+            # and remove it from active
+            if fireline["progress"] == length:
+                fireline["partial_line"] = full_line
+                self._fire_breaks.append((full_line, fireline["width"], id))
+                self.fire_break_dict[id] = (full_line, fireline["width"])
+                firelines_to_remove.append(id)
 
-                    else:
-                        # Store the truncated line based on progress
-                        fireline["partial_line"] = self.truncate_linestring(fireline["line"], fireline["progress"])
+            else:
+                # Store the truncated line based on progress
+                fireline["partial_line"] = self.truncate_linestring(fireline["line"], fireline["progress"])
 
         # Remove the lines marked for removal from active firelines
-        for fireline in firelines_to_remove:
-            self._active_firelines.remove(fireline)
+        for fireline_id in firelines_to_remove:
+            del self._active_firelines[fireline_id]
 
     def truncate_linestring(self, line: LineString, length: float) -> LineString:
         """_summary_
@@ -1491,7 +1518,8 @@ class BaseFireSim:
             ))
 
         if self._active_firelines:
-            for fireline in self._active_firelines:
+            for id in list(self._active_firelines.keys()):
+                fireline = self._active_firelines[id]
                 # For each fireline, collect relevant information on its current state
                 # Create an entry for each line
                 entries.append(ActionsEntry(
