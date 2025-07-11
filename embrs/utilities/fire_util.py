@@ -397,7 +397,17 @@ class UtilFuncs:
             start_angle = (30 * edge_loc + 120) % 360
             end_angle = (start_angle + 120)
 
-            directions = np.linspace(start_angle, end_angle, 9)
+            directions = [
+                start_angle,
+                start_angle + 19.107,
+                start_angle + 30,
+                start_angle + 46.102,
+                start_angle + 60,
+                end_angle - 46.102,
+                end_angle - 30,
+                end_angle - 19.107,
+                end_angle 
+            ]
 
             start_end_point = (edge_loc + 2) % 12 or 12
             end_end_point = (start_end_point + 8) % 12 or 12
@@ -407,7 +417,19 @@ class UtilFuncs:
             start_angle = (30 * edge_loc + 90) % 360
             end_angle = (start_angle + 180)
 
-            directions = np.linspace(start_angle, end_angle, 11)
+            directions = [
+                start_angle,
+                start_angle + 30,
+                start_angle + 40.893,
+                start_angle + 60,
+                start_angle + 73.898,
+                start_angle + 90,
+                end_angle - 73.898,
+                end_angle - 60,
+                end_angle - 40.893,
+                end_angle - 30,
+                end_angle 
+            ]
 
             start_end_point = (edge_loc + 1) % 12 or 12
             end_end_point = (12 + (edge_loc - 1)) % 12 or 12
