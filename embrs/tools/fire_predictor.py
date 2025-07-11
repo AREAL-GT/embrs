@@ -4,7 +4,7 @@ from embrs.utilities.data_classes import PredictorParams
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
-from embrs.models.wind_forecast import run_windninja
+from embrs.models.wind_forecast import run_windninja, create_uniform_wind
 
 import copy
 import numpy as np
@@ -349,13 +349,19 @@ class FirePredictor(BaseFireSim):
 
         new_weather_stream.stream = new_stream
         
-        self.wind_forecast = run_windninja(new_weather_stream, self.fire._sim_params.map_params)
-        self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
-        for layer in range(self.wind_forecast.shape[0]):
-            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
-            
-        self.wind_forecast = self.flipud_forecast
+        if self.fire._sim_params.map_params.uniform_map:
+            # If the map is uniform, we can create a uniform wind forecast
+            self.wind_forecast = create_uniform_wind(new_weather_stream)
+        else:
+            self.wind_forecast = run_windninja(new_weather_stream, self.fire._sim_params.map_params)
+            self.flipud_forecast = np.empty(self.wind_forecast.shape)
+
+            for layer in range(self.wind_forecast.shape[0]):
+                self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
+                
+            self.wind_forecast = self.flipud_forecast
+
         self._wind_res = self.fire._sim_params.weather_input.mesh_resolution
         self._weather_stream = new_weather_stream
 

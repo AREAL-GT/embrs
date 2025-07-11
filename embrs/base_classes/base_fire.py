@@ -356,6 +356,8 @@ class BaseFireSim:
             self._wind_res = 10e10
             self.wind_forecast = create_uniform_wind(self._weather_stream)
 
+            self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
+
         self.model_spotting = sim_params.model_spotting
         self._spot_ign_prob = 0.0
 

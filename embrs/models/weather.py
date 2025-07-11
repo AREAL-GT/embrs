@@ -339,14 +339,62 @@ class WeatherStream:
 
     def get_uniform_stream(self):
         file = self.params.file
-        with open(file) as f:
-            data = json.load(f)
+        weather_data = {
+            "datetime": [],
+            "wind_speed": [],
+            "wind_direction": [],
+        }
 
-        weather_data = {}
+        units = "english"
 
-        # File-based data is already at the correct time step, so use it directly
-        weather_data["wind_speed"] = data["weather_entries"]["wind_speed"]
-        weather_data["wind_direction"] = data["weather_entries"]["wind_direction"]
+        # ── Step 1: Parse WXS line-by-line ───────────────────────────
+        with open(file, "r") as f:
+            header_found = False
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("RAWS_UNITS:"):
+                    units = line.split(":")[1].strip().lower()
+                    continue
+                elif line.startswith("RAWS_ELEVATION:"):
+                    continue
+                elif line.startswith("RAWS:"):
+                    continue
+                elif line.startswith("Year") and not header_found:
+                    header_found = True
+                    continue
+                if not header_found:
+                    continue
+
+                parts = line.split()
+                if len(parts) != 10:
+                    continue
+                try:
+                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                    hour = int(parts[3].zfill(4)[:2])
+                    dt = datetime(year, month, day, hour)
+                    weather_data["datetime"].append(dt)
+                    weather_data["wind_speed"].append(float(parts[7]))
+                    weather_data["wind_direction"].append(float(parts[8]))
+                except Exception as e:
+                    print(f"Skipping malformed line: {line} ({e})")
+                    continue
+
+        df = pd.DataFrame(weather_data).set_index("datetime")
+
+        if len(df.index) < 2:
+            raise ValueError("WXS file does not contain enough data to determine time step.")
+
+        # ── Step 2: Infer time step and apply unit conversions ───────
+        time_step_min = int((df.index[1] - df.index[0]).total_seconds() / 60)
+        if units == "english":
+            df["wind_speed"] *= 0.44704
+        elif units == "metric":
+            df["temperature"] = df["temperature"] * 9 / 5 + 32
+        else:
+            raise ValueError(f"Unknown units: {units}")
+
 
         # Set live moisture values
         self.live_h_mf = 1.4
@@ -359,11 +407,11 @@ class WeatherStream:
         self.stream = list(self.generate_uniform_stream(weather_data))
 
         # Set units and time step based on OpenMeteo params
-        self.time_step = data["time_step_min"]
-        self.input_wind_ht = data["wind_height"]
-        self.input_wind_ht_units = data["wind_height_units"]
-        self.input_wind_vel_units = data["wind_speed_units"]
-        self.input_temp_units = data["temperature_units"]
+        self.time_step = time_step_min
+        self.input_wind_ht = 6.1
+        self.input_wind_ht_units = 'm'
+        self.input_wind_vel_units = 'mps'
+        self.input_temp_units = 'F'
 
     def generate_uniform_stream(self, weather_data: dict) -> Iterator[WeatherEntry]:
         for wind_speed, wind_dir in zip(

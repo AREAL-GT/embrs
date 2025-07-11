@@ -80,7 +80,7 @@ def main():
                     labelbottom = False)
 
     generate_uniform_map(map_params)
-    user_data = get_user_data(fig)
+    user_data = get_user_data(fig, map_params.lcp_data)
     save_to_file(map_params, user_data)
 
 if __name__ == "__main__":
