@@ -13,6 +13,8 @@ from shapely.affinity import translate
 
 import numpy as np
 
+from embrs.utilities.unit_conversions import *
+
 TRAVEL, CONSTRUCTION, PLANNING, ADAPT, IDLE = 0, 1, 2, 3, 4
 
 
@@ -32,23 +34,24 @@ class FirelineConstruction(ControlClass):
         min_x = min(xs)
         max_x = max(xs)
         x_pos = (min_x + max_x) / 4
-        x, y = self.get_xy_from(x_pos)
+        x, y = self.get_xy_from(50)
         self.pos = (x,y)
 
         self.agent = AgentBase(0, x, y)
 
         fire.add_agent(self.agent)
 
-        self.transit_speed_ms = 1.34/3 # Equivalent to 3 mph (walking speed)
-        self.ln_prod_rate_ms = 0.04 # TODO: find a citable value for this (https://www.frames.gov/documents/behaveplus/publications/NWCG_2021_FireLineProductionRates.pdf)
+        self.transit_speed_ms = 1.34112 # Equivalent to 3 mph (walking speed)
+
+        # Working with Hardwood Litter (Type I Crew Indirect: 455 ft/hr)
+        self.ln_prod_rate_ms = ft_to_m(376 / 3600) # convert to m/s
 
         self.plan_buffer = 500 # TODO: find a citable value for this
-        self.adapt_buffer = 1000
-        self.abs_min = 100
+        self.adapt_buffer = 1500
+        self.abs_min = 500
         self.k = 4
 
-        # TODO: maybe implement ability to reduce line_width and increase speed in real-time (talk to Rogers first)
-        self.line_width = 10
+        self.line_width = 10 # TODO: find a citable value for this
         
     def process_state(self, fire: FireSim):
 
@@ -132,10 +135,10 @@ class FirelineConstruction(ControlClass):
         # TODO: play with the bias parameters and such
         pred_input = PredictorParams(
             time_horizon_hr=time_horizon,
-            time_step_s=time_step,
-            cell_size_m=self.fire.cell_size,
+            time_step_s=time_step*3,
+            cell_size_m=self.fire.cell_size*2,
             dead_mf=0.06,
-            wind_bias_factor=-0.25
+            wind_bias_factor=-0.5
         )
 
         self.pred_model = FirePredictor(pred_input, self.fire)
