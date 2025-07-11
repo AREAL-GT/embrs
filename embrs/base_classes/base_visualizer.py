@@ -383,6 +383,7 @@ class BaseVisualizer:
                 alpha_arr.append(entry.I_ss)
 
             else:
+                polygon.radius = self.cell_size* 1.1
                 burnt_patches.append(polygon)
 
         fuel_coll = PatchCollection(tree_patches, match_original=True, zorder=3)

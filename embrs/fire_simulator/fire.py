@@ -146,6 +146,7 @@ class FireSim(BaseFireSim):
             if cell.fully_burning:
                 cell._set_state(CellStates.BURNT)
                 self._burning_cells.remove(cell)
+                self.updated_cells[cell.id] = cell
                 # self.update_fuel_in_burning_cell(cell)
                 # No need to compute spread for these cells
                 continue
