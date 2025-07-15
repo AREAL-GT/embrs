@@ -13,7 +13,7 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.offsetbox import AnchoredOffsetbox, AuxTransformBox, VPacker, TextArea
 from matplotlib.lines import Line2D
 
-from matplotlib.collections import PatchCollection
+from matplotlib.collections import PatchCollection, LineCollection, PathCollection
 import numpy as np
 from shapely.geometry import LineString
 
@@ -62,9 +62,9 @@ class BaseVisualizer:
         self.show_temp_in_F = params.show_temp_in_F
 
         self.retardant_art = None
-        self.water_drop_art = None
+        self.suppressant_art = None
+        self.fireline_art = []  # persistent fireline artists
         self.agent_art = []
-        self.agent_labels = []
         self.legend_elements = []
 
         self.show_compass = params.show_compass
@@ -161,30 +161,36 @@ class BaseVisualizer:
 
         self.all_cells_coll.set_facecolors(self.cell_colors)
 
-         # Draw dynamic elements
-        if agents:
-            for agent_art in self.agent_art:
-                agent_art.remove()
-            self.agent_art.clear()
+        # Agents - batch update with PathCollection
+        if not self.agent_art:
+            self.agent_art = self.h_ax.scatter([], [], zorder=5)
+        agent_positions = np.array([[agent.x, agent.y] for agent in agents]) if agents else np.empty((0, 2))
+        self.agent_art.set_offsets(agent_positions)
 
-            for agent in agents:
-                scatter = self.h_ax.scatter(agent.x, agent.y, marker=agent.marker, color=agent.color, zorder=5)
-                self.agent_art.append(scatter)
+        # Firelines - use a single LineCollection
+        if not self.fireline_art:
+            self.fireline_art = LineCollection([], colors='blue', linewidths=2, zorder=4)
+            self.h_ax.add_collection(self.fireline_art)
+        fireline_segments = [list(zip(action.x_coords, action.y_coords)) for action in actions if action.action_type == 'fireline_construction']
+       
+        if fireline_segments:
+            self.fireline_art.set_segments(self.fireline_art.get_segments() + fireline_segments)
 
-        if actions:
-            for action in actions:
-                if action.action_type == 'fireline_construction':
-                    self.h_ax.plot(action.x_coords, action.y_coords, color='blue', linewidth=self.meters_to_points(action.width), zorder=4)
-                elif action.action_type == 'long_term_retardant':
-                    if self.retardant_art:
-                        self.retardant_art.remove()
-                    self.retardant_art = self.h_ax.scatter(action.x_coords, action.y_coords, marker='h', s=self.meters_to_points(6*self.cell_size), c=action.effectiveness, cmap='Reds_r', vmin=0, vmax=1, zorder=4)
-                elif action.action_type == 'short_term_suppressant':
-                    if self.water_drop_art:
-                        self.water_drop_art.remove()
-                    self.water_drop_art = self.h_ax.scatter(action.x_coords, action.y_coords, marker='h', s=self.meters_to_points(6*self.cell_size), c=action.effectiveness, cmap='Blues', vmin=0.5, vmax=1, zorder=4)
+        # Retardant and suppressant
+        for action in actions:
+            if action.action_type == 'long_term_retardant':
+                if not self.retardant_art:
+                    self.retardant_art = self.h_ax.scatter([], [], marker='h', s=self.meters_to_points(6*self.cell_size), cmap='Reds_r', vmin=0, vmax=1, zorder=4)
+                self.retardant_art.set_offsets(np.column_stack((action.x_coords, action.y_coords)))
+                self.retardant_art.set_array(np.array(action.effectiveness))
 
-
+            elif action.action_type == 'short_term_suppressant':
+                if not self.suppressant_art:
+                    self.suppressant_art = self.h_ax.scatter([], [], marker='h', s=self.meters_to_points(6*self.cell_size), cmap='Blues', vmin=0.5, vmax=1, zorder=4)
+                self.suppressant_art.set_offsets(np.column_stack((action.x_coords, action.y_coords)))
+                self.suppressant_art.set_array(np.array(action.effectiveness))
+        
+        
         # Update time displays
         sim_datetime = self._start_datetime + timedelta(seconds=sim_time_s)
         self.datetime_text.set_text(sim_datetime.strftime("%Y-%m-%d %H:%M"))
