@@ -292,7 +292,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
         end_datetime=end_datetime
     )
 
-    init_mf_list_str = config["Weather"].get("init_mf_list", "0.06, 0.07, 0.08")
+    init_mf_list_str = config["Weather"].get("init_mf", "0.06, 0.07, 0.08")
     init_mf_list = [float(val.strip()) for val in init_mf_list_str.split(",")]
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
