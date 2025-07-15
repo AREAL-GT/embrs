@@ -129,7 +129,7 @@ class FirelineConstruction(ControlClass):
     def plan(self):
         time_est = Point(self.pos).distance(self.target_line) / self.ln_prod_rate_ms # time to nearest point on target line in seconds
 
-        time_horizon = (time_est / 3600) + 2 # add 2 hours buffer to the estimated time # TODO: should come up with a way to determine this buffer
+        time_horizon = (time_est / 3600) + 2 # add 2 hours buffer to the estimated time
         time_step = self.fire.time_step
         
         # TODO: play with the bias parameters and such
@@ -142,7 +142,9 @@ class FirelineConstruction(ControlClass):
         )
 
         self.pred_model = FirePredictor(pred_input, self.fire)
-        self.curr_prediction = self.pred_model.run(visualize=True)
+        pred_output = self.pred_model.run(visualize=True)
+
+        self.spread_prediction = pred_output.spread
 
         # Construct nominal plan for control line
         # Note: this assumes fire is moving left to right
@@ -286,8 +288,8 @@ class FirelineConstruction(ControlClass):
             fires = []
 
             valid = True
-            for t_step in list(self.curr_prediction.keys()):
-                fires.extend(self.curr_prediction[t_step])
+            for t_step in list(self.spread_prediction.keys()):
+                fires.extend(self.spread_prediction[t_step])
                 
                 travel_adj_time = min(t_step - travel_time, 0)
 

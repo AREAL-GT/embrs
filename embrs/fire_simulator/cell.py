@@ -744,9 +744,6 @@ class Cell:
 
         return entry
 
-    def get_spread_directions(self, ignited_pos):
-        return self.DIRECTION_MAP.get(ignited_pos)
-
     # ------ Compare operators overloads ------ #
     def __lt__(self, other) -> bool:
         """Compares two cells based on their unique ID.

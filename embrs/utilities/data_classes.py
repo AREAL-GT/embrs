@@ -253,3 +253,14 @@ class CellData:
     init_dead_mf: Optional[float] = 0.08
     live_h_mf: Optional[float] = 0.3
     live_w_mf: Optional[float] = 0.3
+
+@dataclass
+class PredictionOutput:
+    spread: dict # keys: times, values: (x,y)
+    flame_len_m: dict # keys: (x,y), values: float
+    fli_kw_m: dict # keys: (x,y), values: float
+    ros_ms: dict # keys: (x,y), values: float
+    spread_dir: dict # keys: (x,y), values: float
+    crown_fire: dict # keys: (x,y), values: active or passive
+    hold_probs: dict # keys: (x,y), values: float
+    breaches: dict # keys: (x,y), values: bool

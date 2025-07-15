@@ -1,6 +1,6 @@
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
-from embrs.utilities.data_classes import PredictorParams
+from embrs.utilities.data_classes import PredictorParams, PredictionOutput
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
@@ -78,15 +78,35 @@ class FirePredictor(BaseFireSim):
         # Catch states of predictor cells up with the fire sim
         self._catch_up_with_fire()
 
-        self.output = {}
+        self.spread = {}
+        self.flame_len_m = {}
+        self.fli_kw_m = {}
+        self.ros_ms = {}
+        self.spread_dir = {}
+        self.crown_fire = {}
+        self.hold_probs = {}
+        self.breaches = {}
 
         # Perform the prediction
         self._prediction_loop()
 
         if visualize:
-            self.fire.visualize_prediction(self.output)
+            self.fire.visualize_prediction(self.spread)
 
-        return self.output
+
+        output = PredictionOutput(
+            spread=self.spread,
+            flame_len_m=self.flame_len_m,
+            fli_kw_m=self.fli_kw_m,
+            ros_ms=self.ros_ms,
+            spread_dir=self.spread_dir,
+            crown_fire=self.crown_fire,
+            hold_probs=self.hold_probs,
+            breaches=self.breaches
+        )
+
+
+        return output
     
     def _set_prediction_forecast(self, cell):
         x_wind = max(cell.x_pos - self.wind_xpad, 0)
@@ -135,14 +155,20 @@ class FirePredictor(BaseFireSim):
                 self._set_prediction_forecast(cell)
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
+                
+                flame_len_ft = calc_flame_len(cell)
+                flame_len_m = ft_to_m(flame_len_ft)
+
+                self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
 
                 if cell._break_width > 0:
                     # Determine if fire will breach fireline contained within cell
-                    flame_len_ft = calc_flame_len(cell)
-                    flame_len_m = ft_to_m(flame_len_ft)
                     hold_prob = cell.calc_hold_prob(flame_len_m)
                     rand = np.random.random()
                     cell.breached = rand > hold_prob
+
+                    self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
+                    self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
 
                 else:
                     cell.breached = True
@@ -157,13 +183,19 @@ class FirePredictor(BaseFireSim):
                 cell.r_t = cell.r_ss
                 cell.I_t = cell.I_ss
 
-                if self.output.get(self._curr_time_s) is None:
-                    self.output[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
+                if self.spread.get(self._curr_time_s) is None:
+                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
 
                 else:
-                    self.output[self._curr_time_s].append((cell.x_pos, cell.y_pos))
+                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
 
-        
+                if cell._crown_status != CrownStatus.NONE:
+                    self.crown_fire[(cell.x_pos, cell.y_pos)] = cell._crown_status
+                
+                self.fli_kw_m[(cell.x_pos, cell.y_pos)] = np.max(cell.I_ss)
+                self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
+                self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
+
         if self._curr_time_s >= self._end_time:
             return False
 
