@@ -355,6 +355,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run fire simulation")
     parser.add_argument("--config", type=str, help="Path to .cfg file")
+    parser.add_argument("--profile", action="store_true", help="Enable profiling of the simulation")
 
     args = parser.parse_args()
 
@@ -369,5 +370,29 @@ def main():
         folder_selector = SimFolderSelector(sim_loop)
         folder_selector.run()
 
-if __name__ == "__main__":
+import cProfile
+import pstats
+import sys
+
+def profiled_main():
+    profiler = cProfile.Profile()
+    profiler.enable()
+
+    
     main()
+
+    profiler.disable()
+    stats = pstats.Stats(profiler).strip_dirs().sort_stats('cumulative')
+    stats.print_stats(20)  # Show top 20 time-consuming functions
+
+    # Save profile to file for snakeviz
+    profiler.dump_stats('fire_sim_profile.prof')
+    print("\nProfile saved as 'fire_sim_profile.prof'. To visualize, run:")
+    print("    snakeviz fire_sim_profile.prof")
+
+if __name__ == "__main__":
+    if "--profile" in sys.argv:
+        profiled_main()
+    else:
+        main()
+
