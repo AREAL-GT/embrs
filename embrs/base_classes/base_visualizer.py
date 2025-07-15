@@ -26,6 +26,9 @@ class BaseVisualizer:
         if not self.render:
             mpl.use('Agg')  # Use a non-interactive backend if not rendering
 
+        else:
+            mpl.use('QtAgg')
+
         self.grid_height = params.sim_shape[0]
         self.grid_width = params.sim_shape[1]
         self.cell_size = params.cell_size
@@ -191,8 +194,9 @@ class BaseVisualizer:
         if self.render:
             self.fig.canvas.restore_region(self.initial_state)
             self.h_ax.draw_artist(self.all_cells_coll)
+            self.fig.canvas.blit(self.h_ax.bbox)
             self.fig.canvas.flush_events()
-            plt.pause(0.01)
+            plt.pause(0.001)
 
 
     def close(self):
