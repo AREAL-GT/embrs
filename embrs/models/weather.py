@@ -320,9 +320,15 @@ class WeatherStream:
             "rel_humidity": daily_avg_rh.values
         }).reset_index(drop=True)
 
-        gsi = self.calc_GSI(daily_data)
-        self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
-        self.fmc = self.calc_fmc()
+        if len(daily_data["date"]) == 0:
+            self.live_h_mf = 0.6
+            self.live_w_mf = 0.9
+            self.fmc = 100
+
+        else:
+            gsi = self.calc_GSI(daily_data)
+            self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+            self.fmc = self.calc_fmc()
 
         # ── Step 8: Package final stream ─────────────────────────────
         hourly_data = {col: df[col].values for col in df.columns}

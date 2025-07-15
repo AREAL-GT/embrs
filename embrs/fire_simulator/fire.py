@@ -233,6 +233,7 @@ class FireSim(BaseFireSim):
             self.weather_changed = True
             self._new_ignitions = []
             for cell, loc in self.starting_ignitions:
+                cell._arrival_time = self.curr_time_m
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
 
@@ -340,6 +341,10 @@ class FireSim(BaseFireSim):
     
     def _get_cell_updates(self):
         cell_data = [cell.to_log_entry(self.curr_time_s) for cell in list(self._updated_cells.values())]
+
+        if self._visualizer is None:
+            self._updated_cells.clear()
+
         return cell_data
 
     def set_visualizer(self, visualizer):
