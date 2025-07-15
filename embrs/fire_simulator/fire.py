@@ -146,7 +146,7 @@ class FireSim(BaseFireSim):
             if cell.fully_burning:
                 cell._set_state(CellStates.BURNT)
                 self._burning_cells.remove(cell)
-                self.updated_cells[cell.id] = cell
+                self._updated_cells[cell.id] = cell
                 # self.update_fuel_in_burning_cell(cell)
                 # No need to compute spread for these cells
                 continue
@@ -181,7 +181,7 @@ class FireSim(BaseFireSim):
             # Update time since conditions have changed for fire acceleration
             cell.t_elapsed_min += self.time_step / 60
 
-            self.updated_cells[cell.id] = cell
+            self._updated_cells[cell.id] = cell
 
         # Get set of spot fires started in this time step
         if self.model_spotting and self._spot_ign_prob > 0:
@@ -195,6 +195,10 @@ class FireSim(BaseFireSim):
             if self._iters % self._log_freq == 0:
                 self.logger.flush()
 
+        if self._visualizer:
+            self._visualizer.cache_changes(self._get_cell_updates())
+
+        self._updated_cells.clear()
         self._iters += 1
 
     def _log_changes(self):
@@ -342,9 +346,6 @@ class FireSim(BaseFireSim):
     def _get_cell_updates(self):
         cell_data = [cell.to_log_entry(self.curr_time_s) for cell in list(self._updated_cells.values())]
 
-        if self._visualizer is None:
-            self._updated_cells.clear()
-
         return cell_data
 
     def set_visualizer(self, visualizer):
@@ -366,13 +367,6 @@ class FireSim(BaseFireSim):
             self._visualizer.visualize_prediction(prediction_grid)
 
         self.curr_prediction = prediction_grid
-
-    @property
-    def updated_cells(self) -> dict:
-        """Dictionary containing cells updated since last time real-time visualization was updated.
-        Dict keys are the ids of the :class:`~fire_simulator.cell.Cell` objects.
-        """
-        return self._updated_cells
 
     @property
     def agent_list(self) -> list:

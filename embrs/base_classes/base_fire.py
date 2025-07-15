@@ -59,8 +59,9 @@ class BaseFireSim:
         self._last_weather_update = 0
         self.weather_changed = True
 
-        # Variable to store logger object
+        # Variables to store logger and visualizer object
         self.logger = None
+        self._visualizer = None
 
         # Track whether sim is finished or not
         self._finished = False
@@ -579,7 +580,7 @@ class BaseFireSim:
                     
                     for spot in new_spots:
                         self._new_ignitions.append(spot)
-                        self.updated_cells[spot.id] = spot
+                        self._updated_cells[spot.id] = spot
 
                     del self._scheduled_spot_fires[time]
 
@@ -1575,8 +1576,17 @@ class BaseFireSim:
                 # and the visualizer
                 if logger:
                     entry["logged"] = True
+
+                    # Check if visualizer is being used
+                    if not self._visualizer:
+                        entry["visualized"] = True
+
                 else:
                     entry["visualized"] = True
+
+                    # Check if logger is being used
+                    if not self.logger:
+                        entry["logged"] = True
 
                 if entry["logged"] and entry["visualized"]:
                     to_remove.append(entry)
@@ -1713,12 +1723,6 @@ class BaseFireSim:
         """
         return self._sim_duration
 
-    @property
-    def updated_cells(self) -> dict:
-        """Dictionary containing cells updated since last time real-time visualization was updated. Dict keys
-        are the ids of the :class:`~fire_simulator.cell.Cell` objects.
-        """
-        return self._updated_cells
 
     @property
     def roads(self) -> list:

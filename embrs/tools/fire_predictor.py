@@ -202,7 +202,7 @@ class FirePredictor(BaseFireSim):
                 else:
                     fires_still_burning.append(cell)
 
-                self.updated_cells[cell.id] = cell
+                self._updated_cells[cell.id] = cell
 
             if self.model_spotting and self._spot_ign_prob > 0:
                 self._ignite_spots()
@@ -270,7 +270,7 @@ class FirePredictor(BaseFireSim):
                         self._new_ignitions.append(spot)
                         spot.directions, spot.distances, spot.end_pts = UtilFuncs.get_ign_parameters(0, spot.cell_size)
                         spot._set_state(CellStates.FIRE)
-                        self.updated_cells[spot.id] = spot
+                        self._updated_cells[spot.id] = spot
 
                     # Delete entry from schedule if ignited
                     del self._scheduled_spot_fires[time]

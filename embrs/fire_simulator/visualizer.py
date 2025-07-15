@@ -8,6 +8,7 @@ class RealTimeVisualizer(BaseVisualizer):
 
     def __init__(self, sim: FireSim):
         self.sim = sim
+        self.cell_cache = []
 
         input_params = self.get_input_params()
 
@@ -20,12 +21,16 @@ class RealTimeVisualizer(BaseVisualizer):
         entries = [cell.to_log_entry(self.sim._curr_time_s) for cell in self.sim.cell_dict.values()]
         return entries
 
+    def cache_changes(self, updated_cells: list):
+        self.cell_cache.extend(updated_cells)
+
+
     def update(self):
-        entries = [cell.to_log_entry(self.sim._curr_time_s) for cell in self.sim._updated_cells.values()]
         agents = [agent.to_log_entry(self.sim._curr_time_s) for agent in self.sim.agent_list]
         actions = self.sim.get_action_entries(logger=False)
-        self.update_grid(self.sim._curr_time_s, entries, agents, actions)
-        self.sim._updated_cells.clear()
+        self.update_grid(self.sim._curr_time_s, self.cell_cache, agents, actions)
+
+        self.cell_cache = []
 
     def get_input_params(self):
         params = VisualizerInputs(
