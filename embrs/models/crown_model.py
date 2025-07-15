@@ -244,7 +244,7 @@ def crown_loading_burned(cell, cfb):
     return crown_load_burned
 
 def crown_intensity(R, sfc, clb):
-    # Calculate crown fireline intensity and flame length
+    # Calculate crown fireline intensity
     # From Rothermel 1991 pp 10, 11
 
     # Convert R to ft/s

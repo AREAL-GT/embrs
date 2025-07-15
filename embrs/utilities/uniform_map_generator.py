@@ -42,6 +42,13 @@ def generate_uniform_map(map_params: MapParams):
         crs=None
     )
 
+    # Auto-detect the FBFM used in the input map
+    if map_params.uniform_data.fuel >= 101:
+        map_params.fbfm_type = "ScottBurgan"
+    else:
+        map_params.fbfm_type = "Anderson"
+
+
     # Create a color list in the right order
     colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
 
