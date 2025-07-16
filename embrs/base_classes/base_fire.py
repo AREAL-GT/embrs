@@ -1082,6 +1082,9 @@ class BaseFireSim:
         # Set new state
         cell._set_state(state)
 
+        if state == CellStates.FIRE:
+            self._new_ignitions.append(cell)
+
     def set_ignition_at_xy(self, x_m: float, y_m: float):
         """_summary_
 

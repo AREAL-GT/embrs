@@ -304,8 +304,8 @@ class BaseVisualizer:
                 x, y = road[0], road[1]
                 road_color = rc.road_color_mapping[road_type]
                 self.h_ax.plot(x, y, color=road_color, linewidth=self.meters_to_points(road_width), zorder=2)
-                if road_color not in self.added_colors and self.show_legend:
-                    added_colors.append(road_color)
+                if road_color not in added_colors and self.show_legend:
+                    added_colors.add(road_color)
                     self.legend_elements.append(mpatches.Patch(color=road_color,
                                                             label=f"Road - {road_type}"))
 

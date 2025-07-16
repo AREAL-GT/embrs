@@ -14,7 +14,7 @@ import numpy as np
 from shapely.geometry import Polygon
 import weakref
 
-from embrs.utilities.fire_util import CellStates, CrownStatus
+from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
 from embrs.utilities.data_classes import CellData
 from embrs.models.fuel_models import Fuel
 from embrs.models.dead_fuel_moisture import DeadFuelMoisture
@@ -538,6 +538,8 @@ class Cell:
         self._state = state
 
         if self._state == CellStates.FIRE:
+            self.directions, self.distances, self.end_pts = UtilFuncs.get_ign_parameters(0, self.cell_size)
+
             self.fire_spread = np.zeros(len(self.directions))
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))

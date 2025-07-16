@@ -74,7 +74,7 @@ class FirePredictor(BaseFireSim):
             self.orig_grid = copy.deepcopy(self._cell_grid)
             self.orig_dict = copy.deepcopy(self._cell_dict)
 
-    def run(self, visualize = False):
+    def run(self, visualize = False) -> PredictionOutput:
         # Catch states of predictor cells up with the fire sim
         self._catch_up_with_fire()
 
@@ -104,7 +104,6 @@ class FirePredictor(BaseFireSim):
             hold_probs=self.hold_probs,
             breaches=self.breaches
         )
-
 
         return output
     
