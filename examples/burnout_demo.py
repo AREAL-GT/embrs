@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 
 TRAVEL, WAIT, BURN, PLAN, IDLE = 0, 1, 2, 3, 4
 
-
 class Burnout(ControlClass):
 
     def __init__(self, fire: FireSim):
@@ -22,8 +21,7 @@ class Burnout(ControlClass):
 
         self.state = PLAN
 
-        # TODO: may be worth setting up more than one agent
-        x, y = 800, 0
+        x, y = 0, 0
         self.agent = AgentBase(0, x, y)
 
         fire.add_agent(self.agent)
@@ -35,9 +33,7 @@ class Burnout(ControlClass):
         self.hold_prob_thresh = 0.99
         self.seg_length = 500
         self.wind_speed_thresh = 2.5 # equivalent to ~5 mph winds
-
         self.travel_vel = 1.34 # m/s
-
 
         self.line_segments = self.create_line_segments()
 
@@ -45,9 +41,7 @@ class Burnout(ControlClass):
         self.burn_cell = None
         self.burn_queue = []
 
-
     def process_state(self, fire):
-        
         if self.state == PLAN:
             self.plan()
 
@@ -62,7 +56,6 @@ class Burnout(ControlClass):
 
         elif self.state == IDLE:
             pass
-
 
     def create_line_segments(self):
 
@@ -129,7 +122,6 @@ class Burnout(ControlClass):
 
         break_cells = self.fire.get_cells_at_geometry(seg)
 
-
         for bc in break_cells:
             for n_id in bc.burnable_neighbors.keys():
                 neighbor = self.fire.cell_dict[n_id]
@@ -138,7 +130,7 @@ class Burnout(ControlClass):
                     # Don't add other break cells or already included cells
                     continue
                 
-                n_dist, idx = self.dist_tree.query((neighbor.x_pos, neighbor.y_pos), k=1)
+                _, idx = self.dist_tree.query((neighbor.x_pos, neighbor.y_pos), k=1)
                 fire_pt = self.burning_locs[idx]
                 
                 test_line = LineString([(neighbor.x_pos, neighbor.y_pos), fire_pt])
@@ -154,99 +146,61 @@ class Burnout(ControlClass):
 
         return cells
 
-
     def travel(self):
-        # this should manage the agents travel 
-        fire_tree = KDTree([(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells])
-        dist, idx = fire_tree.query((self.agent.x, self.agent.y), k=1)
-        fire_cell = self.fire._burning_cells[idx]
-
-        agent_to_fire_line = LineString([(self.agent.x, self.agent.y), (fire_cell.x_pos, fire_cell.y_pos)])
-
-        safe = False
-        for fire_break, _, _ in self.fire.fire_breaks:
-            if agent_to_fire_line.intersects(fire_break):
-                safe = True
-                break
-        
-        if safe:
-            if not self.burn_queue:
-                if not self.burn_plan:
-                    # all done
-                    self.state = IDLE
-                else:
-                    # wait for next burn assignment
-                    self.state = WAIT
-
+        # Get target burn cell
+        if not self.burn_queue:
+            if not self.burn_plan:
+                self.state = IDLE
+                return
             else:
-                # travel towards the closest cell in burn_queue while staying safe
-                target_cell = self.burn_queue[self.burn_order[0]]
-                target_pt = (target_cell.x_pos, target_cell.y_pos)
+                self.state = WAIT
+                return
 
-                atr_vec = np.array([target_pt[0] - self.agent.x, target_pt[1] - self.agent.y])
-                atr_vec /= np.linalg.norm(atr_vec)
+        target_cell = self.burn_queue[self.burn_order[0]]
+        cell_point = Point(target_cell.x_pos, target_cell.y_pos)
 
+        # Find closest fireline and project agent onto it
+        agent_point = Point(self.agent.x, self.agent.y)
+        closest_line = None
 
-                line_coords = []
-                for ln, _, _ in self.fire.fire_breaks:
-                    line_coords.extend(list(ln.coords))
-                
-                tree = KDTree(line_coords)
-                dist, idx = tree.query((self.agent.x, self.agent.y), k=1)
-                rep_pt = line_coords[idx]
+        min_dist = float('inf')
 
-                rep_vec = np.array([self.agent.x - rep_pt[0], self.agent.y - rep_pt[1]])
-                rep_vec /= np.linalg.norm(rep_vec)
+        for fireline, _, _ in self.fire.fire_breaks:
+            proj_dist = fireline.project(agent_point)
+            proj_point = fireline.interpolate(proj_dist)
+            dist = agent_point.distance(proj_point)
 
-                d = self.fire.time_step * self.travel_vel
+            if dist < min_dist:
+                min_dist = dist
+                closest_line = fireline
 
-                r = np.exp(-1 * (dist - d)/(10*d - d))
-                r = min(r, 1)
+        # Determine direction along the fireline
+        proj_dist = closest_line.project(agent_point)
+        target_proj_dist = closest_line.project(cell_point)
+        target_point = closest_line.interpolate(target_proj_dist)
 
-                vec = (1 - r) * atr_vec + r * rep_vec
+        step = self.travel_vel * self.fire.time_step
 
-                theta = np.arctan2(vec[1], vec[0])
-
-                dx = self.fire.time_step * self.travel_vel * np.cos(theta)
-                dy = self.fire.time_step * self.travel_vel * np.sin(theta)
-
-                self.agent.x += dx
-                self.agent.y += dy
-
-                dist_to_goal = np.sqrt((target_cell.x_pos - self.agent.x) ** 2 + (target_cell.y_pos - self.agent.y) ** 2)
-                if dist_to_goal <= self.fire.time_step * self.travel_vel:
-                    self.state = BURN
-
+        if target_proj_dist > proj_dist:
+            new_proj_dist = proj_dist + step
         else:
-            # focus on getting safe first
-            closest_dist = np.inf
-            closest_point = None
-            for fire_break, _, _ in self.fire.fire_breaks:
-                point = fire_break.interpolate(fire_break.project(Point((self.agent.x, self.agent.y))))
+            new_proj_dist = proj_dist - step
 
-                dist = np.sqrt((point.x - self.agent.x) ** 2 + (point.y - self.agent.y) ** 2)
+        # Clamp projection distance to fireline
+        new_proj_dist = max(0, min(new_proj_dist, closest_line.length))
 
-                if dist < closest_dist:
-                    closest_dist = dist
-                    closest_point = point
+        # Move agent along fireline
+        new_point = closest_line.interpolate(new_proj_dist)
+        self.agent.x, self.agent.y = new_point.x, new_point.y
 
-            
-            atr_vec = np.array([closest_point.x- self.agent.x, closest_point.y - self.agent.y])
-            atr_vec /= np.linalg.norm(atr_vec)
-
-            theta = np.arctan2(atr_vec[1], atr_vec[0])
-
-            dx = self.fire.time_step * self.travel_vel * np.cos(theta)
-            dy = self.fire.time_step * self.travel_vel * np.sin(theta)
-
-            self.agent.x += dx
-            self.agent.y += dy
-
-
+        # Check if agent reached target
+        if agent_point.distance(target_point) < self.fire.cell_size:
+            self.state = BURN
+            self.burn_cell = None
 
     def wait(self):
-        # TODO: implement
-
+        qualified_lines = []
+        dists = []
         for line, cells in list(self.burn_plan):
 
             speed_tot = 0
@@ -265,14 +219,17 @@ class Burnout(ControlClass):
                 # Check that dir is pointing from the fire to the line
                 burn = True
                 for cell in cells:
+                    # Check if cell is already burning or burnt
+                    if cell.state != CellStates.FUEL:
+                        burn = False
+                        self.burn_plan.remove((line, cells))
+                        break
+
                     # Create a line from cell center extending in wind direction
                     cell_pt = Point((cell.x_pos, cell.y_pos))
-                    
                     dx = cell.cell_size * 2 * np.sin(np.deg2rad(avg_dir))
                     dy = cell.cell_size * 2 * np.cos(np.deg2rad(avg_dir))
-
                     test_pt = translate(cell_pt, xoff=dx, yoff=dy)
-
                     test_line = LineString([cell_pt, test_pt])
 
                     # Ensure that this line intersects the fireline
@@ -281,19 +238,27 @@ class Burnout(ControlClass):
                         break
 
                 if burn:
-                    # self.curr_burn_line = (line, cells)
-                    self.burn_queue.extend(cells)
-                    self.b_tree = KDTree([(cell.x_pos, cell.y_pos) for cell in cells])
-                    _, burn_order = self.b_tree.query((self.agent.x, self.agent.y), k=len(cells))
-                    
+                    qualified_lines.append((line, cells))
+                    avg_x = np.mean([cell.x_pos for cell in cells])
+                    avg_y = np.mean([cell.y_pos for cell in cells])
+                    dist = np.sqrt((avg_x - self.agent.x) ** 2 + (avg_y - self.agent.y) ** 2)
 
-                    if len(cells) == 1:
-                        burn_order = [burn_order]
+                    dists.append(dist)
 
-                    self.burn_order = list(burn_order)
-                    self.burn_plan.remove((line, cells))
-                    self.state = TRAVEL
-                    return
+        if qualified_lines:
+            idx = np.argmin(dists)
+            line, cells = qualified_lines[idx]
+        
+            self.burn_queue = list(cells)
+            self.b_tree = KDTree([(cell.x_pos, cell.y_pos) for cell in cells])
+            _, burn_order = self.b_tree.query((self.agent.x, self.agent.y), k=len(cells))
+
+            if len(cells) == 1:
+                burn_order = [burn_order]
+
+            self.burn_order = list(burn_order)
+            self.burn_plan.remove((line, cells))
+            self.state = TRAVEL
 
     def burn(self):
         
@@ -306,34 +271,25 @@ class Burnout(ControlClass):
         if dist_to_cell > (self.fire.time_step * self.travel_vel):
             # Travel towards the cell
             vec_to_cell = np.array([self.burn_cell.x_pos - self.agent.x, self.burn_cell.y_pos - self.agent.y])
-            
             angle = np.atan2(vec_to_cell[1], vec_to_cell[0])
 
-            self.agent.x += (self.fire.time_step * self.travel_vel) * np.cos(angle) # Check cosine v sine
+            # Move agent towards the cell
+            self.agent.x += (self.fire.time_step * self.travel_vel) * np.cos(angle)
             self.agent.y += (self.fire.time_step * self.travel_vel) * np.sin(angle)
 
-
         else:
+            # Update agent position to the cell's position
             self.agent.x = self.burn_cell.x_pos
             self.agent.y = self.burn_cell.y_pos
 
-            # self.burn_queue.remove(self.burn_cell)
+            # Ignite the cell
             self.fire.set_ignition_at_cell(self.burn_cell)
             self.burn_cell = None
 
-
         if len(self.burn_order) == 0:
-
+            self.burn_cell = None
             self.burn_queue = []
-            
             self.state = TRAVEL
-            # # Change state
-            # if self.burn_plan:
-            #     self.state = TRAVEL
-
-            # else:
-            #     self.state = TRAVEL
-
 
     def plot_linestrings(self, linestrings, ax=None, show=True, color=['red', 'green', 'blue'], linewidth=1):
         """
@@ -383,7 +339,6 @@ class Burnout(ControlClass):
             plt.show()
 
         return ax
-
 
 def split_line(line, segment_length):
     """
