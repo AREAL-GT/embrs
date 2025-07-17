@@ -96,7 +96,7 @@ class FirelineConstruction(ControlClass):
         if self.fire._burning_cells:
             burning_locs = [(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells]
             tree = KDTree(burning_locs)
-            fire_dist, idx = tree.query(self.pos, k=1) # TODO: maybe play around with averagign the closest 5 points or something
+            fire_dist, idx = tree.query(self.pos, k=1)
             closest_point = burning_locs[idx]
 
             vec_from_fire = np.array([self.pos[0] - closest_point[0], self.pos[1] - closest_point[1]])
