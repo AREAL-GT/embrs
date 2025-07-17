@@ -126,7 +126,7 @@ class BaseVisualizer:
         }
 
         # Create a single PatchCollection for all cells
-        self.all_cells_coll = PatchCollection(self.all_polygons, facecolors=self.cell_colors, match_original=True, zorder=1)
+        self.all_cells_coll = PatchCollection(self.all_polygons, facecolors=self.cell_colors, zorder=1)
         self.h_ax.add_collection(self.all_cells_coll)
 
         self._init_static_elements()
