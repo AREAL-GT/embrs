@@ -538,8 +538,6 @@ class Cell:
         self._state = state
 
         if self._state == CellStates.FIRE:
-            self.directions, self.distances, self.end_pts = UtilFuncs.get_ign_parameters(0, self.cell_size)
-
             self.fire_spread = np.zeros(len(self.directions))
             self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
@@ -637,6 +635,9 @@ class Cell:
         x = self._break_width
         m = flame_len_m
         T = 1
+
+        if m == 0:
+            return 1
 
         if m <= 0.61:
             h = 0

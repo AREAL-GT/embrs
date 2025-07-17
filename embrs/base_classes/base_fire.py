@@ -1082,9 +1082,6 @@ class BaseFireSim:
         # Set new state
         cell._set_state(state)
 
-        if state == CellStates.FIRE:
-            self._new_ignitions.append(cell)
-
     def set_ignition_at_xy(self, x_m: float, y_m: float):
         """_summary_
 
@@ -1120,7 +1117,9 @@ class BaseFireSim:
         """
 
         # Set ignition at cell
+        cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(0, cell.cell_size)
         self.set_state_at_cell(cell, CellStates.FIRE)
+        self._new_ignitions.append(cell)
 
     def add_retardant_at_xy(self, x_m: float, y_m: float, duration_hr: float, effectiveness: float):
         """_summary_
