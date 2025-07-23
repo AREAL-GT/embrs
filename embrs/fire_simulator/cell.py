@@ -246,23 +246,19 @@ class Cell:
 
         self.fmois = np.array(fmois)
 
-    def project_distances_to_surf(self):
-
-        distances = []
+    def project_distances_to_surf(self, distances: np.ndarray):
         slope_rad = np.deg2rad(self.slope_deg)
-        aspect = np.deg2rad((self.aspect + 180) % 360)
+        aspect = (self.aspect + 180) % 360
+        deltas = np.deg2rad(aspect - np.array(self.directions))
+        proj = np.sqrt(np.cos(deltas) ** 2 * np.cos(slope_rad) ** 2 + np.sin(deltas) ** 2)
+        self.distances = distances / proj
 
-
-        for i, direction in enumerate(self.directions):
-            
-            delta = aspect - np.deg2rad(direction)
-
-            proj = np.cos(slope_rad) + np.sin(slope_rad) * np.cos(delta)
-
-            distances.append(self.distances[i] / proj)
-
-        self.distances = np.array(distances)
-
+    def get_ign_params(self, n_loc: int):
+        self.directions, distances, self.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+        self.project_distances_to_surf(distances)
+        self.avg_ros = np.zeros_like(self.directions)
+        self.I_t = np.zeros_like(self.directions)
+        self.r_t = np.zeros_like(self.directions)
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
         """Stores the local forecasted wind speed and direction for the cell.

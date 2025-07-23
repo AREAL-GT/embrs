@@ -369,10 +369,7 @@ class Embers:
                             
                             if curr_cell.state == CellStates.FUEL:
                                 spots.add(curr_cell) # Add to a set that will handle igniting spot fires
-                                curr_cell.directions, curr_cell.distances, curr_cell.end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
-                                curr_cell.project_distances_to_surf()
-                                curr_cell.avg_ros = np.zeros_like(curr_cell.directions)
-                                curr_cell.I_t = np.zeros_like(curr_cell.directions)
+                                curr_cell.get_ign_params(0) # Get ignition parameters for the cell
                                 curr_cell._set_state(CellStates.FIRE)
                 else:
                     if curr_time == end_curr_time_step:

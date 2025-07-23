@@ -490,10 +490,7 @@ class BaseFireSim:
                     # Check that ignition ros is greater than no wind no slope ros
                     if neighbor._retardant_factor > 0:
                         self._new_ignitions.append(neighbor)
-                        neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
-                        neighbor.project_distances_to_surf()
-                        neighbor.avg_ros = np.zeros_like(neighbor.directions)
-                        neighbor.I_t = np.zeros_like(neighbor.directions)
+                        neighbor.get_ign_params(n_loc)
                         neighbor._set_state(CellStates.FIRE)
 
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
@@ -505,9 +502,6 @@ class BaseFireSim:
                         r_eff = self.calc_ignition_ros(cell, neighbor, r_gamma)
 
                         neighbor.r_t, _ = calc_vals_for_all_directions(neighbor, r_eff, -999, neighbor.alpha, neighbor.e)
-                        # TODO: This does not work, need to figure out a good way for neighbor to inherit rate of spreads of igniting cell
-                        # neighbor.r_t, _ = calc_vals_for_all_directions(neighbor, m_s_to_ft_min(r_gamma), -999, gamma, cell.e)
-                        
 
                         self._updated_cells[neighbor.id] = neighbor
 
@@ -1142,11 +1136,7 @@ class BaseFireSim:
         """
 
         # Set ignition at cell
-        cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(0, cell.cell_size)
-        cell.project_distances_to_surf()
-        cell.avg_ros = np.zeros_like(cell.directions)
-        cell.I_t = np.zeros_like(cell.directions)
-        cell.r_t = np.zeros_like(cell.directions)
+        cell.get_ign_params(0)
         self.set_state_at_cell(cell, CellStates.FIRE)
         self._new_ignitions.append(cell)
 

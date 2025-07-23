@@ -27,6 +27,7 @@ class BaseVisualizer:
             mpl.use('Agg')  # Use a non-interactive backend if not rendering
 
         else:
+            # TODO: need to find a better backend, this one is so annoying
             mpl.use('QtAgg')
 
         self.grid_height = params.sim_shape[0]

@@ -232,12 +232,8 @@ class FireSim(BaseFireSim):
             self._new_ignitions = []
             for cell, loc in self.starting_ignitions:
                 cell._arrival_time = self.curr_time_m
-                cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
-                cell.project_distances_to_surf()
+                cell.get_ign_params(loc)
                 cell._set_state(CellStates.FIRE)
-                cell.r_t = np.zeros_like(cell.directions)
-                cell.avg_ros = np.zeros_like(cell.directions)
-                cell.I_t = np.zeros_like(cell.directions)
 
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
