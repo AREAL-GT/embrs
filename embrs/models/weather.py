@@ -12,11 +12,6 @@ from typing import Iterator
 from embrs.utilities.data_classes import *
 from embrs.utilities.unit_conversions import *
 
-
-# TODO: In certain cases the GSI calculation may be a bit off because only the morning or afternoon RH is being used 
-# TODO: This occurs in the case where a sim is exactly 24 hours and starts and ends at noon
-
-
 # TODO: Document this file
 
 class WeatherStream:
@@ -45,7 +40,7 @@ class WeatherStream:
         # Buffer times and format for OpenMeteo
         start_datetime = self.params.start_datetime
         start_datetime = local_tz.localize(start_datetime)
-        buffered_start = start_datetime - timedelta(days=1)
+        buffered_start = start_datetime - timedelta(days=56)
         start_datetime_utc = buffered_start.astimezone(pytz.utc)
 
         end_datetime = self.params.end_datetime
@@ -88,7 +83,7 @@ class WeatherStream:
             inclusive="left"
         ).tz_localize(local_tz)
 
-        self.times = pd.date_range(hourly_data["date"][0], hourly_data["date"][-1], freq='H', tz=local_tz)
+        self.times = pd.date_range(hourly_data["date"][0], hourly_data["date"][-1], freq='h', tz=local_tz)
 
         hourly_data["wind_speed"] = hourly_wind_speed_10m
         hourly_data["wind_direction"] = hourly_wind_direction_10m
@@ -105,45 +100,16 @@ class WeatherStream:
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values
 
-        # Convert hourly data into a DataFrame
-        hourly_df = pd.DataFrame(hourly_data).set_index("date")
-
-        # Extract morning (08:00) and afternoon (14:00) values
-        daily_morning_rh = hourly_df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
-        daily_afternoon_rh = hourly_df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
-
-        # Compute daily RH average as per NFDRS convention
-        daily_avg_rh = (daily_morning_rh + daily_afternoon_rh) / 2
-
-        # Compute daily temperature mean (can use max/min if needed)
-        daily_avg_temp = hourly_df.resample('D')["temperature"].mean()  # Alternative: (Tmax + Tmin) / 2
-
-        # Ensure temperature and rel_humidity have the same length
-        min_length = min(len(daily_avg_rh), len(daily_avg_temp))
-
-        # Trim both to the minimum length
-        daily_avg_rh = daily_avg_rh.iloc[:min_length]
-        daily_avg_temp = daily_avg_temp.iloc[:min_length]
-
-        # Ensure date index also matches
-        daily_index = daily_avg_rh.index  # Use RH index (since RH is usually limiting)
-        daily_avg_temp = daily_avg_temp.reindex(daily_index)  # Align temp to RH
-
-        # Create final daily DataFrame
-        daily_data = pd.DataFrame({
-            "date": daily_avg_rh.index,
-            "temperature": daily_avg_temp.values,
-            "rel_humidity": daily_avg_rh.values
-        }).reset_index(drop=True)
-
-        hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
-        self.stream = list(self.generate_stream(hourly_data))
-
-        gsi = self.calc_GSI(daily_data)
+        # Compute the GSI
+        # Use a 28-day period before the start of the simulation to calculate GSI (56-day for rain)
+        gsi = self.calc_GSI(hourly_data, buffered_start, start_datetime)
         
         # Use GSI information to determine what to set live fuel moistures to
         self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
 
+        hourly = filter_hourly_data(hourly_data, start_datetime, end_datetime)
+        self.stream = list(self.generate_stream(hourly))
+        
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
 
@@ -153,7 +119,6 @@ class WeatherStream:
         self.input_wind_ht_units = "m"
         self.input_wind_vel_units = "mps"
         self.input_temp_units = "F"
-
 
     def get_stream_from_wxs(self):
         file = self.params.file
@@ -240,7 +205,7 @@ class WeatherStream:
         if end_datetime > wxs_end:
             raise ValueError(f"End datetime {end_datetime} is after WXS data ends at {wxs_end}.")
 
-        buffered_start = start_datetime - timedelta(days=1)
+        buffered_start = start_datetime - timedelta(days=56)
         buffered_end = end_datetime + timedelta(days=1)
 
         cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
@@ -284,7 +249,7 @@ class WeatherStream:
             irradiance_df = irradiance_df.resample(target_freq).mean()
 
         # ── Step 5: Align WXS and Open-Meteo data on datetime index ──
-        df = df.loc[(df.index >= start_datetime) & (df.index <= end_datetime)]
+        df = df.loc[(df.index >= buffered_start) & (df.index <= end_datetime)]
         irradiance_df = irradiance_df.loc[df.index]
 
         df["ghi"] = irradiance_df["ghi"].values
@@ -296,45 +261,43 @@ class WeatherStream:
         df["solar_zenith"] = solpos["zenith"].values
         df["solar_azimuth"] = solpos["azimuth"].values
 
-        # ── Step 7: Daily stats for GSI ──────────────────────────────
-        daily_morning_rh = df.between_time("08:00", "08:59")["rel_humidity"].resample('D').mean()
-        daily_afternoon_rh = df.between_time("14:00", "14:59")["rel_humidity"].resample('D').mean()
+        # if skip_gis:
+        # # TODO: actually set this up
+        # # TODO: apply user defined moisture values
+        #     pass
+        # else:
 
-        daily_avg_rh = pd.DataFrame({
-            "morning": daily_morning_rh,
-            "afternoon": daily_afternoon_rh
-        }).mean(axis=1)
+        # Determine how far back we can go
+        min_date_in_wxs = df.index.min()
+        desired_start = start_datetime - timedelta(days=56)
+        data_start = max(min_date_in_wxs, desired_start)
 
-        daily_avg_temp = df["temperature"].resample('D').mean()
-    
-        min_len = min(len(daily_avg_rh), len(daily_avg_temp))
+        # Calculate GSI
+        gsi = self.calc_GSI(
+            {
+                "date": df.index,
+                "temperature": df["temperature"].values,
+                "rel_humidity": df["rel_humidity"].values,
+                "rain": df["rain"].values,
+            },
+            data_start,
+            start_datetime
+        )
 
-        daily_avg_rh = daily_avg_rh.iloc[:min_len]
-        daily_avg_temp = daily_avg_temp.iloc[:min_len]
-
-        daily_index = daily_avg_rh.index
-        daily_avg_temp = daily_avg_temp.reindex(daily_index)
-
-        daily_data = pd.DataFrame({
-            "date": daily_avg_rh.index,
-            "temperature": daily_avg_temp.values,
-            "rel_humidity": daily_avg_rh.values
-        }).reset_index(drop=True)
-
-        if len(daily_data["date"]) == 0:
-            self.live_h_mf = 0.6
-            self.live_w_mf = 0.9
-            self.fmc = 120
-
+        if gsi < 0:
+            # Set to dormant values
+            self.live_h_mf = 0.3
+            self.live_w_mf = 0.6
         else:
-            gsi = self.calc_GSI(daily_data)
             self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
-            self.fmc = self.calc_fmc()
+        
+        # Calculate foliar moisture content
+        self.fmc = self.calc_fmc()
 
         # ── Step 8: Package final stream ─────────────────────────────
         hourly_data = {col: df[col].values for col in df.columns}
         hourly_data["date"] = df.index
-        self.times = df.index
+        hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
         self.stream = list(self.generate_stream(hourly_data))
 
         # ── Step 9: Set metadata attributes ──────────────────────────
@@ -401,7 +364,6 @@ class WeatherStream:
             df["temperature"] = df["temperature"] * 9 / 5 + 32
         else:
             raise ValueError(f"Unknown units: {units}")
-
 
         # Set live moisture values
         self.live_h_mf = 1.4
@@ -470,78 +432,118 @@ class WeatherStream:
             )
 
     def set_live_moistures(self, gsi: float):
-        # Set the live moisture for each class based on GSI
-        
+        # TODO: should we incldue max GSI scaling?
+
         # Dormant values
-        h_dorm = 0.3
-        w_dorm = 0.5
+        h_min = 0.3
+        w_min = 0.6
+        
+        # Green-up threshold
+        gu = 0.2
         
         # Max values
         h_max = 2.5
         w_max = 2.0
 
-        # Return dormant if gsi < 0.5
-        if gsi < 0.5:
-            return h_dorm, w_dorm
-        
+        if gsi < gu:
+            self.live_h_mf = h_min
+            self.live_w_mf = w_min
 
-        # Moisture varies linearly with gsi otherwise
-        h_range = h_max - h_dorm
-        w_range = w_max - w_dorm
+        else:
+            m_h = (h_max - h_min) / (1.0 - gu)
+            m_w = (w_max - w_min) / (1.0 - gu)
 
-        intrp_pt = gsi - 0.5
-
-        live_h_mf = intrp_pt * (h_range/0.5) + 0.3
-        live_w_mf = intrp_pt * (w_range/0.5) + 0.5
+        live_h_mf = m_h * gsi + (h_max - m_h)
+        live_w_mf = m_w * gsi + (w_max - m_w)
 
         return live_h_mf, live_w_mf
 
-    def calc_GSI(self, daily_data) -> float:
-        # Initial GSI
-        gsi = 0
+    def calc_GSI(self, hourly_data, data_start, sim_start) -> float:
+        """
+        Calculate the Growing Season Index (GSI) over the period leading up to sim_start.
+        Adjusts to use as much data as available if less than 28 or 56 days exists.
+        """
+        # Determine the maximum available pre-simulation range
+        min_available_date = pd.to_datetime(hourly_data["date"]).min()
+        desired_non_rain_start = sim_start - timedelta(days=28)
+        desired_rain_start = sim_start - timedelta(days=56)
 
-        for day in range(len(daily_data["date"])):
-            # Calculate the length of the day with pv lib
-            date = daily_data["date"][day]
+        if desired_non_rain_start < min_available_date:
+            # Use as much data as possible for non-rain metrics
+            non_rain_data_start = min_available_date
+        else:
+            non_rain_data_start = desired_non_rain_start
+
+        if desired_rain_start < min_available_date:
+            # Use as much data as possible for rain metrics
+            data_start = min_available_date
+        else:
+            data_start = desired_rain_start
+
+        # Filter data
+        hourly = filter_hourly_data(hourly_data, non_rain_data_start, sim_start)
+        rain_hourly_data = filter_hourly_data(hourly_data, data_start, sim_start)
+
+        # Rain requires a longer lead up period
+        rain_df = pd.DataFrame(rain_hourly_data).set_index("date")
+        daily_precipitation = rain_df["rain"].resample('D').sum()        
+
+        # Get daily data
+        hourly_df = pd.DataFrame(hourly).set_index("date")
+        daily_min_temp = hourly_df["temperature"].resample('D').min()
+        daily_max_temp = hourly_df["temperature"].resample('D').max()
+        daily_min_rh = hourly_df["rel_humidity"].resample('D').min()
+        dates = daily_min_temp.index
+
+        if len(dates) < 2:
+            print(
+                "Warning: Not enough pre-simulation data to compute GSI. "
+                "Live moistures will be set to dormant values. "
+                "To fix this, ensure the weather data file contains at least 2 days, preferably 28 days, "
+                "before the simulation start date, or manually enter live moistures."
+            )
+            return -1
+
+        gsi = 0.0
+
+        # For each day, calculate iGSI
+        for day in range(len(dates)):
+            date = dates[day]
             times = pd.date_range(date, periods=1, freq='D', tz=self.geo.timezone)
             pv_loc = pvlib.location.Location(self.geo.center_lat, self.geo.center_lon, tz=self.geo.timezone)
-            solpos = pv_loc.get_sun_rise_set_transit(times) #, self.geo.center_lat, self.geo.center_lon)
+            solpos = pv_loc.get_sun_rise_set_transit(times)
             sunrise = solpos['sunrise'].iloc[0]
             sunset = solpos['sunset'].iloc[0]
 
-            # Ensure sunset is after sunrise
             if sunset < sunrise:
                 sunset += pd.Timedelta(days=1)
+            day_len = (sunset - sunrise).total_seconds() 
 
-            day_len = (sunset - sunrise).total_seconds()/3600 
-
-            # Calculate the photo indicator function using day length
-            iPhoto = (day_len - 10)
+            iPhoto = (day_len - 36000) / (39600 - 36000)
             iPhoto = min(max(iPhoto, 0), 1)
 
-            # Get the average temperature and humidities
-            temp = daily_data["temperature"][day] # TODO: this should be getting the minimum temperature
-            rel_humidity = daily_data["rel_humidity"][day]
-
-            # Calculate the temperature indicator function
-            iTmin = (temp-28)/(41-28)
+            min_temp = F_to_C(daily_min_temp.iloc[day])
+            iTmin = (min_temp + 2)/(5 + 2)
             iTmin = min(max(iTmin, 0), 1)
 
-            # Calculate vapour pressure deficit
-            temp_c = (temp - 32) * (5/9)
-            vpd = (1 - rel_humidity / 100) * 0.6108 * np.exp((17.27 * temp_c) / (temp_c + 237.3)) #kPa
-            
-            # Calculate vapour pressure deficit indicator function
-            iVPD = (vpd-4.1)/(0.9-4.1)
+            max_temp = F_to_C(daily_max_temp.iloc[day])
+            min_rh = daily_min_rh.iloc[day]
+            vpd = (1 - min_rh / 100) * 0.6108 * np.exp((17.27 * max_temp) / (max_temp + 237.3))
+            iVPD = (vpd-0.9)/(4.1-0.9)
             iVPD = min(max(iVPD, 0), 1)
 
-            # Compute the GSI for the day
-            gsi += iTmin * iPhoto * iVPD
+            # Adjust precipitation look-back for available data
+            rain_idx = min(28, len(daily_precipitation))
+            tot_rain = daily_precipitation.iloc[max(0, day - rain_idx):day].sum() * 10  # mm
+            iPrcp = (tot_rain - 0)/(0.394 - 0)
+            iPrcp = min(max(iPrcp, 0), 1)
 
-        # Get the average GSI for the full sim
-        gsi /= len(daily_data["date"])
-        
+            gsi += iTmin * iPhoto * iVPD * iPrcp
+
+        # Average GSI
+        gsi /= len(dates)
         return gsi
+
 
     def calc_fmc(self):
         # Calcualte the foliar moisture content
