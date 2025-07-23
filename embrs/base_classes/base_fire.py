@@ -491,6 +491,7 @@ class BaseFireSim:
                     if neighbor._retardant_factor > 0:
                         self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+                        neighbor.project_distances_to_surf()
                         neighbor.avg_ros = np.zeros_like(neighbor.directions)
                         neighbor.I_t = np.zeros_like(neighbor.directions)
                         neighbor._set_state(CellStates.FIRE)
@@ -1142,6 +1143,7 @@ class BaseFireSim:
 
         # Set ignition at cell
         cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(0, cell.cell_size)
+        cell.project_distances_to_surf()
         cell.avg_ros = np.zeros_like(cell.directions)
         cell.I_t = np.zeros_like(cell.directions)
         cell.r_t = np.zeros_like(cell.directions)

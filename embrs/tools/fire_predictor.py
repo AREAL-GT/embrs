@@ -136,6 +136,7 @@ class FirePredictor(BaseFireSim):
             for cell, loc in self.starting_ignitions:
                 self._set_prediction_forecast(cell)
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
+                cell.project_distances_to_surf()
                 cell._set_state(CellStates.FIRE)
 
                 surface_fire(cell)
@@ -300,6 +301,7 @@ class FirePredictor(BaseFireSim):
                     for spot in new_spots:
                         self._new_ignitions.append(spot)
                         spot.directions, spot.distances, spot.end_pts = UtilFuncs.get_ign_parameters(0, spot.cell_size)
+                        spot.project_distances_to_surf()
                         spot._set_state(CellStates.FIRE)
                         self._updated_cells[spot.id] = spot
 
