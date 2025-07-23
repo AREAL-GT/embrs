@@ -217,15 +217,12 @@ class FirePredictor(BaseFireSim):
             
             for cell in self._burning_cells:
                 if self.weather_changed or not cell.has_steady_state:
-                    cell._update_weather(self._curr_weather_idx, self._weather_stream, True)
-
+                    # Update the steady state
                     self.update_steady_state(cell)
-
                     cell.r_t = cell.r_ss
                     cell.I_t = cell.I_ss
 
                 self.propagate_fire(cell)
-
                 self.remove_neighbors(cell)
 
                 if cell.fully_burning:

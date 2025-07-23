@@ -108,9 +108,11 @@ def calc_R10(cell: Cell) -> float:
     return R_0
 
 def get_wind_slope_vector(cell, phi_w, phi_s, slope_speed):
-    angle = np.abs(cell.curr_wind[1] - cell.aspect) # degrees
+    wind_speed, wind_dir = cell.curr_wind()
 
-    wind_speed_ft_min = m_s_to_ft_min(cell.curr_wind[0]) # ft/min
+    angle = np.abs(wind_dir - cell.aspect) # degrees
+
+    wind_speed_ft_min = m_s_to_ft_min(wind_speed) # ft/min
     wind_speed = 0.5 * wind_speed_ft_min
 
     if angle != 180:
@@ -150,24 +152,24 @@ def get_wind_slope_vector(cell, phi_w, phi_s, slope_speed):
     if angle < 90:
         if angle > 0:
             if phi_w >= phi_s:
-                vec_dir = cell.curr_wind[1] - vangle
+                vec_dir = wind_dir - vangle
             else:
                 vec_dir = cell.aspect + vangle
 
         else:
             if phi_w >= phi_s:
-                vec_dir = cell.curr_wind[1] + vangle
+                vec_dir = wind_dir + vangle
             else:
                 vec_dir = cell.aspect - vangle
     else:
         if angle > 0:
             if phi_w >= phi_s:
-                vec_dir = cell.curr_wind[1] + vangle
+                vec_dir = wind_dir + vangle
             else:
                 vec_dir = cell.aspect - vangle
         else:
             if phi_w >= phi_s:
-                vec_dir = cell.curr_wind[1] - vangle
+                vec_dir = wind_dir - vangle
             else:
                 vec_dir = cell.aspect + vangle
     if vec_dir < 0:
@@ -189,7 +191,9 @@ def calc_slope_speed(cell, phi_s):
 
 def calc_crown_vector(cell, R10):
 
-    wind_ft_min = m_s_to_ft_min(cell.curr_wind[0]) # ft/min
+    wind_speed, wind_dir = cell.curr_wind()
+
+    wind_ft_min = m_s_to_ft_min(wind_speed) # ft/min
     phi_w = calc_wind_factor(cell.fuel, wind_ft_min * 0.4) # Reduce wind speed by 0.4 to get R_10 (Rothermel 1991)
 
     slope_rad = np.deg2rad(cell.slope_deg)
@@ -202,8 +206,8 @@ def calc_crown_vector(cell, R10):
         vec_ros = R10 * (1 + vec_speed)
 
     else:
-        vec_dir = cell.curr_wind[1]
-        vec_mag = cell.curr_wind[0] * 0.5
+        vec_dir = wind_dir
+        vec_mag = wind_ft_min * 0.5
         vec_ros = R10 * (1 + phi_w)
 
     vec_ros *= 3.34 # R10 * 3.34 to get crown fire spread rate

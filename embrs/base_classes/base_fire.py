@@ -485,7 +485,7 @@ class BaseFireSim:
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
                     # Make ignition calculation
                     if self.is_firesim():
-                        neighbor._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+                        neighbor._update_moisture(self._curr_weather_idx, self._weather_stream)
 
                     # Check that ignition ros is greater than no wind no slope ros
                     if neighbor._retardant_factor > 0:
@@ -622,7 +622,8 @@ class BaseFireSim:
         """_summary_
         """
         for cell in self._active_water_drops.copy():
-            cell._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+            if self.is_firesim():
+                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
             dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
 
             if dead_mf < cell.fuel.dead_mx * 0.5:

@@ -113,7 +113,6 @@ class FireSim(BaseFireSim):
                 - Initializes `_new_ignitions` with `starting_ignitions`.
                 - Sets the state of newly ignited cells to `CellStates.FIRE` and computes 
                 their initial fire spread parameters.
-            - Updates wind conditions if necessary (`_update_weather()`).
             - Adds new ignitions to `_burning_cells` and resets `_new_ignitions`.
             - Calls `_init_iteration()` to prepare for the time step.
             - Iterates through burning cells and:
@@ -156,8 +155,8 @@ class FireSim(BaseFireSim):
                 # Reset the elapsed time counters
                 cell.t_elapsed_min = 0
 
-                # Update wind in cell
-                cell._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
+                # Update moisture in cell
+                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
 
                 # Updates the cell's steady-state rate of spread and fireline intensity
                 # Also checks for crown fire initiation

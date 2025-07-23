@@ -23,7 +23,9 @@ class PerrymanSpotting:
     def loft(self, cell: Cell):
         cell.lofted = True
 
-        if cell.curr_wind[0] == 0:
+        wind_speed, wind_dir_deg = cell.curr_wind()
+
+        if wind_speed == 0:
             return
 
         # Compute distances parallel and perpendicular to wind dir
@@ -33,7 +35,7 @@ class PerrymanSpotting:
         # Generate actual coordinate where each brand will land
         
         # Get the downwind distances
-        wind_dir = np.deg2rad(cell.curr_wind[1])
+        wind_dir = np.deg2rad(wind_dir_deg)
         down_wind_x_vec = par_distances * np.sin(wind_dir)
         down_wind_y_vec = par_distances * np.cos(wind_dir)
 
@@ -69,7 +71,7 @@ class PerrymanSpotting:
     def compute_parallel_distances(self, cell: Cell):
         # Convert 20 ft wind speed to wind at canopy height
         # Albini & Baughman 1979 Res. Pap. INT-221
-        wind_spd_ft_s = m_to_ft(cell.curr_wind[0])
+        wind_spd_ft_s = m_to_ft(cell.curr_wind()[0])
         canopy_ht = m_to_ft(cell.canopy_height)
         u_h_ft_s = wind_spd_ft_s / (np.log((20 + 0.36 * canopy_ht)/(0.1313 * canopy_ht)))
         u_h = ft_to_m(u_h_ft_s)

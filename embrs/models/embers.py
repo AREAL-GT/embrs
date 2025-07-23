@@ -180,10 +180,9 @@ class Embers:
                 carry.append(ember)
                 continue
             else:
-                curr_cell = self.get_cell_from_xy(sx, sy)
+                curr_cell = self.get_cell_from_xy(sx, sy)                
+                wind_speed, wind_dir = curr_cell.curr_wind()
 
-                # TODO: need to update the cell's weather based on sim's weather idx
-                
                 eH = m_to_ft(curr_cell.canopy_height)
 
                 if eH <= 0.0:
@@ -204,7 +203,7 @@ class Embers:
                 eZelev = m_to_ft(Zelev)
                 
                 zt1 = 0.0
-                rwinddir = curr_cell.curr_wind[1] # degrees
+                rwinddir = wind_dir # degrees
 
                 mZt = np.inf
 
@@ -256,7 +255,7 @@ class Embers:
                             mZt = ft_to_m(Z2AboveGround)
 
                             if mZt > 1.0:
-                                wind_speed = curr_cell.curr_wind[0]
+                                wind_speed = wind_speed
                                 wind_adj_factor = curr_cell.wind_adj_factor
 
                                 UH = self.vert_wind_speed(Z1AboveGround, eH, wind_speed, wind_adj_factor)/2.0 # half of UeH in ft/s
@@ -323,7 +322,7 @@ class Embers:
 
                             zfuel1 = zfuel2
                             zfuel2 = curr_cell.elevation_m
-                            rwinddir = curr_cell.curr_wind[1]
+                            rwinddir = wind_dir
 
                         else:
                             if zt2 > MAXZ:

@@ -209,7 +209,6 @@ class Cell:
         # Wind forecast and current wind within cell
         self.forecast_wind_speeds = []
         self.forecast_wind_dirs = []
-        self.curr_wind = (0,0)
 
         # Constant defining fire acceleration characteristics
         self.a_a = 0.3 / 60
@@ -275,22 +274,15 @@ class Cell:
         Behavior:
             - Combines `wind_speed` and `wind_dir` into a list of tuples.
             - Stores the result in `self.wind_forecast`.
-            - Initializes `self.curr_wind` to the first forecasted wind value.
 
         Side Effects:
             - Updates `self.wind_forecast` with the forecasted wind data.
-            - Sets `self.curr_wind` to the first forecasted wind tuple.
 
         Notes:
             - Wind direction is assumed to be in degrees, following cartesian convention.
         """ 
         self.forecast_wind_speeds = wind_speed
         self.forecast_wind_dirs = wind_dir
-
-
-        # TODO: calling curr_wind should get the correct idx directly without having to update weather 
-
-        self.curr_wind = (self.forecast_wind_speeds[0], self.forecast_wind_dirs[0]) # Note: (m/s, degrees)
 
     def _step_moisture(self, weather_stream: WeatherStream, idx: int, update_interval_hr: float = 1):
 
@@ -368,13 +360,11 @@ class Cell:
 
         self.moist_update_time_s = curr
 
-    def _update_weather(self, idx: int, weather_stream: WeatherStream, ignore_moisture: bool):
-        if not ignore_moisture:
-            # Update moisture content based on weather stream
-            self._update_moisture(idx, weather_stream)
+    def curr_wind(self):
+        w_idx = self._parent()._curr_weather_idx
+        curr_wind = (self.forecast_wind_speeds[w_idx], self.forecast_wind_dirs[w_idx])
 
-        # Update wind to next value in forecast
-        self.curr_wind = (self.forecast_wind_speeds[idx], self.forecast_wind_dirs[idx])
+        return curr_wind
 
     def _set_elev(self, elevation: float):
         """Sets the elevation of the cell.
@@ -696,6 +686,8 @@ class Cell:
             r_t = 0
             I_ss = 0
 
+        wind_speed, wind_dir = self.curr_wind()
+
         entry = CellLogEntry(
             timestamp=time,
             id=self.id,
@@ -712,8 +704,8 @@ class Cell:
             dfm_100hr=dfm_100hr,
             ros=r_t,
             I_ss=I_ss,
-            wind_speed=self.curr_wind[0],
-            wind_dir=self.curr_wind[1],
+            wind_speed=wind_speed,
+            wind_dir=wind_dir,
             retardant=self._retardant,
             arrival_time=self._arrival_time
         )
