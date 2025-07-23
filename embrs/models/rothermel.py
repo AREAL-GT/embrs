@@ -54,7 +54,9 @@ def accelerate(cell: Cell, time_step: float):
         r_ss = cell.r_ss[mask_nonzero]
         a_a = cell.a_a
 
-        T_t = np.log(1 - r_t / r_ss) / (-a_a)
+        ratio = np.clip(r_t / (r_ss + 1e-7), 0.0, 1.0 - 1e-7)
+        T_t = np.log(1 - ratio) / (-a_a)
+
         D_t = r_ss * (T_t + np.exp(-a_a * T_t) / a_a - (1 / a_a))
         D_t1 = r_ss * (
             time_step + T_t + np.exp(-a_a * (time_step + T_t)) / a_a - (1 / a_a)
