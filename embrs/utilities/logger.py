@@ -347,6 +347,10 @@ def make_json_serializable(obj):
         return tuple(make_json_serializable(item) for item in obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
     elif isinstance(obj, datetime.datetime):
         return obj.isoformat()
     elif isinstance(obj, datetime.date):
