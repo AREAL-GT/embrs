@@ -158,19 +158,13 @@ class FireSim(BaseFireSim):
 
                 # Update wind in cell
                 cell._update_weather(self._curr_weather_idx, self._weather_stream, self._uniform_map)
-                
-                # Set previous rate of spreads to the most recent value
-                if cell.r_t is not None:
-                    cell.r_prev_list = cell.r_t
-                else:
-                    cell.r_prev_list = np.zeros(len(cell.directions))
 
                 # Updates the cell's steady-state rate of spread and fireline intensity
                 # Also checks for crown fire initiation
                 self.update_steady_state(cell)
 
-            # Set real time ROS and fireline intensity (vals stored in cell.r_t, cell.I_t)
-            cell.set_real_time_vals()
+            # Set real time ROS and fireline intensity (vals stored in cell.avg_ros, cell.I_t)
+            accelerate(cell, self.time_step)
 
             # Update extent of fire along each direction and check for ignition
             self.propagate_fire(cell)
@@ -240,12 +234,15 @@ class FireSim(BaseFireSim):
                 cell._arrival_time = self.curr_time_m
                 cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(loc, self.cell_size)
                 cell._set_state(CellStates.FIRE)
+                cell.r_t = np.zeros_like(cell.directions)
+                cell.avg_ros = np.zeros_like(cell.directions)
+                cell.I_t = np.zeros_like(cell.directions)
 
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
 
                 cell.has_steady_state = True
-                cell.set_real_time_vals()
+                accelerate(cell, self.time_step)
 
                 self._updated_cells[cell.id] = cell
                 self._new_ignitions.append(cell)
@@ -278,7 +275,7 @@ class FireSim(BaseFireSim):
                     if not cell.lofted and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
                         self.embers.loft(cell, self.curr_time_m)
 
-                cell.set_real_time_vals()
+                accelerate(cell, self.time_step)
 
         # Update current time
         self._curr_time_s = self.time_step * self._iters

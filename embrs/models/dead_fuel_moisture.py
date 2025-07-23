@@ -196,10 +196,6 @@ class DeadFuelMoisture:
     
     def initialized(self):
         return self.m_init
-    
-    def initializeEnvironment(self, year, month, day, hour, minute, second, ta, ha, sr, rc, ti, hi, wi, bp):
-        self.m_semTime = datetime.datetime(year, month, day, hour, minute, second)
-        self.initializeEnvironment(ta, ha, sr, rc, ti, hi, wi, bp)
 
     def initializeEnvironment(self, ta, ha, sr, rc, ti, hi, wi, bp):
         self.m_ta0 = self.m_ta1 = ta

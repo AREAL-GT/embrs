@@ -446,22 +446,24 @@ class BaseFireSim:
             return
 
         # Update extent of fire spread along each direction
-        cell.fire_spread = cell.fire_spread + (cell.r_t * self._time_step)
+        cell.fire_spread = cell.fire_spread + (cell.avg_ros * self._time_step)
 
         # Compute intersections between fire spread and distances to neighbors
         intersections = np.where(cell.fire_spread > cell.distances)[0]
 
         for idx in sorted(intersections, reverse=True):
-            # Check if ignition signal should be sent to each intersecting neighbor
-            if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
-                self.ignite_neighbors(cell, cell.r_t[idx], cell.end_pts[idx])
+            if idx not in cell.intersections:
+                # Check if ignition signal should be sent to each intersecting neighbor
+                if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
+                    self.ignite_neighbors(cell, cell.r_t[idx], cell.directions[idx], cell.end_pts[idx])
 
-        self._remove_spread_elements_by_indices(cell, intersections)
-            
-        if len(cell.distances) == 0:
+        # Add new intersections to tracked intersections
+        cell.intersections.update(intersections)
+
+        if len(cell.burnable_neighbors) == 0 or len(cell.intersections) == len(cell.directions):
             cell.fully_burning = True
 
-    def ignite_neighbors(self, cell: Cell, r_gamma: float, end_point: list):
+    def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
         """_summary_
 
         Args:
@@ -489,14 +491,23 @@ class BaseFireSim:
                     if neighbor._retardant_factor > 0:
                         self._new_ignitions.append(neighbor)
                         neighbor.directions, neighbor.distances, neighbor.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+                        neighbor.avg_ros = np.zeros_like(neighbor.directions)
+                        neighbor.I_t = np.zeros_like(neighbor.directions)
                         neighbor._set_state(CellStates.FIRE)
 
                         if cell._crown_status == CrownStatus.ACTIVE and neighbor.has_canopy:
                             neighbor._crown_status = CrownStatus.ACTIVE
 
+                        self.set_surface_accel_constant(neighbor)
                         surface_fire(neighbor)
 
-                        neighbor.r_prev_list = neighbor.r_ss.copy()
+                        r_eff = self.calc_ignition_ros(cell, neighbor, r_gamma)
+
+                        neighbor.r_t, _ = calc_vals_for_all_directions(neighbor, r_eff, -999, neighbor.alpha, neighbor.e)
+                        # TODO: This does not work, need to figure out a good way for neighbor to inherit rate of spreads of igniting cell
+                        # neighbor.r_t, _ = calc_vals_for_all_directions(neighbor, m_s_to_ft_min(r_gamma), -999, gamma, cell.e)
+                        
+
                         self._updated_cells[neighbor.id] = neighbor
 
                         if neighbor.id in self._frontier:
@@ -506,18 +517,6 @@ class BaseFireSim:
                         if neighbor.id not in self._frontier:
                             self._frontier.add(neighbor.id)
 
-    def _remove_spread_elements_by_indices(self, cell: Cell, indices_to_remove: set):
-        """Removes spread-related attributes for a cell in the given index set."""
-        keep_mask = np.array([i not in indices_to_remove for i in range(len(cell.r_t))])
-        cell.r_t = cell.r_t[keep_mask]
-        cell.r_ss = cell.r_ss[keep_mask]
-        cell.r_prev_list = cell.r_prev_list[keep_mask]
-        cell.I_ss = cell.I_ss[keep_mask]
-        cell.directions = cell.directions[keep_mask]
-        cell.distances = cell.distances[keep_mask]
-        cell.fire_spread = cell.fire_spread[keep_mask]
-        cell.end_pts = [ep for i, ep in enumerate(cell.end_pts) if i not in indices_to_remove]
-    
     def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple[int, str]) -> Cell:
         """_summary_
 
@@ -554,6 +553,31 @@ class BaseFireSim:
 
         return None
     
+    def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
+        """_summary_
+
+        Args:
+            cell (Cell): _description_
+            neighbor (Cell): _description_
+            r_gamma (float): _description_
+
+        Returns:
+            float: _description_
+        """
+        # Get the rate of spread in ft/min
+        r_ft_min = m_s_to_ft_min(r_gamma)
+
+        # Get the heat source in the direction of question by eliminating denominator
+        heat_source = r_ft_min * calc_heat_sink(cell.fuel, cell.fmois)
+
+        # Get the heat sink using the neighbors fuel and moisture content
+        heat_sink = calc_heat_sink(neighbor.fuel, neighbor.fmois)
+        
+        # Calculate a ignition rate of spread
+        r_ign = heat_source / heat_sink
+
+        return r_ign
+
     def propagate_embers(self):
         """_summary_
         """
@@ -1118,6 +1142,9 @@ class BaseFireSim:
 
         # Set ignition at cell
         cell.directions, cell.distances, cell.end_pts = UtilFuncs.get_ign_parameters(0, cell.cell_size)
+        cell.avg_ros = np.zeros_like(cell.directions)
+        cell.I_t = np.zeros_like(cell.directions)
+        cell.r_t = np.zeros_like(cell.directions)
         self.set_state_at_cell(cell, CellStates.FIRE)
         self._new_ignitions.append(cell)
 
@@ -1485,11 +1512,11 @@ class BaseFireSim:
                 neighbor = self._cell_dict[n_id]
                 if neighbor.state == CellStates.FIRE:
                     # Model as a line fire
-                    cell.a_a = 0.3
+                    cell.a_a = 0.3 / 60 # convert to 1 /sec
                     return
             
             # Model as a point fire
-            cell.a_a = 0.115
+            cell.a_a = 0.115 / 60 # convert to 1 / sec
 
     def get_action_entries(self, logger: bool = False) -> List[ActionsEntry]:
         """_summary_

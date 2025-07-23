@@ -75,13 +75,14 @@ def crown_fire(cell: Cell, fmc: float):
             
             # Set rate of spread based on crown fire equations
             cell.r_ss, cell.I_ss = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
+            cell.r_h_ss = np.max(cell.r_ss)
 
         else:
             cell._crown_status = CrownStatus.NONE
 
 def set_accel_constant(cell, cfb):
     # Set the acceleration constant for the cell
-    a = 0.3 - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)
+    a = (0.3 / 60) - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)
 
     cell.a_a = a
 
@@ -210,6 +211,8 @@ def calc_crown_vector(cell, R10):
     return vec_ros, vec_dir, vec_mag # ft/min, degrees, ft/min
 
 def calc_crown_eccentricity(wind_slope_vec_mag: float):
+    # TODO: a little silly that this is basically identical to regular eccentricity
+
     # wind_slope_vec_mag should be in ft/min
     wind_slope_vec_mag = ft_min_to_mph(wind_slope_vec_mag) # convert to mph
 
@@ -224,8 +227,9 @@ def calc_crown_propagation(cell, r_actual, alpha, vec_mag, sfc, cfb):
     clb = crown_loading_burned(cell, cfb)
     I_h = crown_intensity(r_actual, sfc, clb)
 
-    # Calculate Crown Eccentricity
+    # Calculate Eccentricity
     e = calc_crown_eccentricity(vec_mag)
+    cell.e = e
 
     # calculate ros and I along each direction based on e and alpha
     r_list, I_list = calc_vals_for_all_directions(cell, r_actual, I_h, alpha, e)

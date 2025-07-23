@@ -18,6 +18,7 @@ def surface_fire(cell: Cell):
         Tuple[np.ndarray, np.ndarray]: _description_
     """
     R_h, R_0, I_r, alpha = calc_r_h(cell)
+    cell.alpha = alpha
     spread_directions = np.deg2rad(cell.directions)
     
     if R_h < R_0 or R_0 == 0:
@@ -29,11 +30,65 @@ def surface_fire(cell: Cell):
     cell.reaction_intensity = I_r
 
     e = calc_eccentricity(cell.fuel, R_h, R_0)
+    cell.e = e
 
     r_list, I_list = calc_vals_for_all_directions(cell, R_h, I_r, alpha, e)
 
     cell.r_ss = r_list
     cell.I_ss = I_list
+    cell.r_h_ss = np.max(r_list)
+
+def accelerate(cell: Cell, time_step: float):
+    # Mask where acceleration is needed
+    mask_accel = cell.r_t < cell.r_ss
+
+    # Mask for nonzero r_t (partial acceleration history)
+    mask_nonzero = mask_accel & (cell.r_t != 0)
+
+    # Mask for zero r_t (accelerate from rest)
+    mask_zero = mask_accel & (cell.r_t == 0)
+
+    # --- Handle nonzero r_t ---
+    if np.any(mask_nonzero):
+        r_t = cell.r_t[mask_nonzero]
+        r_ss = cell.r_ss[mask_nonzero]
+        a_a = cell.a_a
+
+        T_t = np.log(1 - r_t / r_ss) / (-a_a)
+        D_t = r_ss * (T_t + np.exp(-a_a * T_t) / a_a - (1 / a_a))
+        D_t1 = r_ss * (
+            time_step + T_t + np.exp(-a_a * (time_step + T_t)) / a_a - (1 / a_a)
+        )
+        avg_ros = (D_t1 - D_t) / time_step
+        r_t1 = r_ss * (1 - np.exp(-a_a * (time_step + T_t)))
+
+        # Apply updates
+        cell.r_t[mask_nonzero] = r_t1
+        cell.avg_ros[mask_nonzero] = avg_ros
+        cell.I_t[mask_nonzero] = (r_t1 / (r_ss + 1e-7)) * cell.I_ss[mask_nonzero]
+
+    # --- Handle zero r_t ---
+    if np.any(mask_zero):
+        r_ss = cell.r_ss[mask_zero]
+        a_a = cell.a_a if np.isscalar(cell.a_a) else cell.a_a[mask_zero]
+
+        r_t1 = r_ss * (1 - np.exp(-a_a * time_step))
+        D_t = r_ss * (
+            time_step + np.exp(-a_a * time_step) / a_a - (1 / a_a)
+        )
+        avg_ros = D_t / time_step
+
+        # Apply updates
+        cell.r_t[mask_zero] = r_t1
+        cell.avg_ros[mask_zero] = avg_ros
+        cell.I_t[mask_zero] = (r_t1 / (r_ss + 1e-7)) * cell.I_ss[mask_zero]
+
+    # --- Handle steady state ---
+    mask_steady = ~mask_accel
+    if np.any(mask_steady):
+        cell.r_t[mask_steady] = cell.r_ss[mask_steady]
+        cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
+
 
 def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
     spread_directions = np.deg2rad(cell.directions)

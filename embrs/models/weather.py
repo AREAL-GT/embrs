@@ -10,6 +10,7 @@ import pvlib
 from typing import Iterator
 
 from embrs.utilities.data_classes import *
+from embrs.utilities.unit_conversions import *
 
 
 # TODO: In certain cases the GSI calculation may be a bit off because only the morning or afternoon RH is being used 
@@ -323,7 +324,7 @@ class WeatherStream:
         if len(daily_data["date"]) == 0:
             self.live_h_mf = 0.6
             self.live_w_mf = 0.9
-            self.fmc = 100
+            self.fmc = 120
 
         else:
             gsi = self.calc_GSI(daily_data)
@@ -519,7 +520,7 @@ class WeatherStream:
             iPhoto = min(max(iPhoto, 0), 1)
 
             # Get the average temperature and humidities
-            temp = daily_data["temperature"][day]
+            temp = daily_data["temperature"][day] # TODO: this should be getting the minimum temperature
             rel_humidity = daily_data["rel_humidity"][day]
 
             # Calculate the temperature indicator function
@@ -593,9 +594,8 @@ def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherE
     if (rh > 99.0):
         rh=99.0
 
-    # Convert temp to celius
-    temp = temp-32
-    temp /= 1.8 
+    # Convert temp to celsius
+    temp = F_to_C(temp)
 
     # Return humidity as a decimal
     rh /= 100.0

@@ -192,13 +192,17 @@ class Cell:
         self.I_h_ss = None
 
         # Variables that keep track of elliptical spread within cell
-        self.r_t = [0]
+        self.r_t = np.array([0])
         self.fire_spread = np.array([])
-        self.r_prev_list = np.array([])
+        self.avg_ros = np.array([]) # Average rate of spread for current time step
         self.t_elapsed_min = 0
         self.r_ss = np.array([])
         self.I_ss = np.array([0])
-        
+        self.I_t = np.array([0])
+        self.intersections = set()
+        self.e = 0
+        self.alpha = None
+
         # Boolean defining the cell already has a steady-state ROS
         self.has_steady_state = False
 
@@ -208,7 +212,7 @@ class Cell:
         self.curr_wind = (0,0)
 
         # Constant defining fire acceleration characteristics
-        self.a_a = 0.115
+        self.a_a = 0.3 / 60
 
     def set_arrays(self):
         """_summary_
@@ -242,50 +246,6 @@ class Cell:
 
         self.fmois = np.array(fmois)
 
-    def set_real_time_vals(self):
-        """Updates real-time fire spread parameters using fire acceleration.
-
-        This method applies fire acceleration dynamics similar to FARSITE. It updates the 
-        current rate of spread (`self.r_t`) in each direction by considering the prescribed 
-        steady-state rate of spread (`self.r_ss`) and previous rates (`self.r_prev_list`). 
-        Additionally, it recalculates fireline intensity (`self.I_t`) based on the new `r_t` value.
-
-        Behavior:
-            - If the maximum steady-state ROS (`self.r_ss`) is less than the maximum previous 
-            ROS (`self.r_prev_list`), the cell undergoes **instantaneous deceleration**, 
-            setting `self.r_t` and `self.I_t` directly to their steady-state values.
-            - Otherwise, `self.r_t` is updated using an exponential function that accounts 
-            for fire acceleration over elapsed time.
-            - Fireline intensity (`self.I_t`) is adjusted proportionally based on the updated 
-            rate of spread.
-
-        Notes:
-            - The acceleration factor (`self.a_a`) and elapsed time (`self.t_elapsed_min`) 
-            influence how quickly the fire reaches steady-state ROS.
-            - A small epsilon (`1e-7`) is added to prevent division by zero.
-        Side Effects:
-            - Updates `self.r_t` (current rate of spread).
-            - Updates `self.I_t` (current fireline intensity).
-        """
-
-        if self.r_h_ss < self.r_h_prev:
-            # Allow for instant deceleration as in FARSITE
-            self.r_t = self.r_ss
-            self.I_t = self.I_ss
-
-        else:
-            # Update acceleration constant if parent exists
-            if self._parent is not None:
-                parent = self._parent()
-                if parent is not None:  # Check if parent still exists
-                    parent.set_surface_accel_constant(self)
-
-            self.r_t = self.r_ss - (self.r_ss - self.r_prev_list) * np.exp(-self.a_a * self.t_elapsed_min)
-            self.I_t = (self.r_t / (self.r_ss+1e-7)) * self.I_ss
-
-        if self._retardant:
-            self.r_t *= self._retardant_factor
-            self.I_t *= self._retardant_factor
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
         """Stores the local forecasted wind speed and direction for the cell.
@@ -313,6 +273,9 @@ class Cell:
         """ 
         self.forecast_wind_speeds = wind_speed
         self.forecast_wind_dirs = wind_dir
+
+
+        # TODO: calling curr_wind should get the correct idx directly without having to update weather 
 
         self.curr_wind = (self.forecast_wind_speeds[0], self.forecast_wind_dirs[0]) # Note: (m/s, degrees)
 
@@ -531,7 +494,6 @@ class Cell:
             - Updates the `_state` attribute with the given state.
             - If the state is `CellStates.FIRE`, initializes fire spread-related attributes:
                 - `fire_spread`: Tracks fire spread rates in different directions.
-                - `r_prev_list`: Stores previous rates of spread.
                 - `r_ss`: Stores steady-state rates of spread.
                 - `I_ss`: Stores steady-state fireline intensity values.
         """
@@ -539,13 +501,11 @@ class Cell:
 
         if self._state == CellStates.FIRE:
             self.fire_spread = np.zeros(len(self.directions))
-            self.r_prev_list = np.zeros(len(self.directions))
             self.r_ss = np.zeros(len(self.directions))
             self.I_ss = np.zeros(len(self.directions))
 
             self.r_h_ss = 0
             self.I_h_ss = 0
-            self.r_h_prev = 0
 
     def add_retardant(self, duration_hr: float, effectiveness: float):
         if effectiveness < 0 or effectiveness > 1:

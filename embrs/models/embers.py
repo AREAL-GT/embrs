@@ -181,6 +181,8 @@ class Embers:
                 continue
             else:
                 curr_cell = self.get_cell_from_xy(sx, sy)
+
+                # TODO: need to update the cell's weather based on sim's weather idx
                 
                 eH = m_to_ft(curr_cell.canopy_height)
 
@@ -368,6 +370,8 @@ class Embers:
                             if curr_cell.state == CellStates.FUEL:
                                 spots.add(curr_cell) # Add to a set that will handle igniting spot fires
                                 curr_cell.directions, curr_cell.distances, curr_cell.end_pts = UtilFuncs.get_ign_parameters(0, curr_cell.cell_size)
+                                curr_cell.avg_ros = np.zeros_like(curr_cell.directions)
+                                curr_cell.I_t = np.zeros_like(curr_cell.directions)
                                 curr_cell._set_state(CellStates.FIRE)
                 else:
                     if curr_time == end_curr_time_step:
