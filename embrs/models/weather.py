@@ -535,7 +535,7 @@ class WeatherStream:
             # Adjust precipitation look-back for available data
             rain_idx = min(28, len(daily_precipitation))
             tot_rain = daily_precipitation.iloc[max(0, day - rain_idx):day].sum() * 10  # mm
-            iPrcp = (tot_rain - 0)/(0.394 - 0)
+            iPrcp = (tot_rain - 0)/(10 - 0)
             iPrcp = min(max(iPrcp, 0), 1)
 
             gsi += iTmin * iPhoto * iVPD * iPrcp
