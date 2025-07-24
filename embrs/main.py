@@ -12,7 +12,7 @@ from typing import Tuple
 from tqdm import tqdm
 import argparse
 import configparser
-from datetime import datetime, timedelta
+from datetime import datetime
 from embrs.fire_simulator.visualizer import RealTimeVisualizer
 from embrs.utilities.logger import Logger
 from embrs.fire_simulator.fire import FireSim
@@ -263,8 +263,12 @@ def load_sim_params(cfg_path: str) -> SimParams:
             raise ValueError(f"Error in {cfg_path}: 'file' must be specified in the [Weather] section when using 'File' input type.")
         
         end_iso_datetime = config["Weather"].get("end_datetime", None)
-        end_datetime = datetime.fromisoformat(end_iso_datetime)
-        duration_s = (end_datetime - start_datetime).total_seconds()
+        if end_iso_datetime is None:
+            raise ValueError(f"Error in {cfg_path}: End datetime must be specified in the [Weather] section.")
+        
+        else:
+            end_datetime = datetime.fromisoformat(end_iso_datetime)
+            duration_s = (end_datetime - start_datetime).total_seconds()
 
         if duration_s <= 0:
             raise ValueError(f"End datetime must come after start datetime")
@@ -272,11 +276,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
     elif weather_input_type == "OpenMeteo":
         end_iso_datetime = config["Weather"].get("end_datetime", None)
         if end_iso_datetime is None:
-            duration_s = config["Simulation"].getint("duration_s", None)
-            if duration_s is None:
-                raise ValueError(f"Error in {cfg_path}: When using OpenMeteo 'duration_s' must be specified in the [Simulation] section if no End datetime is provided.")
-            else:
-                end_datetime = start_datetime + timedelta(seconds=duration_s)
+                raise ValueError(f"Error in {cfg_path}: End datetime must be specified in the [Weather] section.")
         else:
             end_datetime = datetime.fromisoformat(end_iso_datetime)
             duration_s = (end_datetime - start_datetime).total_seconds()
@@ -395,4 +395,3 @@ if __name__ == "__main__":
         profiled_main()
     else:
         main()
-

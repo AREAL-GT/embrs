@@ -549,8 +549,7 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(self.model_content_frame, "Time Step (s):", np.inf, self.time_step, "seconds", row=0, column=0)
         self.create_spinbox_with_two_labels(self.model_content_frame, "Cell Size (m):", np.inf, self.cell_size, "meters", row=0, column=1)
 
-        self.duration_spinbox = self.create_spinbox_with_two_labels(self.model_content_frame, "Duration (hours):", self.max_duration, self.duration, "hours", row=1, column=0)
-        self.create_spinbox_with_two_labels(self.model_content_frame, "Iterations:", np.inf, self.num_runs, None, row=1, column=1)
+        self.create_spinbox_with_two_labels(self.model_content_frame, "Iterations:", np.inf, self.num_runs, None, row=1, column=0)
 
         self.viz_frame = self.create_frame(self.model_tab)
         tk.Checkbutton(self.viz_frame, text = "Visualize in Real-time", variable=self.viz_on, onvalue=True, offvalue=False).grid(row = 0, column=0, pady=10)
@@ -568,7 +567,6 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(self.spotting_options_frame, "Min. Spot Distance. (m):", np.inf, self.min_spot_dist, "meters", row=3, column=0)
         self.create_spinbox_with_two_labels(self.spotting_options_frame, "Spot Delay (s)", np.inf, self.spot_delay, "seconds", row=4, column=0)
 
-        self.duration.trace_add("write", self.duration_changed)
         self.canopy_species_name.trace_add("write", self.canopy_species_changed)
 
 
@@ -612,12 +610,10 @@ class SimFolderSelector(FileSelectBase):
             self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
-            self.duration_spinbox.configure(state='normal')
         else:
             self.use_weather_file.set(True)
             self.weather_button.configure(state='normal')
             self.weather_entry.configure(state='normal')
-            self.duration_spinbox.configure(state='disabled')
 
         self.validate_fields()
 
@@ -629,7 +625,6 @@ class SimFolderSelector(FileSelectBase):
             # Enable weather file widgets
             self.weather_button.configure(state='normal')
             self.weather_entry.configure(state='normal')
-            self.duration_spinbox.configure(state='disabled')
         else:
             # Prevent both options from being off
             self.use_open_meteo.set(True)
@@ -638,22 +633,9 @@ class SimFolderSelector(FileSelectBase):
             self.weather_file.set("")
             self.weather_button.configure(state='disabled')
             self.weather_entry.configure(state='disabled')
-            self.duration_spinbox.configure(state='normal')
 
     def canopy_species_changed(self, *args):        
         self.canopy_species = CanopySpecies.species_ids[self.canopy_species_name.get()]
-
-    def duration_changed(self, *args):
-        """Callback function that handles the sim duration changing, prevents values greater than 
-        the max being input
-        """
-        try:
-            self.duration.get()
-        except tk.TclError:
-            return
-
-        if self.duration.get() > self.max_duration:
-            self.duration.set(self.max_duration)
 
     def map_folder_changed(self, *args):
         """Callback function that handles the map folder selection being changed, sets the max
@@ -1179,228 +1161,6 @@ class VizFolderSelector(FileSelectBase):
             self.submit_button.config(state='normal')
         else:
             self.submit_button.config(state='disabled')
-
-class WindForecastGen(FileSelectBase):
-    """Class used to allow users to generate wind forecasts
-
-    :param submit_callback: Function that should be called when the submit button is pressed
-    :type submit_callback: Callable
-    """
-    def __init__(self, submit_callback: Callable):
-        """Constructor method, populates tk window with all necessary elements and initializes
-        necessary variables
-        """
-        super().__init__("Wind Forecast Generator")
-
-        self.submit_callback = submit_callback
-
-        # define variables
-        self.file_name = tk.StringVar()
-        self.folderpath = tk.StringVar()
-        self.duration = tk.DoubleVar()
-        self.duration.set(1.0)
-        self.time_step = tk.DoubleVar()
-        self.curr_speed_val = tk.DoubleVar()
-        self.curr_direction_val = tk.DoubleVar()
-
-        self.wind_forecast = []
-
-        self.time_step_last_changed = 0
-        self.duration_last_changed = 0
-
-        frame = self.create_frame(self.root)
-
-        filename_frame = tk.Frame(frame)
-        filename_frame.pack(padx=10,pady=5)
-        tk.Label(filename_frame, text="Filename: ", anchor="center").grid(row=0, column=0)
-        self.filename_entry = tk.Entry(filename_frame, textvariable=self.file_name, width = 25)
-        self.filename_entry.grid(row=0, column=1)
-        tk.Label(filename_frame, text=".json ", anchor="center").grid(row=0, column=2)
-
-        self.create_folder_selector(frame, "Save forecast to: ", self.folderpath)
-
-        entry_frame = tk.Frame(frame)
-        entry_frame.pack(padx=10,pady=5)
-        tk.Label(entry_frame, text="Wind Speed: ", anchor="center").grid(row=0, column=0)
-        self.speed_entry = tk.Entry(entry_frame, textvariable=self.curr_speed_val, width = 10)
-        self.speed_entry.grid(row=0, column=1)
-        tk.Label(entry_frame, text="(m/s)", anchor="center").grid(row=0, column=2)
-
-        time_step_frame = tk.Frame(frame)
-        time_step_frame.pack(padx=20,pady=5)
-        tk.Label(time_step_frame, text="Time Step: ", anchor="center").grid(row=0, column=0)
-        self.t_step_entry = tk.Spinbox(time_step_frame, from_=1, to=1000, increment=1, textvariable=self.time_step, width=10)
-        self.t_step_entry.grid(row=0, column=1)
-        tk.Label(time_step_frame, text="mins", anchor="center").grid(row=0, column=2)
-
-        # spacer
-        tk.Label(time_step_frame, text="").grid(row=0, column=3, padx=20)
-
-        tk.Label(time_step_frame, text="Duration: ", anchor="center").grid(row=0, column=4)
-        self.duration_entry = tk.Spinbox(time_step_frame, from_=0.0166666, to=1000, increment=0.5, textvariable=self.duration, width=10)
-        self.duration_entry.grid(row=0, column=5)
-        tk.Label(time_step_frame, text="hours", anchor="center").grid(row=0, column=6)
-
-        # spacer
-        tk.Label(entry_frame, text="").grid(row=0, column=3, padx=20)
-
-        tk.Label(entry_frame, text="Wind Direction: ", anchor="center").grid(row=0, column=4)
-        self.dir_entry = tk.Entry(entry_frame, textvariable=self.curr_direction_val, width = 10)
-        self.dir_entry.grid(row=0, column=5)
-        tk.Label(entry_frame, text="degrees", anchor="center").grid(row=0, column=6)
-
-        # Buttons to add, delete, and edit entries
-        btn_add = tk.Button(entry_frame, text="Add", command=self.add_entry)
-        btn_add.grid(row=0,column=7, padx=10)
-
-        # Listbox to display entries
-        self.listbox = tk.Listbox(frame, width=40, height=10)
-        self.listbox.pack(pady=10)
-
-        edit_del_frame = tk.Frame(frame)
-        edit_del_frame.pack(padx=10,pady=5)
-
-        btn_edit = tk.Button(edit_del_frame, text="Overwrite", command=self.overwrite_entry)
-        btn_edit.grid(row=0, column=0)
-        btn_delete = tk.Button(edit_del_frame, text="Delete", command=self.delete_entry)
-        btn_delete.grid(row=0, column=1)
-
-        # Create a submit button
-        self.submit_button = tk.Button(frame, text="Save to File", command=self.submit, state='disabled')
-        self.submit_button.pack(pady=10)
-
-        self.time_step.trace_add('write', self.time_step_changed)
-        self.duration.trace_add('write', self.duration_changed)
-
-    def validate_fields(self):
-        """Function used to validate the inputs, primarily responsible for activating/disabling
-        the submit button based on if all necessary input has been provided.
-        """
-        folder_exists = os.path.exists(self.folderpath.get())
-        filename_entered = self.file_name.get()
-        entries_exist = len(self.wind_forecast)
-
-        if entries_exist and self.time_step.get() > 0 and self.duration.get() > 0 and folder_exists and filename_entered:
-            self.submit_button.config(state='normal')
-
-    def add_entry(self):
-        """Callback function for 'add' button that adds the current input for direction and speed
-        to the working wind forecast.
-        """
-
-        entry = (self.curr_speed_val.get(), self.curr_direction_val.get())
-        if entry:  # only add non-empty entries
-            self.wind_forecast.append(entry)
-            hours = int(np.floor(len(self.listbox.get(0, tk.END)) * self.time_step.get() / 60))
-            mins = int(len(self.listbox.get(0, tk.END)) * self.time_step.get() % 60)
-            formatted_entry = f"{hours} h {mins} m: {entry[0]} m/s, {entry[1]} deg"
-            self.listbox.insert(tk.END, formatted_entry)
-
-        self.duration.set(len(self.wind_forecast) * self.time_step.get() / 60)
-
-        self.validate_fields()
-
-    def delete_entry(self):
-        """Callback function for 'delete' button that removes the selected entry from the working
-        wind forecast.
-        """
-        try:
-            # get the index of the selected entry
-            index = self.listbox.curselection()[0]
-            self.listbox.delete(index)
-
-            del self.wind_forecast[index]
-
-            self.duration.set(len(self.wind_forecast) * self.time_step.get() / 60)
-
-        except IndexError:  # if no entry is selected
-            pass
-
-        self.validate_fields()
-
-    def overwrite_entry(self):
-        """Callback function for 'overwrite' button that overwrites the selected entry in the
-        working wind forecast with the current input for speed and direction.
-        """
-        try:
-            # get the index of the selected entry
-            index = self.listbox.curselection()[0]
-
-            updated_entry = (self.curr_speed_val.get(), self.curr_direction_val.get())
-
-            self.wind_forecast[index] = updated_entry
-
-            mins = index * self.time_step.get()
-
-            hours = int(np.floor(mins / 60))
-            mins = int(mins % 60)
-
-            formatted_entry = f"{hours} h {mins} m: {updated_entry[0]} m/s, {updated_entry[1]} deg"
-
-            self.listbox.delete(index)
-            self.listbox.insert(index, formatted_entry)
-
-        except IndexError:  # if no entry is selected
-            pass
-
-        self.validate_fields()
-
-    def time_step_changed(self, *args):
-        """Callback function that handles when the time step of the forecast has been changed.
-        Ensures the entered time step is valid and updates the duration based on the new time 
-        step and the current number of entries in the forecast.
-        """
-        try:
-            current_time_step = self.time_step.get()
-        except tk.TclError:
-            current_time_step = 0  # default value if Spinbox is empty
-
-        if current_time_step < 0:
-            self.time_step.set(1)
-            return
-
-        self.listbox.delete(0, tk.END)
-        for idx, (speed, direction) in enumerate(self.wind_forecast):
-            mins = int((idx * current_time_step) % 60)
-            hours = int(np.floor(idx * current_time_step) / 60)
-            formatted_entry = f"{hours} h {mins} m: {speed} m/s, {direction} deg"
-            self.listbox.insert(tk.END, formatted_entry)
-
-        self.duration.set(len(self.wind_forecast) * current_time_step / 60)  # Convert to hours
-
-        self.validate_fields()
-
-    def duration_changed(self, *args):
-        """Callback function that handles when the duration of the forecast has been changed.
-        Ensures the entered duration is valid and updates the time step based on the new
-        duration and the current number of entries in the forecast.
-        """
-        try:
-            curr_duration = self.duration.get()
-        except tk.TclError:
-            curr_duration = 0  # default value if Spinbox is empty
-
-        # If duration was the last changed variable, update time_step
-            if len(self.wind_forecast) > 0:
-                new_time_step = curr_duration * 60 / len(self.wind_forecast)  # Convert duration to minutes
-                self.time_step.set(new_time_step)
-
-        self.validate_fields()
-
-    def submit(self):
-        """Callback when the submit button is pressed. Stores all the relevant data in the result
-        variable so it can be retrieved
-        """
-        data = {
-            "save_location": os.path.join(self.folderpath.get(), self.file_name.get() + ".json"),
-            "time_step": self.time_step.get(),
-            "forecast": self.wind_forecast
-        }
-
-        self.submit_callback(data)
-
-        self.root.withdraw()
-        self.root.quit()
 
 class LoaderWindow:
     """Class used to created loading bars for progress updates to user while programs are running
