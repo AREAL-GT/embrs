@@ -118,7 +118,8 @@ class BaseVisualizer:
                 fuel_color = fc.fuel_color_mapping[entry.fuel]
                 if fuel_color not in fuel_types_seen:
                     fuel_types_seen.add(fuel_color)
-                    self.legend_elements.append(mpatches.Patch(color=fuel_color, label=fc.fuel_names[entry.fuel]))
+                    legend_patch = mpatches.Patch(color=fuel_color, label=fc.fuel_names[entry.fuel])
+                    self.legend_elements.append((entry.fuel, legend_patch))
 
         # Assign initial facecolors based on cell state
         self.cell_colors = [self._get_cell_color(entry) for entry in init_entries]
@@ -152,14 +153,15 @@ class BaseVisualizer:
         if self.show_weather_data and weather_idx != self.forecast_idx and weather_idx < len(self.temp_forecast):
             self.forecast_idx = weather_idx
             temp_unit = "F" if self.show_temp_in_F else "C"
-            weather_str = f"Temp: {self.temp_forecast[self.forecast_idx]} °{temp_unit}, RH: {self.rh_forecast[self.forecast_idx]} %"
+            t_rounded = np.round(float(self.temp_forecast[self.forecast_idx]), 1)
+            rh_rounded = np.round(float(self.rh_forecast[self.forecast_idx]), 1)
+            weather_str = f"Temp: {t_rounded} °{temp_unit}, RH: {rh_rounded} %"
             self.weather_text.set_text(weather_str)
 
         # Update only changed cells
         for entry in entries:
             idx = self.cell_id_to_index[entry.id]
             self.cell_colors[idx] = self._get_cell_color(entry)
-
 
         self.all_cells_coll.set_facecolors(self.cell_colors)
 
@@ -307,8 +309,8 @@ class BaseVisualizer:
                 self.h_ax.plot(x, y, color=road_color, linewidth=self.meters_to_points(road_width), zorder=2)
                 if road_color not in added_colors and self.show_legend:
                     added_colors.add(road_color)
-                    self.legend_elements.append(mpatches.Patch(color=road_color,
-                                                            label=f"Road - {road_type}"))
+                    legend_patch = mpatches.Patch(color=road_color, label=f"Road - {road_type}")
+                    self.legend_elements.append((204 + np.where(road_type == rc.road_types)[0][0], legend_patch))
 
         # === Firebreaks ===
         for fire_break, break_width, _ in self.fire_breaks:
@@ -318,7 +320,8 @@ class BaseVisualizer:
 
         # === Legend ===
         if self.legend_elements and self.show_legend:
-            self.h_ax.legend(handles=self.legend_elements, loc='upper right', borderaxespad=0)
+            sorted_patches = [patch for _, patch in sorted(self.legend_elements, key=lambda x: x[0])]
+            self.h_ax.legend(handles=sorted_patches, loc='upper right', borderaxespad=0)
 
         # === Scale bar ===
         bar_length = self.scale_bar_km * 1000  # meters
