@@ -147,6 +147,7 @@ class WeatherStream:
                     units = line.split(":")[1].strip().lower()
                     continue
                 elif line.startswith("RAWS_ELEVATION:"):
+                    self.ref_elev = float(line.split(":")[1].strip().lower())
                     continue
                 elif line.startswith("RAWS:"):
                     continue
@@ -184,6 +185,7 @@ class WeatherStream:
         if units == "english":
             df["rain"] *= 2.54
             df["wind_speed"] *= 0.44704
+            self.ref_elev = ft_to_m(self.ref_elev)
         elif units == "metric":
             df["temperature"] = df["temperature"] * 9 / 5 + 32
             df["rain"] /= 10
@@ -224,7 +226,6 @@ class WeatherStream:
 
         responses = openmeteo.weather_api(url, params=api_input)
         response = responses[0]
-        self.ref_elev = response.Elevation()
 
         hourly = response.Hourly()
         hourly_data = {
@@ -295,7 +296,6 @@ class WeatherStream:
         self.fmc = self.calc_fmc()
 
         # ── Step 8: Package final stream ─────────────────────────────
-        hourly_data = {col: df[col].values for col in df.columns}
         hourly_data["date"] = df.index
         hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
         self.stream = list(self.generate_stream(hourly_data))
@@ -446,8 +446,7 @@ class WeatherStream:
         w_max = 2.0
 
         if gsi < gu:
-            self.live_h_mf = h_min
-            self.live_w_mf = w_min
+            return h_min, w_min
 
         else:
             m_h = (h_max - h_min) / (1.0 - gu)
