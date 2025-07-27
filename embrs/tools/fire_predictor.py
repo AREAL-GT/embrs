@@ -26,6 +26,8 @@ class FirePredictor(BaseFireSim):
         self.time_horizon_hr = params.time_horizon_hr
 
         # Uncertainty parameters
+        # TODO: This should be a bias for direction and speed individually
+
         self.wind_bias_factor = params.wind_bias_factor # [-1 , 1], systematic error
         self.wind_uncertainty_factor = params.wind_uncertainty_factor # [0, 1], autoregression noise
 
@@ -93,7 +95,6 @@ class FirePredictor(BaseFireSim):
         if visualize:
             self.fire.visualize_prediction(self.spread)
 
-
         output = PredictionOutput(
             spread=self.spread,
             flame_len_m=self.flame_len_m,
@@ -134,7 +135,6 @@ class FirePredictor(BaseFireSim):
             self._new_ignitions = []
 
             for cell, loc in self.starting_ignitions:
-                self._set_prediction_forecast(cell)
                 cell.get_ign_params(loc)
                 cell._set_state(CellStates.FIRE)
 
@@ -144,6 +144,7 @@ class FirePredictor(BaseFireSim):
 
                 # Don't model fire acceleration in prediction model
                 cell.r_t = cell.r_ss
+                cell.avg_ros = cell.r_ss
                 cell.I_t = cell.I_ss
 
                 self._updated_cells[cell.id] = cell
@@ -151,7 +152,6 @@ class FirePredictor(BaseFireSim):
 
         else:
             for cell in self._new_ignitions:
-                self._set_prediction_forecast(cell)
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
                 
@@ -180,6 +180,7 @@ class FirePredictor(BaseFireSim):
 
                 # Don't model fire acceleration in prediction model
                 cell.r_t = cell.r_ss
+                cell.avg_ros = cell.r_ss
                 cell.I_t = cell.I_ss
 
                 if self.spread.get(self._curr_time_s) is None:
@@ -220,6 +221,7 @@ class FirePredictor(BaseFireSim):
                     # Update the steady state
                     self.update_steady_state(cell)
                     cell.r_t = cell.r_ss
+                    cell.avg_ros = cell.r_ss
                     cell.I_t = cell.I_ss
 
                 self.propagate_fire(cell)

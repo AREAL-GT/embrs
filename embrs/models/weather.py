@@ -296,8 +296,8 @@ class WeatherStream:
         self.fmc = self.calc_fmc()
 
         # ── Step 8: Package final stream ─────────────────────────────
-        hourly_data["date"] = df.index
-        hourly_data = filter_hourly_data(hourly_data, start_datetime, end_datetime)
+        df["date"] = df.index
+        hourly_data = filter_hourly_data(df, start_datetime, end_datetime)
         self.stream = list(self.generate_stream(hourly_data))
 
         # ── Step 9: Set metadata attributes ──────────────────────────

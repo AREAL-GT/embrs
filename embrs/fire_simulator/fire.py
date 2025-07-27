@@ -152,9 +152,6 @@ class FireSim(BaseFireSim):
 
             # Check if conditions have changed
             if self.weather_changed or not cell.has_steady_state: 
-                # Reset the elapsed time counters
-                cell.t_elapsed_min = 0
-
                 # Update moisture in cell
                 cell._update_moisture(self._curr_weather_idx, self._weather_stream)
 
@@ -170,9 +167,6 @@ class FireSim(BaseFireSim):
 
             # Remove any neighbors that are no longer burnable
             self.remove_neighbors(cell)
-
-            # Update time since conditions have changed for fire acceleration
-            cell.t_elapsed_min += self.time_step / 60
 
             self._updated_cells[cell.id] = cell
 

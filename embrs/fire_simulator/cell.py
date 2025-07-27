@@ -195,7 +195,6 @@ class Cell:
         self.r_t = np.array([0])
         self.fire_spread = np.array([])
         self.avg_ros = np.array([]) # Average rate of spread for current time step
-        self.t_elapsed_min = 0
         self.r_ss = np.array([])
         self.I_ss = np.array([0])
         self.I_t = np.array([0])
@@ -362,6 +361,10 @@ class Cell:
 
     def curr_wind(self):
         w_idx = self._parent()._curr_weather_idx
+
+        if self._parent().is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
+            self._parent()._set_prediction_forecast(self)
+        
         curr_wind = (self.forecast_wind_speeds[w_idx], self.forecast_wind_dirs[w_idx])
 
         return curr_wind
