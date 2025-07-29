@@ -12,19 +12,22 @@ from shapely.affinity import translate
 import numpy as np
 import matplotlib.pyplot as plt
 
-TRAVEL, WAIT, BURN, PLAN, IDLE = 0, 1, 2, 3, 4
+TRAVEL, WAIT, BURN, PLAN, MONITOR, IDLE = 0, 1, 2, 3, 4, 5
 
 class Burnout(ControlClass):
 
     def __init__(self, fire: FireSim):
         self.fire = fire
 
-        self.state = PLAN
+        self.burn_state = PLAN
+        self.soak_state = WAIT
 
+        # Define firefighting crews
         x, y = 0, 0
-        self.agent = AgentBase(0, x, y)
-
-        fire.add_agent(self.agent)
+        self.burn_crew = AgentBase(0, x, y, color='red')
+        fire.add_agent(self.burn_crew)
+        self.soak_crew = AgentBase(1, x, y, color='blue')
+        fire.add_agent(self.soak_crew)
 
         # Set prediction length to whole sim for now
         self.t_horizon = self.fire._sim_duration / 3600
@@ -41,24 +44,36 @@ class Burnout(ControlClass):
         self.burn_cell = None
         self.burn_queue = []
 
+        self.monitor_queue = []
+
     def process_state(self, fire):
-        if self.state == PLAN:
+        # Burn Crew State Machine
+        if self.burn_state == PLAN:
             self.plan()
 
-        elif self.state == TRAVEL:
+        elif self.burn_state == TRAVEL:
             self.travel()
 
-        elif self.state == WAIT:
+        elif self.burn_state == WAIT:
             self.wait()
 
-        elif self.state == BURN:
+        elif self.burn_state == BURN:
             self.burn()
 
-        elif self.state == IDLE:
+        elif self.burn_state == IDLE:
+            pass
+        
+        # Soak Crew State Machine
+        if self.soak_state == WAIT:
             pass
 
-    def create_line_segments(self):
+        if self.soak_state == TRAVEL:
+            self.soak_travel()
 
+        elif self.soak_state == MONITOR:
+            self.monitor()
+
+    def create_line_segments(self):
         segments = []
 
         for fireline, _, _ in self.fire.fire_breaks:
@@ -67,7 +82,6 @@ class Burnout(ControlClass):
         return segments
     
     def plan(self):
-
         # TODO: play with parameters
         pred_input = PredictorParams(
             time_horizon_hr=self.t_horizon,
@@ -85,7 +99,7 @@ class Burnout(ControlClass):
 
         self.burn_plan = self.create_burn_plan()
 
-        self.state = WAIT
+        self.burn_state = WAIT
 
     def create_burn_plan(self):
         # Gather relevant prediction output
@@ -113,7 +127,7 @@ class Burnout(ControlClass):
                     at_risk_segments.append((seg, cells))
 
         print(f"{len(at_risk_segments)} burn lines generated")
-        self.plot_linestrings(at_risk_segments)
+        # self.plot_linestrings(at_risk_segments)
 
         return at_risk_segments
 
@@ -150,17 +164,17 @@ class Burnout(ControlClass):
         # Get target burn cell
         if not self.burn_queue:
             if not self.burn_plan:
-                self.state = IDLE
+                self.burn_state = IDLE
                 return
             else:
-                self.state = WAIT
+                self.burn_state = WAIT
                 return
 
         target_cell = self.burn_queue[self.burn_order[0]]
         cell_point = Point(target_cell.x_pos, target_cell.y_pos)
 
         # Find closest fireline and project agent onto it
-        agent_point = Point(self.agent.x, self.agent.y)
+        agent_point = Point(self.burn_crew.x, self.burn_crew.y)
         closest_line = None
 
         min_dist = float('inf')
@@ -191,11 +205,12 @@ class Burnout(ControlClass):
 
         # Move agent along fireline
         new_point = closest_line.interpolate(new_proj_dist)
-        self.agent.x, self.agent.y = new_point.x, new_point.y
+        self.burn_crew.x, self.burn_crew.y = new_point.x, new_point.y
+        # self.soak_crew.x, self.soak_crew.y = new_point.x, new_point.y
 
         # Check if agent reached target
         if agent_point.distance(target_point) < self.fire.cell_size:
-            self.state = BURN
+            self.burn_state = BURN
             self.burn_cell = None
 
     def wait(self):
@@ -207,10 +222,9 @@ class Burnout(ControlClass):
             dir_tot = 0
 
             for cell in cells:
-                cell._update_weather(self.fire._curr_weather_idx, self.fire._weather_stream, False)
-
-                speed_tot += cell.curr_wind[0]
-                dir_tot += cell.curr_wind[1]
+                wind_speed, wind_dir = cell.curr_wind()
+                speed_tot += wind_speed
+                dir_tot += wind_dir
 
             avg_speed = speed_tot / len(cells)
             avg_dir = dir_tot / len(cells)
@@ -241,46 +255,45 @@ class Burnout(ControlClass):
                     qualified_lines.append((line, cells))
                     avg_x = np.mean([cell.x_pos for cell in cells])
                     avg_y = np.mean([cell.y_pos for cell in cells])
-                    dist = np.sqrt((avg_x - self.agent.x) ** 2 + (avg_y - self.agent.y) ** 2)
+                    dist = np.sqrt((avg_x - self.burn_crew.x) ** 2 + (avg_y - self.burn_crew.y) ** 2)
 
                     dists.append(dist)
 
         if qualified_lines:
             idx = np.argmin(dists)
             line, cells = qualified_lines[idx]
-        
+            self.curr_burn_line = line
             self.burn_queue = list(cells)
             self.b_tree = KDTree([(cell.x_pos, cell.y_pos) for cell in cells])
-            _, burn_order = self.b_tree.query((self.agent.x, self.agent.y), k=len(cells))
+            _, burn_order = self.b_tree.query((self.burn_crew.x, self.burn_crew.y), k=len(cells))
 
             if len(cells) == 1:
                 burn_order = [burn_order]
 
             self.burn_order = list(burn_order)
             self.burn_plan.remove((line, cells))
-            self.state = TRAVEL
+            self.burn_state = TRAVEL
 
     def burn(self):
-        
         if self.burn_cell is None:
             self.burn_cell = self.burn_queue[self.burn_order[0]]
             self.burn_order.remove(self.burn_order[0])
         
-        dist_to_cell = np.sqrt((self.agent.x - self.burn_cell.x_pos) ** 2 + (self.agent.y - self.burn_cell.y_pos) ** 2)
+        dist_to_cell = np.sqrt((self.burn_crew.x - self.burn_cell.x_pos) ** 2 + (self.burn_crew.y - self.burn_cell.y_pos) ** 2)
 
         if dist_to_cell > (self.fire.time_step * self.travel_vel):
             # Travel towards the cell
-            vec_to_cell = np.array([self.burn_cell.x_pos - self.agent.x, self.burn_cell.y_pos - self.agent.y])
+            vec_to_cell = np.array([self.burn_cell.x_pos - self.burn_crew.x, self.burn_cell.y_pos - self.burn_crew.y])
             angle = np.atan2(vec_to_cell[1], vec_to_cell[0])
 
             # Move agent towards the cell
-            self.agent.x += (self.fire.time_step * self.travel_vel) * np.cos(angle)
-            self.agent.y += (self.fire.time_step * self.travel_vel) * np.sin(angle)
+            self.burn_crew.x += (self.fire.time_step * self.travel_vel) * np.cos(angle)
+            self.burn_crew.y += (self.fire.time_step * self.travel_vel) * np.sin(angle)
 
         else:
             # Update agent position to the cell's position
-            self.agent.x = self.burn_cell.x_pos
-            self.agent.y = self.burn_cell.y_pos
+            self.burn_crew.x = self.burn_cell.x_pos
+            self.burn_crew.y = self.burn_cell.y_pos
 
             # Ignite the cell
             self.fire.set_ignition_at_cell(self.burn_cell)
@@ -289,7 +302,132 @@ class Burnout(ControlClass):
         if len(self.burn_order) == 0:
             self.burn_cell = None
             self.burn_queue = []
-            self.state = TRAVEL
+
+            self.monitor_queue.append({
+                'line': self.curr_burn_line,
+                'start_time': self.fire._curr_time_s
+            })
+
+            self.burn_state = TRAVEL
+            self.soak_state = TRAVEL
+
+    def soak_travel(self):
+        # Travel to first line in monitor queue
+        if not self.monitor_queue:
+            self.soak_state = WAIT
+            return
+        
+        # Get the current line to monitor
+        target_line = self.monitor_queue[0]['line']
+
+        # Target point is the midpoint of the line
+        target_point = target_line.interpolate(target_line.length / 2)
+
+        # Find closest fireline and project agent onto it
+        agent_point = Point(self.soak_crew.x, self.soak_crew.y)
+        closest_line = None
+
+        min_dist = float('inf')
+
+        for fireline, _, _ in self.fire.fire_breaks:
+            proj_dist = fireline.project(agent_point)
+            proj_point = fireline.interpolate(proj_dist)
+            dist = agent_point.distance(proj_point)
+
+            if dist < min_dist:
+                min_dist = dist
+                closest_line = fireline
+
+        # Determine direction along the fireline
+        proj_dist = closest_line.project(agent_point)
+        target_proj_dist = closest_line.project(target_point)
+        target_point = closest_line.interpolate(target_proj_dist)
+
+        step = self.travel_vel * self.fire.time_step
+
+        if target_proj_dist > proj_dist:
+            new_proj_dist = proj_dist + step
+        else:
+            new_proj_dist = proj_dist - step
+
+        # Clamp projection distance to fireline
+        new_proj_dist = max(0, min(new_proj_dist, closest_line.length))
+
+        # Move agent along fireline
+        new_point = closest_line.interpolate(new_proj_dist)
+        self.soak_crew.x, self.soak_crew.y = new_point.x, new_point.y
+
+        # Check if agent reached target
+        if agent_point.distance(target_point) < self.fire.cell_size:
+            self.move_soak_crew_away_from_line(closest_line)
+            self.soak_state = MONITOR
+
+    def monitor(self):
+        # Get line and cells to monitor
+        line = self.monitor_queue[0]['line']
+        cells = self.fire.get_cells_at_geometry(line)
+
+        # Get the 10 closest burning cells to the soak crew
+        burning_locs = [(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells if cell._break_width == 0]
+        tree = KDTree(burning_locs)
+        fire_dist, idx = tree.query((self.soak_crew.x, self.soak_crew.y), k=10)
+
+        breaches = []
+        for i in idx:
+            # Test if the cell has breached the firebreak
+            breach = True
+            fireloc = burning_locs[i]
+            fire_pt = Point(fireloc)
+
+            test_line = LineString([fire_pt, Point(self.soak_crew.x, self.soak_crew.y)])
+
+            for fire_break, _, _ in self.fire.fire_breaks:
+                if test_line.intersects(fire_break):
+                    breach = False
+
+            if breach:
+                breaches.append(self.fire.get_cell_from_xy(fireloc[0], fireloc[1]))
+
+        # If any breaches have occurred, soak neighbors of burning cells
+        if breaches:
+            for cell in breaches:
+                # Soak neighbors of the burning cell
+                for n_id in cell.burnable_neighbors.keys():
+                    neighbor = self.fire.cell_dict[n_id]
+                    self.fire.water_drop_at_cell_as_rain(neighbor, 10)
+            
+        else:
+            elapsed_time = self.fire._curr_time_s - self.monitor_queue[0]['start_time']
+            if elapsed_time > 600 and not any(cell.state == CellStates.FIRE for cell in cells):
+                # If no breaches and no burning cells, remove from queue
+                self.monitor_queue.pop(0)
+                self.soak_state = TRAVEL
+                return
+            
+    def move_soak_crew_away_from_line(self, line):
+        agent_point = Point(self.soak_crew.x, self.soak_crew.y)
+        proj_dist = line.project(agent_point)
+        proj_point = line.interpolate(proj_dist)
+
+        delta = 0.01 * line.length
+        pt_before = line.interpolate(max(0, proj_dist - delta))
+        pt_after = line.interpolate(min(line.length, proj_dist + delta))
+
+        tangent_vec = np.array([pt_after.x - pt_before.x, pt_after.y - pt_before.y])
+        tangent_vec /= np.linalg.norm(tangent_vec)
+        normal_vec = np.array([-tangent_vec[1], tangent_vec[0]])
+
+        # Use nearest initial ignition point to determine fire side
+        fire_vec = np.array([self.fire.initial_ignition[0].x - proj_point.x,
+                            self.fire.initial_ignition[0].y - proj_point.y])
+
+        side = np.sign(np.cross(tangent_vec, fire_vec))
+        safe_vec = -side * normal_vec
+
+        offset = 2 * self.fire.cell_size
+        new_pos = np.array([proj_point.x, proj_point.y]) + offset * safe_vec
+
+        self.soak_crew.x, self.soak_crew.y = new_pos
 
     def plot_linestrings(self, linestrings, ax=None, show=True, color=['red', 'green', 'blue'], linewidth=1):
         """
