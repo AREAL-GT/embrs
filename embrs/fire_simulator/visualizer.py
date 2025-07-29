@@ -50,7 +50,8 @@ class RealTimeVisualizer(BaseVisualizer):
             elevation=self.sim.coarse_elevation,
             roads=self.sim.roads,
             fire_breaks=self.sim.fire_breaks,
-            init_entries=self.get_init_entries()
+            init_entries=self.get_init_entries(),
+            show_weather_data=not self.sim._uniform_map
         )
 
         return params
