@@ -23,7 +23,7 @@ class Burnout(ControlClass):
         self.soak_state = WAIT
 
         # Define firefighting crews
-        x, y = 0, 0
+        x, y = 3000, 540
         self.burn_crew = AgentBase(0, x, y, color='red')
         fire.add_agent(self.burn_crew)
         self.soak_crew = AgentBase(1, x, y, color='blue')
@@ -33,7 +33,7 @@ class Burnout(ControlClass):
         self.t_horizon = self.fire._sim_duration / 3600
 
         # Parameters        
-        self.hold_prob_thresh = 0.99
+        self.hold_prob_thresh = 0.965
         self.seg_length = 500
         self.wind_speed_thresh = 2.5 # equivalent to ~5 mph winds
         self.travel_vel = 1.34 # m/s
@@ -47,6 +47,10 @@ class Burnout(ControlClass):
         self.monitor_queue = []
 
     def process_state(self, fire):
+
+        if self.fire._curr_time_s < 30:
+            return
+
         # Burn Crew State Machine
         if self.burn_state == PLAN:
             self.plan()
@@ -127,7 +131,9 @@ class Burnout(ControlClass):
                     at_risk_segments.append((seg, cells))
 
         print(f"{len(at_risk_segments)} burn lines generated")
-        # self.plot_linestrings(at_risk_segments)
+        self.plot_burn_plan_with_baselines(
+            at_risk_segments,
+            base_linestrings=self.fire.fire_breaks)
 
         return at_risk_segments
 
@@ -206,7 +212,6 @@ class Burnout(ControlClass):
         # Move agent along fireline
         new_point = closest_line.interpolate(new_proj_dist)
         self.burn_crew.x, self.burn_crew.y = new_point.x, new_point.y
-        # self.soak_crew.x, self.soak_crew.y = new_point.x, new_point.y
 
         # Check if agent reached target
         if agent_point.distance(target_point) < self.fire.cell_size:
@@ -222,7 +227,13 @@ class Burnout(ControlClass):
             dir_tot = 0
 
             for cell in cells:
-                wind_speed, wind_dir = cell.curr_wind()
+
+                if (self.fire._curr_time_s - self.fire.weather_t_step * self.fire._curr_weather_idx) > (50 * 60):
+                    wind_speed, wind_dir = (cell.forecast_wind_speeds[self.fire._curr_weather_idx + 1], cell.forecast_wind_dirs[self.fire._curr_weather_idx + 1 ])
+
+                else:
+                    wind_speed, wind_dir = cell.curr_wind()
+                
                 speed_tot += wind_speed
                 dir_tot += wind_dir
 
@@ -358,19 +369,21 @@ class Burnout(ControlClass):
         self.soak_crew.x, self.soak_crew.y = new_point.x, new_point.y
 
         # Check if agent reached target
-        if agent_point.distance(target_point) < self.fire.cell_size:
-            self.move_soak_crew_away_from_line(closest_line)
+        if agent_point.distance(target_point) < 2 * self.fire.cell_size:
             self.soak_state = MONITOR
+            self.move_soak_crew_away_from_line(closest_line)
 
     def monitor(self):
         # Get line and cells to monitor
         line = self.monitor_queue[0]['line']
-        cells = self.fire.get_cells_at_geometry(line)
+        cells = self.fire.get_cells_at_geometry(line.buffer(self.fire.cell_size * 1.5))
 
         # Get the 10 closest burning cells to the soak crew
         burning_locs = [(cell.x_pos, cell.y_pos) for cell in self.fire._burning_cells if cell._break_width == 0]
         tree = KDTree(burning_locs)
-        fire_dist, idx = tree.query((self.soak_crew.x, self.soak_crew.y), k=10)
+
+        k = min(10, len(burning_locs))
+        fire_dist, idx = tree.query((self.soak_crew.x, self.soak_crew.y), k=k)
 
         breaches = []
         for i in idx:
@@ -394,11 +407,11 @@ class Burnout(ControlClass):
                 # Soak neighbors of the burning cell
                 for n_id in cell.burnable_neighbors.keys():
                     neighbor = self.fire.cell_dict[n_id]
-                    self.fire.water_drop_at_cell_as_rain(neighbor, 10)
+                    self.fire.water_drop_at_cell_as_rain(neighbor, 3)
             
         else:
             elapsed_time = self.fire._curr_time_s - self.monitor_queue[0]['start_time']
-            if elapsed_time > 600 and not any(cell.state == CellStates.FIRE for cell in cells):
+            if elapsed_time > 1200 and not any(cell.state == CellStates.FIRE for cell in cells):
                 # If no breaches and no burning cells, remove from queue
                 self.monitor_queue.pop(0)
                 self.soak_state = TRAVEL
@@ -424,59 +437,72 @@ class Burnout(ControlClass):
         side = np.sign(np.cross(tangent_vec, fire_vec))
         safe_vec = -side * normal_vec
 
-        offset = 2 * self.fire.cell_size
+        offset = 6 * self.fire.cell_size
         new_pos = np.array([proj_point.x, proj_point.y]) + offset * safe_vec
 
         self.soak_crew.x, self.soak_crew.y = new_pos
 
-    def plot_linestrings(self, linestrings, ax=None, show=True, color=['red', 'green', 'blue'], linewidth=1):
-        """
-        Plot a list of Shapely LineString objects using matplotlib.
 
-        Parameters:
-        ----------
-        linestrings : list
-            A list of shapely.geometry.LineString objects.
-        ax : matplotlib.axes.Axes, optional
-            Existing matplotlib axes to plot on. If None, a new figure is created.
-        show : bool, default=True
-            Whether to call plt.show() after plotting.
-        color : str or list, default='blue'
-            Color of the LineStrings. Can be a single color or a list of colors.
-        linewidth : float, default=1
-            Width of the lines.
 
-        Returns:
-        -------
-        ax : matplotlib.axes.Axes
-            The matplotlib axes containing the plot.
-        """
+    def plot_burn_plan_with_baselines(
+        self,
+        burn_plan_lines,             # List of (LineString, [Cell]) tuples
+        base_linestrings=None,       # List of LineString objects
+        ax=None,
+        show=True,
+        base_color='black',
+        burn_color='tab:red',
+        linewidth_base=1,
+        linewidth_burn=2.5,
+        point_style='o',
+        point_size=10,
+        title="Burn Plan",
+        annotate=False,
+        alpha=1.0
+    ):
+
         if ax is None:
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(8, 8))
             ax.set_aspect('equal')
 
-        if isinstance(color, str):
-            color = [color] * len(linestrings)
+        # ── Base lines: anchor/control lines ─────────────────────────────
+        if base_linestrings:
+            for base_line, _, _ in base_linestrings:
+                x, y = base_line.xy
+                ax.plot(x, y, color=base_color, linewidth=linewidth_base, linestyle='--', alpha=1)
 
-        for i, line in enumerate(linestrings):
-            x, y = line[0].xy
-            ax.plot(x, y, color=color[i % len(color)], linewidth=linewidth)
+        # ── Burn plan lines + cell markers ───────────────────────────────
+        if isinstance(burn_color, str):
+            burn_color = [burn_color] * len(burn_plan_lines)
 
-            xs = [cell.x_pos for cell in line[1]]
-            ys = [cell.y_pos for cell in line[1]]
+        for i, (line, cell_list) in enumerate(burn_plan_lines):
+            x, y = line.xy
+            line_color = burn_color[i % len(burn_color)]
+            ax.plot(x, y, color=line_color, linewidth=linewidth_burn, alpha=alpha)
 
-            ax.scatter(xs, ys, color=color[i%len(color)])
+            if cell_list:
+                xs = [cell.x_pos for cell in cell_list]
+                ys = [cell.y_pos for cell in cell_list]
+                ax.scatter(xs, ys, color=line_color, s=point_size, marker=point_style, alpha=alpha)
 
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_title("LineString Plot")
+            if annotate:
+                mid_idx = len(x) // 2
+                ax.text(x[mid_idx], y[mid_idx], f"{i}", fontsize=10, color='black', ha='center')
+
+        ax.set_xlabel("X (m)", fontsize=12)
+        ax.set_ylabel("Y (m)", fontsize=12)
+        ax.set_title(title, fontsize=14, pad=10)
         ax.set_xlim(0, self.fire.x_lim)
         ax.set_ylim(0, self.fire.y_lim)
+        ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
 
         if show:
+            plt.tight_layout()
             plt.show()
 
         return ax
+
+
 
 def split_line(line, segment_length):
     """
