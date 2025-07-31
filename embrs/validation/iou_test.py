@@ -11,7 +11,7 @@ import pandas as pd
 import json
 import pickle
 
-max_time_hr = np.linspace(0, 4, 25)
+max_time_hr = np.linspace(0.5, 72, 100)
 
 def plot_raster_and_sim_bounds(raster_bounds, sim_bounds):
     fig, ax = plt.subplots()
@@ -73,7 +73,7 @@ def raster_to_polygon_in_sim_coords(full_raster_path, sim_bounds, max_time, debu
     rows, cols = cropped_data.shape
     
 
-    print(f"Test transform: {cropped_transform}")
+    # print(f"Test transform: {cropped_transform}")
 
 
     new_transform = cropped_transform * Affine.translation(
@@ -178,12 +178,12 @@ def crop_raster_to_sim(full_raster_path, sim_bounds, debug=False):
         raw_bounds = src.bounds
         crs = src.crs
         xres, yres = src.res
-        print(f"Pixel size: {xres} × {yres}")
+        # print(f"Pixel size: {xres} × {yres}")
         nodata = src.nodata
 
         # If you need the number of rows/cols:
         rows, cols = src.read(1).shape
-        print(f"Raster dimensions: {rows} rows × {cols} cols")
+        # print(f"Raster dimensions: {rows} rows × {cols} cols")
 
 
         if debug:
@@ -231,14 +231,40 @@ def plot_polygons(polys):
     ax.set_aspect('equal')
     plt.show()
 
+from matplotlib.animation import FFMpegWriter
+
+def plot_polygons_frame(ax, polys, title=""):
+    ax.clear()
+    colors = ['blue', 'red']
+
+    for i, polygon in enumerate(polys):
+        if polygon.geom_type == 'Polygon':
+            x, y = polygon.exterior.xy
+            ax.fill(x, y, alpha=0.5, fc=colors[i], ec='black')
+        elif polygon.geom_type == 'MultiPolygon':
+            for poly in polygon.geoms:
+                x, y = poly.exterior.xy
+                ax.fill(x, y, alpha=0.5, fc=colors[i], ec='black')
+
+    ax.set_aspect('equal')
+    ax.set_title(title)
+
+# Create video writer
+output_path = "polygon_overlap.mp4"
+metadata = dict(title='Polygon IOU Over Time', artist='Rui', comment='Sim vs Raster')
+writer = FFMpegWriter(fps=2, metadata=metadata)
+
+fig, ax = plt.subplots()
+ious = []
+
 
 # # Example usage
-tif_file = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/flatland/fmp_nowind.tif"
+tif_file = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar/fmp_cougar2.tif"
 
 
-log_file = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/flatland/flat_nowind_new_accel/run_0/cell_logs.parquet'
-metadata_path = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/flatland/flat_nowind_new_accel/metadata.json'
-map_params_path = "/Users/rui/Library/CloudStorage/OneDrive-GeorgiaInstituteofTechnology/Research/embrs_inputs/embrs_maps/flatland_test/map_params.pkl"
+log_file = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar/cougar_5/run_0/cell_logs.parquet'
+metadata_path = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar/cougar_5/metadata.json'
+map_params_path = "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/map_params.pkl"
 
 
 with open(map_params_path, "rb") as f:
@@ -254,27 +280,34 @@ sim_bounds = (bounding_box.left, bounding_box.bottom, bounding_box.right, boundi
 
 ious = []
 
-for tm in max_time_hr:
-    raster_polygon = raster_to_polygon_in_sim_coords(
-        full_raster_path=tif_file,
-        sim_bounds = sim_bounds,
-        max_time = tm
-    )
+with writer.saving(fig, output_path, dpi=150):
+    for tm in max_time_hr:
+        raster_polygon = raster_to_polygon_in_sim_coords(
+            full_raster_path=tif_file,
+            sim_bounds=sim_bounds,
+            max_time=tm
+        )
 
-    log_polygon = cell_log_to_hex_polygons(log_file, metadata_path, map_params_path, tm)
+        log_polygon = cell_log_to_hex_polygons(
+            log_file, metadata_path, map_params_path, tm
+        )
 
-    plot_polygons([raster_polygon, log_polygon])
+        intersection_area = log_polygon.intersection(raster_polygon).area
+        union_area = log_polygon.union(raster_polygon).area
+        iou = intersection_area / union_area
 
-    intersection_area = log_polygon.intersection(raster_polygon).area
-    union_area = log_polygon.union(raster_polygon).area
-    iou = intersection_area/union_area
+        ious.append(iou)
+        print(f"IOU @ {tm:.1f} hr: {iou:.3f}")
 
-    print(f"IOU: {iou}")
-
-    ious.append(iou)
+        # title = f"Max Time: {tm:.1f} hr | IOU = {iou:.3f}"
+        # plot_polygons_frame(ax, [raster_polygon, log_polygon], title=title)
+        # writer.grab_frame()
 
 
 
 plt.plot(max_time_hr, ious)
+plt.title("IOU Over Time")
+plt.xlabel("Time (hr)")
+plt.ylabel("IOU")
 
 plt.show()

@@ -10,8 +10,8 @@ import pandas as pd
 
 # Paths
 map_params_path = f"/Users/rui/Library/CloudStorage/OneDrive-GeorgiaInstituteofTechnology/Research/embrs_inputs/embrs_maps/cougar_creek/map_params.pkl"
-flammap_path = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar_1/fmp_cougar.tif"
-cell_logs_path = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar_1/cougar_1/run_0/cell_logs.parquet"
+flammap_path = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar/fmp_cougar2.tif"
+cell_logs_path = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/cougar/cougar_4/run_0/cell_logs.parquet"
 
 
 sim_time_hr = 36
