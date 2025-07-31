@@ -137,12 +137,12 @@ class FirelineConstruction(ControlClass):
             time_horizon_hr=time_horizon,
             time_step_s=time_step*3,
             cell_size_m=self.fire.cell_size*2,
-            dead_mf=0.06,
+            dead_mf=0.10,
             wind_bias_factor=-0.5
         )
 
         self.pred_model = FirePredictor(pred_input, self.fire)
-        pred_output = self.pred_model.run(visualize=True)
+        pred_output = self.pred_model.run()
 
         self.spread_prediction = pred_output.spread
 
