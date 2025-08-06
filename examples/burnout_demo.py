@@ -92,7 +92,7 @@ class Burnout(ControlClass):
             time_step_s=self.fire.time_step,
             cell_size_m=self.fire.cell_size,
             dead_mf=0.03,
-            wind_bias_factor=1
+            wind_speed_bias=1
         )
 
         self.pred_model = FirePredictor(pred_input, self.fire)

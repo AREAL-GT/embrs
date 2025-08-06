@@ -26,14 +26,11 @@ class FirePredictor(BaseFireSim):
         self.time_horizon_hr = params.time_horizon_hr
 
         # Uncertainty parameters
-        # TODO: This should be a bias for direction and speed individually
-
-        self.wind_bias_factor = params.wind_bias_factor # [-1 , 1], systematic error
         self.wind_uncertainty_factor = params.wind_uncertainty_factor # [0, 1], autoregression noise
 
         # Compute constant bias terms
-        self.wind_speed_bias = self.wind_bias_factor * params.max_wind_speed_bias
-        self.wind_dir_bias   = self.wind_bias_factor * params.max_wind_dir_bias
+        self.wind_speed_bias = params.wind_speed_bias * params.max_wind_speed_bias
+        self.wind_dir_bias   = params.wind_dir_bias * params.max_wind_dir_bias
 
         # Compute auto-regressive parameters
         self.beta = self.wind_uncertainty_factor * params.max_beta

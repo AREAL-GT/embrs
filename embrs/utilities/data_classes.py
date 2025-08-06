@@ -212,7 +212,8 @@ class PredictorParams:
     live_mf: float = 0.30
     model_spotting: bool = False
     spot_delay_s: float = 1200
-    wind_bias_factor: float = 0
+    wind_speed_bias: float = 0
+    wind_dir_bias: float = 0
     wind_uncertainty_factor: float = 0
 
     # Advanced uncertainty settings
