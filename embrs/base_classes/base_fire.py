@@ -482,6 +482,48 @@ class BaseFireSim:
         if len(cell.burnable_neighbors) == 0 or len(cell.intersections) == len(cell.directions):
             cell.fully_burning = True
 
+    def propagate_fire_parallel(self, cell: Cell):
+        """Compute fire spread without igniting neighbors.
+
+        This helper mirrors :meth:`propagate_fire` but instead of igniting
+        neighbors immediately it returns a list of ignition parameters.  This
+        allows fire spread computations to be performed in parallel while the
+        side effects of igniting neighbors are applied sequentially to maintain
+        deterministic behaviour.
+
+        Args:
+            cell (Cell): The cell being processed.
+
+        Returns:
+            list: A list of tuples ``(r_gamma, gamma, end_pts)`` for each
+            newly intersected neighbour that should be ignited.
+        """
+
+        if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
+            cell.fully_burning = True
+            return []
+
+        # Update extent of fire spread along each direction
+        cell.fire_spread = cell.fire_spread + (cell.avg_ros * self._time_step)
+
+        # Compute intersections between fire spread and distances to neighbors
+        intersections = np.where(cell.fire_spread > cell.distances)[0]
+
+        ignition_params = []
+        for idx in sorted(intersections, reverse=True):
+            if idx not in cell.intersections and cell.breached:
+                ignition_params.append(
+                    (cell.r_t[idx], cell.directions[idx], cell.end_pts[idx])
+                )
+
+        # Add new intersections to tracked intersections
+        cell.intersections.update(intersections)
+
+        if len(cell.burnable_neighbors) == 0 or len(cell.intersections) == len(cell.directions):
+            cell.fully_burning = True
+
+        return ignition_params
+
     def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
         """_summary_
 
