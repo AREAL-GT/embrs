@@ -226,8 +226,11 @@ class FireSim(BaseFireSim):
             for cell, loc in self.starting_ignitions:
                 cell._arrival_time = self.curr_time_m
                 cell.get_ign_params(loc)
-                cell._set_state(CellStates.FIRE)
 
+                if not cell.fuel.burnable:
+                    continue
+                
+                cell._set_state(CellStates.FIRE)
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
 
