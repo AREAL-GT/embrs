@@ -190,6 +190,8 @@ class SimParams:
     t_step_s: Optional[int] = None
     cell_size: Optional[int] = None
     init_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
+    fuel_moisture_map: Dict[int, List[float]] = field(default_factory=dict)
+    fms_has_live: bool = False
     model_spotting: Optional[bool] = False
     canopy_species: Optional[int] = 5
     dbh_cm: Optional[float] = 20.0

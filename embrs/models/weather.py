@@ -14,10 +14,12 @@ from embrs.utilities.unit_conversions import *
 
 # TODO: Document this file
 
+
 class WeatherStream:
-    def __init__(self, params: WeatherParams, geo: GeoInfo):
+    def __init__(self, params: WeatherParams, geo: GeoInfo, use_gsi: bool = True):
         self.params = params
         self.geo = geo
+        self.use_gsi = use_gsi
         input_type = params.input_type
 
         if input_type == "OpenMeteo":
@@ -99,12 +101,16 @@ class WeatherStream:
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values
 
-        # Compute the GSI
-        # Use a 28-day period before the start of the simulation to calculate GSI (56-day for rain)
-        gsi = self.calc_GSI(hourly_data, buffered_start, start_datetime)
-        
-        # Use GSI information to determine what to set live fuel moistures to
-        self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+        if self.use_gsi:
+            # Compute the GSI
+            # Use a 28-day period before the start of the simulation to calculate GSI (56-day for rain)
+            gsi = self.calc_GSI(hourly_data, buffered_start, start_datetime)
+
+            # Use GSI information to determine what to set live fuel moistures to
+            self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+        else:
+            self.live_h_mf = None
+            self.live_w_mf = None
 
         hourly = filter_hourly_data(hourly_data, start_datetime, end_datetime)
         self.stream = list(self.generate_stream(hourly))
@@ -267,29 +273,33 @@ class WeatherStream:
         #     pass
         # else:
 
-        # Determine how far back we can go
-        min_date_in_wxs = df.index.min()
-        desired_start = start_datetime - timedelta(days=56)
-        data_start = max(min_date_in_wxs, desired_start)
+        if self.use_gsi:
+            # Determine how far back we can go
+            min_date_in_wxs = df.index.min()
+            desired_start = start_datetime - timedelta(days=56)
+            data_start = max(min_date_in_wxs, desired_start)
 
-        # Calculate GSI
-        gsi = self.calc_GSI(
-            {
-                "date": df.index,
-                "temperature": df["temperature"].values,
-                "rel_humidity": df["rel_humidity"].values,
-                "rain": df["rain"].values,
-            },
-            data_start,
-            start_datetime
-        )
+            # Calculate GSI
+            gsi = self.calc_GSI(
+                {
+                    "date": df.index,
+                    "temperature": df["temperature"].values,
+                    "rel_humidity": df["rel_humidity"].values,
+                    "rain": df["rain"].values,
+                },
+                data_start,
+                start_datetime
+            )
 
-        if gsi < 0:
-            # Set to dormant values
-            self.live_h_mf = 0.3
-            self.live_w_mf = 0.6
+            if gsi < 0:
+                # Set to dormant values
+                self.live_h_mf = 0.3
+                self.live_w_mf = 0.6
+            else:
+                self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
         else:
-            self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+            self.live_h_mf = None
+            self.live_w_mf = None
         
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
@@ -365,8 +375,12 @@ class WeatherStream:
             raise ValueError(f"Unknown units: {units}")
 
         # Set live moisture values
-        self.live_h_mf = 1.4
-        self.live_w_mf = 1.25
+        if self.use_gsi:
+            self.live_h_mf = 1.4
+            self.live_w_mf = 1.25
+        else:
+            self.live_h_mf = None
+            self.live_w_mf = None
 
         # Set Foliar moisture content to 100
         self.fmc = 100

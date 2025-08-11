@@ -3,7 +3,7 @@
 
 from tkinter import BOTH, filedialog
 from datetime import datetime, time, timedelta
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Dict, List
 import tkinter.simpledialog as sd
 from tkcalendar import DateEntry
 from tkinter import ttk
@@ -21,6 +21,53 @@ from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, Un
 from embrs.utilities.fire_util import CanopySpecies
 from embrs.models.fuel_models import FuelConstants
 from embrs.base_classes.control_base import ControlClass
+
+
+def read_fms_file(filepath: str) -> Tuple[Dict[int, List[float]], bool]:
+    """Read a FlamMap .fms file.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the .fms file.
+
+    Returns
+    -------
+    Tuple[Dict[int, List[float]], bool]
+        Mapping of fuel model id to moisture values (fractions) and a flag
+        indicating if live fuel moistures were provided.
+    """
+
+    moisture = {}
+    has_live = False
+
+    with open(filepath, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("//"):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            fm = int(parts[0])
+            vals = []
+            for p in parts[1:4]:
+                v = float(p)
+                if v > 1:
+                    v /= 100.0
+                vals.append(v)
+            if len(parts) >= 6:
+                lh = float(parts[4])
+                lw = float(parts[5])
+                if lh > 1:
+                    lh /= 100.0
+                if lw > 1:
+                    lw /= 100.0
+                vals.extend([lh, lw])
+                has_live = True
+            moisture[fm] = vals
+
+    return moisture, has_live
 
 class FileSelectBase:
     """Base class for creating tkinter file and folder selector interfaces
@@ -441,6 +488,7 @@ class SimFolderSelector(FileSelectBase):
         self.init_mf_1hr = tk.DoubleVar(value=6)
         self.init_mf_10hr = tk.DoubleVar(value=7)
         self.init_mf_100hr = tk.DoubleVar(value=8)
+        self.fms_file = tk.StringVar()
         self.time_step = tk.IntVar(value=5)
         self.cell_size = tk.IntVar(value=10)
         self.model_spotting = tk.BooleanVar(value=True)
@@ -529,6 +577,10 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture: 1 hr:", 100, self.init_mf_1hr, "%", row=1, column=0)
         self.create_spinbox_with_two_labels(weather_settings, "10 hr:", 100, self.init_mf_10hr, "%", row=1, column=1)
         self.create_spinbox_with_two_labels(weather_settings, "100 hr:", 100, self.init_mf_100hr, "%", row=1, column=2)
+        _, self.fms_entry, self.fms_button, self.fms_frame = self.create_file_selector(
+            weather_settings, "Fuel Moisture File:", self.fms_file, [("Fuel Moisture", "*.fms")]
+        )
+        tk.Button(self.fms_frame, text='Generate FMS', command=self.generate_fms).grid(row=0, column=3)
 
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
@@ -540,6 +592,29 @@ class SimFolderSelector(FileSelectBase):
         self.end_hour.trace_add("write", self.update_datetime)
         self.end_min.trace_add("write", self.update_datetime)
         self.end_ampm.trace_add("write", self.update_datetime)
+
+    def generate_fms(self):
+        """Generate a stock .fms file using current dead fuel moisture inputs."""
+        if not self.map_folder.get():
+            window = tk.Tk()
+            window.withdraw()
+            tk.messagebox.showwarning("Error", "Select a map folder before generating an FMS file.")
+            window.destroy()
+            return
+
+        with open(os.path.join(self.map_folder.get(), "map_params.pkl"), "rb") as f:
+            map_params = pickle.load(f)
+
+        fuel_map = map_params.lcp_data.fuel_map
+        unique_fuels = np.unique(fuel_map.astype(int))
+
+        save_path = filedialog.asksaveasfilename(defaultextension=".fms", filetypes=[("Fuel Moisture", "*.fms")])
+        if not save_path:
+            return
+
+        with open(save_path, "w") as f:
+            for fm in sorted(unique_fuels):
+                f.write(f"{int(fm)} {self.init_mf_1hr.get():.2f} {self.init_mf_10hr.get():.2f} {self.init_mf_100hr.get():.2f}\n")
 
     def setup_model_tab(self):
         # Create a big frame that will hold two columns
@@ -841,12 +916,23 @@ class SimFolderSelector(FileSelectBase):
                 end_datetime = self.end_datetime
              )
 
+            fms_map = {}
+            fms_has_live = False
+            if self.fms_file.get():
+                try:
+                    fms_map, fms_has_live = read_fms_file(self.fms_file.get())
+                except Exception as e:
+                    tk.messagebox.showwarning("Error", f"Failed to read FMS file: {e}")
+                    return
+
             sim_params = SimParams(
                 map_params = map_params,
                 log_folder = self.log_folder.get(),
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
                 init_mf = [self.init_mf_1hr.get()/100, self.init_mf_10hr.get()/100, self.init_mf_100hr.get()/100],
+                fuel_moisture_map = fms_map,
+                fms_has_live = fms_has_live,
                 model_spotting = self.model_spotting.get(),
                 canopy_species = self.canopy_species,
                 dbh_cm = self.dbh_cm.get(),
