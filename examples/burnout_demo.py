@@ -407,7 +407,7 @@ class Burnout(ControlClass):
                 # Soak neighbors of the burning cell
                 for n_id in cell.burnable_neighbors.keys():
                     neighbor = self.fire.cell_dict[n_id]
-                    self.fire.water_drop_at_cell_as_rain(neighbor, 3)
+                    self.fire.water_drop_at_cell_as_rain(neighbor, 0.057)
             
         else:
             elapsed_time = self.fire._curr_time_s - self.monitor_queue[0]['start_time']
@@ -444,7 +444,7 @@ class Burnout(ControlClass):
 
 
 
-    def plot_burn_plan_with_baselines(
+def plot_burn_plan_with_baselines(
         self,
         burn_plan_lines,             # List of (LineString, [Cell]) tuples
         base_linestrings=None,       # List of LineString objects
@@ -467,9 +467,16 @@ class Burnout(ControlClass):
 
         # ── Base lines: anchor/control lines ─────────────────────────────
         if base_linestrings:
-            for base_line, _, _ in base_linestrings:
+            for idx, (base_line, _, _) in enumerate(base_linestrings):
                 x, y = base_line.xy
-                ax.plot(x, y, color=base_color, linewidth=linewidth_base, linestyle='--', alpha=1)
+                ax.plot(
+                    x, y,
+                    color=base_color,
+                    linewidth=linewidth_base,
+                    linestyle='--',
+                    alpha=1,
+                    label="Control Lines" if idx == 0 else None
+                )
 
         # ── Burn plan lines + cell markers ───────────────────────────────
         if isinstance(burn_color, str):
@@ -478,12 +485,25 @@ class Burnout(ControlClass):
         for i, (line, cell_list) in enumerate(burn_plan_lines):
             x, y = line.xy
             line_color = burn_color[i % len(burn_color)]
-            ax.plot(x, y, color=line_color, linewidth=linewidth_burn, alpha=alpha)
+            ax.plot(
+                x, y,
+                color=line_color,
+                linewidth=linewidth_burn,
+                alpha=alpha,
+                label="Burn Plan Lines" if i == 0 else None
+            )
 
             if cell_list:
                 xs = [cell.x_pos for cell in cell_list]
                 ys = [cell.y_pos for cell in cell_list]
-                ax.scatter(xs, ys, color=line_color, s=point_size, marker=point_style, alpha=alpha)
+                ax.scatter(
+                    xs, ys,
+                    color=line_color,
+                    s=point_size,
+                    marker=point_style,
+                    alpha=alpha,
+                    label="Burn Plan Cells" if i == 0 else None
+                )
 
             if annotate:
                 mid_idx = len(x) // 2
@@ -495,6 +515,9 @@ class Burnout(ControlClass):
         ax.set_xlim(0, self.fire.x_lim)
         ax.set_ylim(0, self.fire.y_lim)
         ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
+
+        # ── Legend ───────────────────────────────────────────────────────
+        ax.legend(loc='upper right', fontsize=10, frameon=True)
 
         if show:
             plt.tight_layout()
