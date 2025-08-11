@@ -56,8 +56,7 @@ class WeatherStream:
             "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
             "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance", "rain"],
             "wind_speed_unit": "ms",
-            "temperature_unit": "fahrenheit",
-            "timezone": "auto"
+            "temperature_unit": "fahrenheit"
         }
         responses = openmeteo.weather_api(url, params=api_input)
         response = responses[0]
@@ -81,7 +80,7 @@ class WeatherStream:
             end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
             freq=pd.Timedelta(seconds=hourly.Interval()),
             inclusive="left"
-        ).tz_localize(local_tz)
+        ).tz_localize('UTC').tz_convert(local_tz)
 
         self.times = pd.date_range(hourly_data["date"][0], hourly_data["date"][-1], freq='h', tz=local_tz)
 
