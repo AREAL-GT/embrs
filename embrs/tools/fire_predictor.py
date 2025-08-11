@@ -31,6 +31,7 @@ class FirePredictor(BaseFireSim):
         # Compute constant bias terms
         self.wind_speed_bias = params.wind_speed_bias * params.max_wind_speed_bias
         self.wind_dir_bias   = params.wind_dir_bias * params.max_wind_dir_bias
+        self.ros_bias_factor = max(min(1 + params.ros_bias, 1.5), 0.5)
 
         # Compute auto-regressive parameters
         self.beta = self.wind_uncertainty_factor * params.max_beta
@@ -132,20 +133,29 @@ class FirePredictor(BaseFireSim):
             self._new_ignitions = []
 
             for cell, loc in self.starting_ignitions:
+                if not cell.fuel.burnable:
+                    continue
+                
                 cell.get_ign_params(loc)
                 cell._set_state(CellStates.FIRE)
-
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)
                 cell.has_steady_state = True
 
                 # Don't model fire acceleration in prediction model
-                cell.r_t = cell.r_ss
-                cell.avg_ros = cell.r_ss
-                cell.I_t = cell.I_ss
+                cell.r_t = cell.r_ss * self.ros_bias_factor
+                cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                cell.I_t = cell.I_ss * self.ros_bias_factor
 
                 self._updated_cells[cell.id] = cell
                 self._new_ignitions.append(cell)
+
+
+                if self.spread.get(self._curr_time_s) is None:
+                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
+
+                else:
+                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
 
         else:
             for cell in self._new_ignitions:
@@ -172,13 +182,13 @@ class FirePredictor(BaseFireSim):
                 cell.has_steady_state = True
 
                 if self.model_spotting:
-                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self.nom_ign_prob > 0:
                         self.embers.loft(cell)
 
                 # Don't model fire acceleration in prediction model
-                cell.r_t = cell.r_ss
-                cell.avg_ros = cell.r_ss
-                cell.I_t = cell.I_ss
+                cell.r_t = cell.r_ss * self.ros_bias_factor
+                cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                cell.I_t = cell.I_ss * self.ros_bias_factor
 
                 if self.spread.get(self._curr_time_s) is None:
                     self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
@@ -217,9 +227,9 @@ class FirePredictor(BaseFireSim):
                 if self.weather_changed or not cell.has_steady_state:
                     # Update the steady state
                     self.update_steady_state(cell)
-                    cell.r_t = cell.r_ss
-                    cell.avg_ros = cell.r_ss
-                    cell.I_t = cell.I_ss
+                    cell.r_t = cell.r_ss * self.ros_bias_factor
+                    cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                    cell.I_t = cell.I_ss * self.ros_bias_factor
 
                 self.propagate_fire(cell)
                 self.remove_neighbors(cell)
@@ -231,7 +241,7 @@ class FirePredictor(BaseFireSim):
 
                 self._updated_cells[cell.id] = cell
 
-            if self.model_spotting and self._spot_ign_prob > 0:
+            if self.model_spotting and self.nom_ign_prob > 0:
                 self._ignite_spots()
 
             self.update_control_interface_elements()
@@ -294,10 +304,11 @@ class FirePredictor(BaseFireSim):
                     # Ignite the fires scheduled for this time step
                     new_spots = self._scheduled_spot_fires[time]
                     for spot in new_spots:
-                        self._new_ignitions.append(spot)
-                        spot.get_ign_params(0)
-                        spot._set_state(CellStates.FIRE)
-                        self._updated_cells[spot.id] = spot
+                        if spot.state == CellStates.FUEL and spot.fuel.burnable:
+                            self._new_ignitions.append(spot)
+                            spot.get_ign_params(0)
+                            spot._set_state(CellStates.FIRE)
+                            self._updated_cells[spot.id] = spot
 
                     # Delete entry from schedule if ignited
                     del self._scheduled_spot_fires[time]
@@ -366,6 +377,7 @@ class FirePredictor(BaseFireSim):
             new_entry = copy.deepcopy(entry)
 
             new_entry.wind_speed += speed_error + self.wind_speed_bias
+            new_entry.wind_speed = np.max([0, new_entry.wind_speed])
             new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
             new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
 
@@ -375,7 +387,6 @@ class FirePredictor(BaseFireSim):
             dir_error = self.beta * dir_error + np.random.normal(0, self.wnd_dir_std)
 
         new_weather_stream.stream = new_stream
-        
 
         if self.fire._sim_params.map_params.uniform_map:
             # If the map is uniform, we can create a uniform wind forecast

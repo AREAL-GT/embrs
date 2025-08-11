@@ -215,9 +215,10 @@ class PredictorParams:
     wind_speed_bias: float = 0
     wind_dir_bias: float = 0
     wind_uncertainty_factor: float = 0
+    ros_bias: float = 0
 
     # Advanced uncertainty settings
-    max_wind_speed_bias: float = 1.5 # m/s
+    max_wind_speed_bias: float = 2.5 # m/s
     max_wind_dir_bias: float = 20.0 # deg
     base_wind_spd_std: float = 1.0 # m/s
     base_wind_dir_std: float = 5.0 # deg
