@@ -192,6 +192,8 @@ class SimParams:
     init_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
     fuel_moisture_map: Dict[int, List[float]] = field(default_factory=dict)
     fms_has_live: bool = False
+    live_h_mf: Optional[float] = None
+    live_w_mf: Optional[float] = None
     model_spotting: Optional[bool] = False
     canopy_species: Optional[int] = 5
     dbh_cm: Optional[float] = 20.0

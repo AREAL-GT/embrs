@@ -93,8 +93,8 @@ class BaseFireSim:
 
         if not prediction: # Regular FireSim
             if self._fms_has_live:
-                live_h_mf = 0.0
-                live_w_mf = 0.0
+                live_h_mf = self._init_live_h_mf
+                live_w_mf = self._init_live_w_mf
             else:
                 # Set live moisture and foliar moisture to weather stream values
                 live_h_mf = self._weather_stream.live_h_mf
@@ -270,6 +270,8 @@ class BaseFireSim:
         self._init_mf = sim_params.init_mf
         self._fuel_moisture_map = getattr(sim_params, 'fuel_moisture_map', {})
         self._fms_has_live = getattr(sim_params, 'fms_has_live', False)
+        self._init_live_h_mf = getattr(sim_params, 'live_h_mf', 0.0)
+        self._init_live_w_mf = getattr(sim_params, 'live_w_mf', 0.0)
 
         # Load map params
         map_params = sim_params.map_params
