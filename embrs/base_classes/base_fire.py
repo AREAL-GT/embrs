@@ -92,9 +92,13 @@ class BaseFireSim:
         self._grid_height = self._cell_grid.shape[0] - 1
 
         if not prediction: # Regular FireSim
-            # Set live moisture and foliar moisture to weather stream values
-            live_h_mf = self._weather_stream.live_h_mf
-            live_w_mf = self._weather_stream.live_w_mf
+            if self._fms_has_live:
+                live_h_mf = self._init_live_h_mf
+                live_w_mf = self._init_live_w_mf
+            else:
+                # Set live moisture and foliar moisture to weather stream values
+                live_h_mf = self._weather_stream.live_h_mf
+                live_w_mf = self._weather_stream.live_w_mf
             self.fmc = self._weather_stream.fmc
 
         else:
@@ -136,23 +140,30 @@ class BaseFireSim:
                     # Initialize cell data class
                     cell_data = CellData()
 
-                    # Set initial moisture values
-                    cell_data.init_dead_mf = self._init_mf
-                    cell_data.live_h_mf = live_h_mf
-                    cell_data.live_w_mf = live_w_mf
-
                     cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
                     # Get row and col of data arrays corresponding to cell
                     data_col = int(np.floor(cell_x/self._data_res))
                     data_row = int(np.floor(cell_y/self._data_res))
-                    
+
                     # Ensure data row and col in bounds
                     data_col = min(data_col, sim_params.map_params.lcp_data.cols-1)
                     data_row = min(data_row, sim_params.map_params.lcp_data.rows-1)
 
                     # Get fuel type
                     fuel_key = self._fuel_map[data_row, data_col]
+
+                    # Set initial moisture values (default)
+                    cell_data.init_dead_mf = self._init_mf
+                    cell_data.live_h_mf = live_h_mf
+                    cell_data.live_w_mf = live_w_mf
+                    if self._fuel_moisture_map.get(fuel_key) is not None:
+                        mf_vals = self._fuel_moisture_map[fuel_key]
+                        cell_data.init_dead_mf = mf_vals[:3]
+                        if self._fms_has_live and len(mf_vals) >= 5:
+                            cell_data.live_h_mf = mf_vals[3]
+                            cell_data.live_w_mf = mf_vals[4]
+
                     fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
                     cell_data.fuel_type = fuel
 
@@ -257,6 +268,10 @@ class BaseFireSim:
         self._sim_duration = sim_params.duration_s
         self._time_step = sim_params.t_step_s
         self._init_mf = sim_params.init_mf
+        self._fuel_moisture_map = getattr(sim_params, 'fuel_moisture_map', {})
+        self._fms_has_live = getattr(sim_params, 'fms_has_live', False)
+        self._init_live_h_mf = getattr(sim_params, 'live_h_mf', 0.0)
+        self._init_live_w_mf = getattr(sim_params, 'live_w_mf', 0.0)
 
         # Load map params
         map_params = sim_params.map_params
@@ -321,7 +336,9 @@ class BaseFireSim:
 
             # Generate a weather stream
             else:
-                self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info)
+                self._weather_stream = WeatherStream(
+                    sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
+                )
                 self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
                 
                 # Get wind data
@@ -350,7 +367,9 @@ class BaseFireSim:
                 raise ValueError(f"Error: If using a uniform map, OpenMeteo can not be used. Must specify a weather file")
 
             # Create weather stream (just consisting of wind)
-            self._weather_stream = WeatherStream(sim_params.weather_input, sim_params.map_params.geo_info)
+            self._weather_stream = WeatherStream(
+                sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
+            )
             self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
 
             # Create a uniform wind forecast
