@@ -47,17 +47,18 @@ class BaseFireSim:
         self._sim_params = sim_params
         self.burnout_thresh = 0.01
 
+        # Variables to keep track of current weather conditions
+        self.sim_start_w_idx = 0
+        self._curr_weather_idx = None
+        self._last_weather_update = 0
+        self.weather_changed = True
+        
         # Store sim input values in class variables
         self._parse_sim_params(sim_params)
         
         # Variables to keep track of sim progress
         self._curr_time_s = 0
         self._iters = 0
-
-        # Variables to keep track of current wind conditions
-        self._curr_weather_idx = 0
-        self._last_weather_update = 0
-        self.weather_changed = True
 
         # Variables to store logger and visualizer object
         self.logger = None
@@ -334,11 +335,14 @@ class BaseFireSim:
                 self.wind_xpad = 0
                 self.wind_ypad = 0
 
+                self._curr_weather_idx = 0
             # Generate a weather stream
             else:
                 self._weather_stream = WeatherStream(
                     sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
                 )
+                self.sim_start_w_idx = self._weather_stream.sim_start_idx
+                self._curr_weather_idx = self._weather_stream.sim_start_idx
                 self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
                 
                 # Get wind data

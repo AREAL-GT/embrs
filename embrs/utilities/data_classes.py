@@ -179,6 +179,7 @@ class WeatherParams:
     input_type: Optional[str] = None
     file: Optional[str] = "" # Populated only if user is passing a weather file
     mesh_resolution: Optional[int] = None
+    conditioning_start: Optional[datetime] = None
     start_datetime: Optional[datetime] = None
     end_datetime: Optional[datetime] = None
 

@@ -363,7 +363,7 @@ class Cell:
         self.moist_update_time_s = curr
 
     def curr_wind(self):
-        w_idx = self._parent()._curr_weather_idx
+        w_idx = self._parent()._curr_weather_idx - self._parent().sim_start_w_idx
 
         if self._parent().is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
             self._parent()._set_prediction_forecast(self)

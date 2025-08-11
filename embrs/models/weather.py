@@ -40,6 +40,8 @@ class WeatherStream:
         local_tz = pytz.timezone(self.geo.timezone)
 
         # Buffer times and format for OpenMeteo
+        conditioning_start = self.params.conditioning_start
+        conditioning_start = local_tz.localize(conditioning_start)
         start_datetime = self.params.start_datetime
         start_datetime = local_tz.localize(start_datetime)
         buffered_start = start_datetime - timedelta(days=56)
@@ -112,9 +114,15 @@ class WeatherStream:
             self.live_h_mf = None
             self.live_w_mf = None
 
-        hourly = filter_hourly_data(hourly_data, start_datetime, end_datetime)
+        hourly = filter_hourly_data(hourly_data, conditioning_start, end_datetime)
+        self.stream_times = pd.DatetimeIndex(hourly["date"])
         self.stream = list(self.generate_stream(hourly))
-        
+
+        try:
+            self.sim_start_idx = self.stream_times.get_loc(start_datetime)
+        except KeyError:
+            self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
+
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
 
@@ -199,6 +207,7 @@ class WeatherStream:
 
         # ── Step 3: Fetch irradiance from Open-Meteo ─────────────────
         # Use buffer around sim dates
+        conditioning_start = local_tz.localize(self.params.conditioning_start)
         start_datetime = local_tz.localize(self.params.start_datetime)
         end_datetime = local_tz.localize(self.params.end_datetime)
 
@@ -267,12 +276,6 @@ class WeatherStream:
         df["solar_zenith"] = solpos["zenith"].values
         df["solar_azimuth"] = solpos["azimuth"].values
 
-        # if skip_gis:
-        # # TODO: actually set this up
-        # # TODO: apply user defined moisture values
-        #     pass
-        # else:
-
         if self.use_gsi:
             # Determine how far back we can go
             min_date_in_wxs = df.index.min()
@@ -306,7 +309,15 @@ class WeatherStream:
 
         # ── Step 8: Package final stream ─────────────────────────────
         df["date"] = df.index
-        hourly_data = filter_hourly_data(df, start_datetime, end_datetime)
+        hourly_data = filter_hourly_data(df, conditioning_start, end_datetime)
+        self.stream_times = pd.DatetimeIndex(hourly_data["date"])
+
+        try:
+            self.sim_start_idx = self.stream_times.get_loc(start_datetime)
+        except KeyError:
+            self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
+
+
         self.stream = list(self.generate_stream(hourly_data))
 
         # ── Step 9: Set metadata attributes ──────────────────────────

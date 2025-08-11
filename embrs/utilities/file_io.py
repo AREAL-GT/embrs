@@ -174,7 +174,7 @@ class FileSelectBase:
                                     row=0, column=0):
         """Creates a frame containing a spinbox with one or two labels."""
         new_frame = tk.Frame(frame)
-        new_frame.grid(row=row, column=column, sticky='w', padx=5, pady=2)
+        new_frame.grid(row=row, column=column, sticky='w', padx=5, pady=5)
 
         tk.Label(new_frame, text=left_label).grid(row=0, column=0, sticky='w')
 
@@ -485,6 +485,11 @@ class SimFolderSelector(FileSelectBase):
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.weather_file = tk.StringVar()
+        self.apply_conditioning = tk.BooleanVar(value=False)
+        self.conditioning_start = tk.StringVar()
+        self.cond_start_hr = tk.IntVar(value=12)
+        self.cond_start_min = tk.IntVar(value=0)
+        self.cond_start_ampm = tk.StringVar(value="AM")
         self.init_mf_1hr = tk.DoubleVar(value=6)
         self.init_mf_10hr = tk.DoubleVar(value=7)
         self.init_mf_100hr = tk.DoubleVar(value=8)
@@ -580,14 +585,35 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture: 1 hr:", 100, self.init_mf_1hr, "%", row=1, column=0)
         self.create_spinbox_with_two_labels(weather_settings, "10 hr:", 100, self.init_mf_10hr, "%", row=1, column=1)
         self.create_spinbox_with_two_labels(weather_settings, "100 hr:", 100, self.init_mf_100hr, "%", row=1, column=2)
-        tk.Checkbutton(weather_settings, text='Use GSI to compute live moisture', variable=self.use_gsi, command=self.gsi_toggled).grid(row=2, column=0, columnspan=2, sticky='w')
-        self.live_h_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Herbaceous:", 300, self.live_h_mf, "%", row=3, column=0)
-        self.live_w_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Woody:", 300, self.live_w_mf, "%", row=3, column=1)
+        self.live_h_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Herbaceous:", 300, self.live_h_mf, "%", row=2, column=0)
+        self.live_w_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Woody:", 300, self.live_w_mf, "%", row=2, column=1)
+        tk.Checkbutton(weather_settings, text='Use GSI to compute live moisture', variable=self.use_gsi, command=self.gsi_toggled).grid(row=2, column=2)
+        
         _, self.fms_entry, self.fms_button, self.fms_frame = self.create_file_selector(
-            weather_settings, "Fuel Moisture File:", self.fms_file, [("Fuel Moisture", "*.fms")]
+            self.weather_tab, "Fuel Moisture File:", self.fms_file, [("Fuel Moisture", "*.fms")]
         )
+
         tk.Button(self.fms_frame, text='Generate FMS', command=self.generate_fms).grid(row=0, column=3)
         tk.Button(self.fms_frame, text='Edit FMS', command=self.edit_fms).grid(row=0, column=4)
+
+        conditioning_frame = self.create_frame(self.weather_tab)
+
+
+        tk.Checkbutton(conditioning_frame, text='Condition Dead Fuel Moisture', variable=self.apply_conditioning, command=self.conditioning_toggled).grid(row=0, column = 0)
+        
+        tk.Label(conditioning_frame, text="Conditioning Start Date:").grid(row=1, column=0)
+        self.cond_cal = DateEntry(conditioning_frame, date_pattern="y-mm-dd", background='white')
+        self.cond_cal.grid(row=1, column=1)
+        self.cond_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
+        tk.Label(conditioning_frame, text="Conditioning Start Time:").grid(row=1, column=2)
+        self.cond_hr_box = tk.Spinbox(conditioning_frame, from_=1, to=12, width=5, textvariable=self.cond_start_hr)
+        self.cond_hr_box.grid(row=1, column=3)
+        self.cond_min_box = tk.Spinbox(conditioning_frame, from_=0, to=59, width=5, textvariable=self.cond_start_min)
+        self.cond_min_box.grid(row=1, column=4)
+        self.cond_ampm_box = ttk.Combobox(conditioning_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.cond_start_ampm)
+        self.cond_ampm_box.grid(row=1, column=5)
+
+        self.conditioning_toggled()
 
         self.gsi_toggled()
 
@@ -660,6 +686,13 @@ class SimFolderSelector(FileSelectBase):
         state = 'disabled' if self.use_gsi.get() else 'normal'
         self.live_h_spin.config(state=state)
         self.live_w_spin.config(state=state)
+
+    def conditioning_toggled(self):
+        state = 'normal' if self.apply_conditioning.get() else 'disabled'
+        self.cond_ampm_box.config(state=state)
+        self.cond_hr_box.config(state=state)
+        self.cond_min_box.config(state=state)
+        self.cond_cal.config(state=state)
 
     def setup_model_tab(self):
         # Create a big frame that will hold two columns
@@ -833,6 +866,12 @@ class SimFolderSelector(FileSelectBase):
                 self.end_min.set(0)
                 self.end_ampm.set("AM" if end_dt.hour < 12 else "PM")
 
+                self.cond_cal.set_date(start_dt.date())
+                self.cond_start_hr.set(start_dt.hour % 12 or 12)
+                self.cond_start_min.set(0)
+                self.cond_start_ampm.set("AM" if start_dt.hour < 12 else "PM")
+
+
                 # Update internal datetime values
                 self.update_datetime()
 
@@ -899,6 +938,14 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", "User class must be instance of ControlClass!")
             window.destroy()
 
+    def _sync_conditioning_to_start(self):
+        # mirror the start date/time into the conditioning widgets
+        self.cond_cal.set_date(self.start_cal.get_date())
+        self.cond_start_hr.set(self.start_hour.get())
+        self.cond_start_min.set(self.start_min.get())
+        self.cond_start_ampm.set(self.start_ampm.get())
+        self.update_datetime()
+
     def update_datetime(self, *args):
         """Update datetime values whenever any input field changes"""
         start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
@@ -908,6 +955,14 @@ class SimFolderSelector(FileSelectBase):
         end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
         end_time = time(end_hr, self.end_min.get())
         self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
+
+        if self.apply_conditioning.get():
+            cond_hr = self.convert_to_24_hr_time(self.cond_start_hr.get(), self.cond_start_ampm.get())
+            cond_time = time(cond_hr, self.cond_start_min.get())
+            self.cond_datetime = datetime.combine(self.cond_cal.get_date(), cond_time)
+
+            if self.cond_datetime > self.start_datetime:
+                self.root.after_idle(self._sync_conditioning_to_start)
 
         if self.end_datetime < self.start_datetime:
             # User is likely still working on entering dates, don't limit duration
@@ -957,6 +1012,7 @@ class SimFolderSelector(FileSelectBase):
                 input_type = "OpenMeteo" if self.use_open_meteo.get() else "File",
                 file = self.weather_file.get(),
                 mesh_resolution = self.mesh_resolution.get(),
+                conditioning_start=self.cond_datetime,
                 start_datetime = self.start_datetime,
                 end_datetime = self.end_datetime
              )

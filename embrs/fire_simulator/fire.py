@@ -230,6 +230,7 @@ class FireSim(BaseFireSim):
                 if not cell.fuel.burnable:
                     continue
                 
+                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
                 cell._set_state(CellStates.FIRE)
                 surface_fire(cell)
                 crown_fire(cell, self.fmc)

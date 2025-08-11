@@ -284,10 +284,20 @@ def load_sim_params(cfg_path: str) -> SimParams:
     if start_datetime >= end_datetime:
         raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
 
+
+    cond_iso_datetime = config["Weather"].get("conditioning_start", start_iso_datetime)
+
+    conditioning_start = datetime.fromisoformat(cond_iso_datetime)
+
+    if conditioning_start > start_datetime:
+        conditioning_start = start_datetime
+        raise RuntimeWarning(f"Conditioning start must be before simulation start, no conditioning will occur.")
+
     weather_params = WeatherParams(
         input_type=weather_input_type,
         file=config["Weather"].get("file", None),
         mesh_resolution=mesh_resolution,
+        conditioning_start=conditioning_start,
         start_datetime=start_datetime,
         end_datetime=end_datetime
     )
