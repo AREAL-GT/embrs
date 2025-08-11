@@ -870,7 +870,7 @@ class VizFolderSelector(FileSelectBase):
     :param submit_callback: Function that should be called when the submit button is pressed
     :type submit_callback: Callable
     """
-    def __init__(self, submit_callback: Callable):
+    def __init__(self, normal_callback: Callable, arrival_callback: Callable):
         """Constructor method, populates tk window with all necessary elements and initializes
         necessary variables
         """
@@ -909,13 +909,18 @@ class VizFolderSelector(FileSelectBase):
         self.render_visualization = tk.BooleanVar()
         self.render_visualization.set(True)
 
+        self.arrival_time = tk.BooleanVar()
+        self.arrival_time.set(False)
+        self.arrival_time.trace_add("write", self.toggle_arrival_time)
+
         self.has_agents = False
         self.run_folders = ["No runs available, select a folder"]
 
         self.init_location = False
 
         # Save submit callback function
-        self.submit_callback = submit_callback
+        self.normal_callback = normal_callback
+        self.arrival_callback = arrival_callback
 
         frame = self.create_frame(self.root)
 
@@ -973,11 +978,39 @@ class VizFolderSelector(FileSelectBase):
         self.temp_units_menu = tk.OptionMenu(display_frame, self.temp_units, "Fahrenheit", "Celsius")
         self.temp_units_menu.grid(row=2, column=2, sticky='w')
 
+        # BETA Arrival time
+        arrival_frame = tk.LabelFrame(frame, text="BETA Alternate Visualization", padx=10, pady=5)
+        arrival_frame.grid(row=4, column=0, columnspan=3, sticky='ew', padx=10, pady=5)
+
+        self.arrival_time_checkbox = tk.Checkbutton(
+            arrival_frame,
+            text="Visualize Arrival Time",
+            variable=self.arrival_time
+        )
+
+        self.arrival_time_checkbox.grid(row=0, column=0, sticky='w')
+
         # === Submit Button ===
         self.submit_button = tk.Button(frame, text='Submit', command=self.submit, state='disabled')
-        self.submit_button.grid(row=4, column=0, columnspan=3, pady=10)
+        self.submit_button.grid(row=5, column=0, columnspan=3, pady=10)
 
         self.toggle_video_options()
+
+    def toggle_arrival_time(self, *args):
+        """Disables video options if arrival time plot visualization is selected."""
+        if self.arrival_time.get():
+            # Disable video options completely
+            self.save_video_checkbox.config(state='disabled')
+            self.video_path_field.config(state='disabled')
+            self.vid_path_button.config(state='disabled')
+            self.videoname_field.config(state='disabled')
+            self.frame_rate_spin.config(state='disabled')
+            self.show_viz_checkbox.config(state='disabled')
+        else:
+            # Re-enable video options based on save_video checkbox
+            self.save_video_checkbox.config(state='normal')
+            self.toggle_video_options()
+
 
     def viz_folder_changed(self, *args):
         """Callback function for selecting the log file to be displayed. Checks the file selected
@@ -1151,7 +1184,12 @@ class VizFolderSelector(FileSelectBase):
         if self.has_predictions:
             self.result.prediction_file = self.prediction_file
 
-        self.submit_callback(self.result)
+
+        if self.arrival_time.get():
+            self.arrival_callback(self.result)
+
+        else:
+            self.normal_callback(self.result)
 
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
