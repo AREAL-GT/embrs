@@ -16,6 +16,7 @@ Classes:
 from tqdm import tqdm
 import numpy as np
 import copy
+from concurrent.futures import ThreadPoolExecutor
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
@@ -58,7 +59,7 @@ class FireSim(BaseFireSim):
         - Fire spread is calculated using **Rothermel's fire behavior model**.
         - The simulation tracks both fire progression and suppression efforts.
     """
-    def __init__(self, sim_params: SimParams):
+    def __init__(self, sim_params: SimParams, parallel: bool = False):
         """Initializes the wildfire simulation with input parameters and sets up core tracking structures.
 
         This constructor initializes key attributes related to fire progression, cell state tracking, 
@@ -94,6 +95,10 @@ class FireSim(BaseFireSim):
         self.curr_prediction = None
 
         super().__init__(sim_params)
+
+        # Flag controlling whether burning cell updates are processed in
+        # parallel. The default preserves the original sequential behaviour.
+        self.parallel = parallel
         
         # Log frequency (set to 1 hour by default)
         self._log_freq = int(np.floor(3600 / self._time_step))
@@ -139,36 +144,66 @@ class FireSim(BaseFireSim):
         if self._init_iteration():
             self._finished = True
             return
-        
-        # Loop over surface fires
-        for cell in copy.copy(self._burning_cells):
-            if cell.fully_burning:
-                cell._set_state(CellStates.BURNT)
-                self._burning_cells.remove(cell)
+
+        burning_cells = copy.copy(self._burning_cells)
+
+        if self.parallel:
+            def process(cell: Cell):
+                if cell.fully_burning:
+                    return (cell, [])
+
+                if self.weather_changed or not cell.has_steady_state:
+                    cell._update_moisture(self._curr_weather_idx, self._weather_stream)
+                    self.update_steady_state(cell)
+
+                accelerate(cell, self.time_step)
+                ignitions = self.propagate_fire_parallel(cell)
+                return (cell, ignitions)
+
+            with ThreadPoolExecutor() as executor:
+                results = list(executor.map(process, burning_cells))
+
+            for cell, ignitions in results:
+                if cell.fully_burning:
+                    cell._set_state(CellStates.BURNT)
+                    self._burning_cells.remove(cell)
+                    self._updated_cells[cell.id] = cell
+                    continue
+
+                for r_gamma, gamma, end_pts in ignitions:
+                    self.ignite_neighbors(cell, r_gamma, gamma, end_pts)
+
+                self.remove_neighbors(cell)
                 self._updated_cells[cell.id] = cell
-                # self.update_fuel_in_burning_cell(cell)
-                # No need to compute spread for these cells
-                continue
 
-            # Check if conditions have changed
-            if self.weather_changed or not cell.has_steady_state: 
-                # Update moisture in cell
-                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
+        else:
+            # Loop over surface fires sequentially
+            for cell in burning_cells:
+                if cell.fully_burning:
+                    cell._set_state(CellStates.BURNT)
+                    self._burning_cells.remove(cell)
+                    self._updated_cells[cell.id] = cell
+                    continue
 
-                # Updates the cell's steady-state rate of spread and fireline intensity
-                # Also checks for crown fire initiation
-                self.update_steady_state(cell)
+                # Check if conditions have changed
+                if self.weather_changed or not cell.has_steady_state:
+                    # Update moisture in cell
+                    cell._update_moisture(self._curr_weather_idx, self._weather_stream)
 
-            # Set real time ROS and fireline intensity (vals stored in cell.avg_ros, cell.I_t)
-            accelerate(cell, self.time_step)
+                    # Updates the cell's steady-state rate of spread and fireline intensity
+                    # Also checks for crown fire initiation
+                    self.update_steady_state(cell)
 
-            # Update extent of fire along each direction and check for ignition
-            self.propagate_fire(cell)
+                # Set real time ROS and fireline intensity (vals stored in cell.avg_ros, cell.I_t)
+                accelerate(cell, self.time_step)
 
-            # Remove any neighbors that are no longer burnable
-            self.remove_neighbors(cell)
+                # Update extent of fire along each direction and check for ignition
+                self.propagate_fire(cell)
 
-            self._updated_cells[cell.id] = cell
+                # Remove any neighbors that are no longer burnable
+                self.remove_neighbors(cell)
+
+                self._updated_cells[cell.id] = cell
 
         # Get set of spot fires started in this time step
         if self.model_spotting and self._spot_ign_prob > 0:
