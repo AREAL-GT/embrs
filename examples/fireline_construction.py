@@ -138,7 +138,7 @@ class FirelineConstruction(ControlClass):
             time_step_s=time_step*3,
             cell_size_m=self.fire.cell_size*2,
             dead_mf=0.10,
-            wind_bias_factor=-0.5
+            wind_speed_bias=-0.5
         )
 
         self.pred_model = FirePredictor(pred_input, self.fire)

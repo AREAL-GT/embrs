@@ -59,11 +59,17 @@ class PerrymanSpotting:
         # Calculate the distance from the cell center to each ember
         d = np.sqrt((cell.x_pos - x_coords)**2 + (cell.y_pos - y_coords)**2)
 
-        for i in range(len(d)):
+        # Filter out distances below minimum spotting distance
+        filtered_indices = np.where(d > 50)[0]
+        filtered_d = d[filtered_indices]
+        x_coords = x_coords[filtered_indices]
+        y_coords = y_coords[filtered_indices]
+
+        for i in range(len(filtered_d)):
             ember = {
                 'x': x_coords[i],
                 'y': y_coords[i],
-                'd': d[i]
+                'd': filtered_d[i]
             }
 
             self.embers.append(ember)

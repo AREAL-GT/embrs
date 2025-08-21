@@ -179,6 +179,7 @@ class WeatherParams:
     input_type: Optional[str] = None
     file: Optional[str] = "" # Populated only if user is passing a weather file
     mesh_resolution: Optional[int] = None
+    conditioning_start: Optional[datetime] = None
     start_datetime: Optional[datetime] = None
     end_datetime: Optional[datetime] = None
 
@@ -190,6 +191,10 @@ class SimParams:
     t_step_s: Optional[int] = None
     cell_size: Optional[int] = None
     init_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
+    fuel_moisture_map: Dict[int, List[float]] = field(default_factory=dict)
+    fms_has_live: bool = False
+    live_h_mf: Optional[float] = None
+    live_w_mf: Optional[float] = None
     model_spotting: Optional[bool] = False
     canopy_species: Optional[int] = 5
     dbh_cm: Optional[float] = 20.0
@@ -212,11 +217,13 @@ class PredictorParams:
     live_mf: float = 0.30
     model_spotting: bool = False
     spot_delay_s: float = 1200
-    wind_bias_factor: float = 0
+    wind_speed_bias: float = 0
+    wind_dir_bias: float = 0
     wind_uncertainty_factor: float = 0
+    ros_bias: float = 0
 
     # Advanced uncertainty settings
-    max_wind_speed_bias: float = 1.5 # m/s
+    max_wind_speed_bias: float = 2.5 # m/s
     max_wind_dir_bias: float = 20.0 # deg
     base_wind_spd_std: float = 1.0 # m/s
     base_wind_dir_std: float = 5.0 # deg

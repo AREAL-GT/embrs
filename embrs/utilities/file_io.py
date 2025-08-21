@@ -3,7 +3,7 @@
 
 from tkinter import BOTH, filedialog
 from datetime import datetime, time, timedelta
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Dict, List
 import tkinter.simpledialog as sd
 from tkcalendar import DateEntry
 from tkinter import ttk
@@ -21,6 +21,53 @@ from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, Un
 from embrs.utilities.fire_util import CanopySpecies
 from embrs.models.fuel_models import FuelConstants
 from embrs.base_classes.control_base import ControlClass
+
+
+def read_fms_file(filepath: str) -> Tuple[Dict[int, List[float]], bool]:
+    """Read a FlamMap .fms file.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the .fms file.
+
+    Returns
+    -------
+    Tuple[Dict[int, List[float]], bool]
+        Mapping of fuel model id to moisture values (fractions) and a flag
+        indicating if live fuel moistures were provided.
+    """
+
+    moisture = {}
+    has_live = False
+
+    with open(filepath, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("//"):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            fm = int(parts[0])
+            vals = []
+            for p in parts[1:4]:
+                v = float(p)
+                if v > 1:
+                    v /= 100.0
+                vals.append(v)
+            if len(parts) >= 6:
+                lh = float(parts[4])
+                lw = float(parts[5])
+                if lh > 1:
+                    lh /= 100.0
+                if lw > 1:
+                    lw /= 100.0
+                vals.extend([lh, lw])
+                has_live = True
+            moisture[fm] = vals
+
+    return moisture, has_live
 
 class FileSelectBase:
     """Base class for creating tkinter file and folder selector interfaces
@@ -127,7 +174,7 @@ class FileSelectBase:
                                     row=0, column=0):
         """Creates a frame containing a spinbox with one or two labels."""
         new_frame = tk.Frame(frame)
-        new_frame.grid(row=row, column=column, sticky='w', padx=5, pady=2)
+        new_frame.grid(row=row, column=column, sticky='w', padx=5, pady=5)
 
         tk.Label(new_frame, text=left_label).grid(row=0, column=0, sticky='w')
 
@@ -438,9 +485,18 @@ class SimFolderSelector(FileSelectBase):
         self.map_folder = tk.StringVar()
         self.log_folder = tk.StringVar()
         self.weather_file = tk.StringVar()
+        self.apply_conditioning = tk.BooleanVar(value=False)
+        self.conditioning_start = tk.StringVar()
+        self.cond_start_hr = tk.IntVar(value=12)
+        self.cond_start_min = tk.IntVar(value=0)
+        self.cond_start_ampm = tk.StringVar(value="AM")
         self.init_mf_1hr = tk.DoubleVar(value=6)
         self.init_mf_10hr = tk.DoubleVar(value=7)
         self.init_mf_100hr = tk.DoubleVar(value=8)
+        self.fms_file = tk.StringVar()
+        self.live_h_mf = tk.DoubleVar(value=60)
+        self.live_w_mf = tk.DoubleVar(value=90)
+        self.use_gsi = tk.BooleanVar(value=True)
         self.time_step = tk.IntVar(value=5)
         self.cell_size = tk.IntVar(value=10)
         self.model_spotting = tk.BooleanVar(value=True)
@@ -529,6 +585,37 @@ class SimFolderSelector(FileSelectBase):
         self.create_spinbox_with_two_labels(weather_settings, "Initial Fuel Moisture: 1 hr:", 100, self.init_mf_1hr, "%", row=1, column=0)
         self.create_spinbox_with_two_labels(weather_settings, "10 hr:", 100, self.init_mf_10hr, "%", row=1, column=1)
         self.create_spinbox_with_two_labels(weather_settings, "100 hr:", 100, self.init_mf_100hr, "%", row=1, column=2)
+        self.live_h_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Herbaceous:", 300, self.live_h_mf, "%", row=2, column=0)
+        self.live_w_spin = self.create_spinbox_with_two_labels(weather_settings, "Live Woody:", 300, self.live_w_mf, "%", row=2, column=1)
+        tk.Checkbutton(weather_settings, text='Use GSI to compute live moisture', variable=self.use_gsi, command=self.gsi_toggled).grid(row=2, column=2)
+        
+        _, self.fms_entry, self.fms_button, self.fms_frame = self.create_file_selector(
+            self.weather_tab, "Fuel Moisture File:", self.fms_file, [("Fuel Moisture", "*.fms")]
+        )
+
+        tk.Button(self.fms_frame, text='Generate FMS', command=self.generate_fms).grid(row=0, column=3)
+        tk.Button(self.fms_frame, text='Edit FMS', command=self.edit_fms).grid(row=0, column=4)
+
+        conditioning_frame = self.create_frame(self.weather_tab)
+
+
+        tk.Checkbutton(conditioning_frame, text='Condition Dead Fuel Moisture', variable=self.apply_conditioning, command=self.conditioning_toggled).grid(row=0, column = 0)
+        
+        tk.Label(conditioning_frame, text="Conditioning Start Date:").grid(row=1, column=0)
+        self.cond_cal = DateEntry(conditioning_frame, date_pattern="y-mm-dd", background='white')
+        self.cond_cal.grid(row=1, column=1)
+        self.cond_cal.bind("<<DateEntrySelected>>", lambda e: self.update_datetime())
+        tk.Label(conditioning_frame, text="Conditioning Start Time:").grid(row=1, column=2)
+        self.cond_hr_box = tk.Spinbox(conditioning_frame, from_=1, to=12, width=5, textvariable=self.cond_start_hr)
+        self.cond_hr_box.grid(row=1, column=3)
+        self.cond_min_box = tk.Spinbox(conditioning_frame, from_=0, to=59, width=5, textvariable=self.cond_start_min)
+        self.cond_min_box.grid(row=1, column=4)
+        self.cond_ampm_box = ttk.Combobox(conditioning_frame, values=["AM", "PM"], width=5, state='readonly', textvariable=self.cond_start_ampm)
+        self.cond_ampm_box.grid(row=1, column=5)
+
+        self.conditioning_toggled()
+
+        self.gsi_toggled()
 
         self.map_folder.trace_add("write", self.map_folder_changed)
         self.log_folder.trace_add("write", self.log_folder_changed)
@@ -540,6 +627,72 @@ class SimFolderSelector(FileSelectBase):
         self.end_hour.trace_add("write", self.update_datetime)
         self.end_min.trace_add("write", self.update_datetime)
         self.end_ampm.trace_add("write", self.update_datetime)
+
+    def generate_fms(self):
+        """Generate a stock .fms file using current dead fuel moisture inputs."""
+        if not self.map_folder.get():
+            window = tk.Tk()
+            window.withdraw()
+            tk.messagebox.showwarning("Error", "Select a map folder before generating an FMS file.")
+            window.destroy()
+            return
+
+        with open(os.path.join(self.map_folder.get(), "map_params.pkl"), "rb") as f:
+            map_params = pickle.load(f)
+
+        fuel_map = map_params.lcp_data.fuel_map
+        unique_fuels = np.unique(fuel_map.astype(int))
+
+        save_path = filedialog.asksaveasfilename(defaultextension=".fms", filetypes=[("Fuel Moisture", "*.fms")])
+        if not save_path:
+            return
+
+        with open(save_path, "w") as f:
+            for fm in sorted(unique_fuels):
+                if self.use_gsi.get():
+                    f.write(f"{int(fm)} {self.init_mf_1hr.get():.2f} {self.init_mf_10hr.get():.2f} {self.init_mf_100hr.get():.2f}\n")
+                else:
+                    f.write(
+                        f"{int(fm)} {self.init_mf_1hr.get():.2f} {self.init_mf_10hr.get():.2f} {self.init_mf_100hr.get():.2f} {self.live_h_mf.get():.2f} {self.live_w_mf.get():.2f}\n"
+                    )
+
+    def edit_fms(self):
+        """Open a simple editor for the selected .fms file."""
+        if not self.fms_file.get():
+            tk.messagebox.showwarning("Error", "Select an FMS file to edit.")
+            return
+
+        try:
+            with open(self.fms_file.get(), "r") as f:
+                content = f.read()
+        except Exception as e:
+            tk.messagebox.showwarning("Error", f"Failed to open FMS file: {e}")
+            return
+
+        edit_win = tk.Toplevel(self.root)
+        edit_win.title("Edit FMS")
+        text = tk.Text(edit_win, width=60, height=20)
+        text.insert("1.0", content)
+        text.pack(fill=BOTH, expand=True)
+
+        def save_and_close():
+            with open(self.fms_file.get(), "w") as f:
+                f.write(text.get("1.0", tk.END))
+            edit_win.destroy()
+
+        tk.Button(edit_win, text="Save", command=save_and_close).pack()
+
+    def gsi_toggled(self):
+        state = 'disabled' if self.use_gsi.get() else 'normal'
+        self.live_h_spin.config(state=state)
+        self.live_w_spin.config(state=state)
+
+    def conditioning_toggled(self):
+        state = 'normal' if self.apply_conditioning.get() else 'disabled'
+        self.cond_ampm_box.config(state=state)
+        self.cond_hr_box.config(state=state)
+        self.cond_min_box.config(state=state)
+        self.cond_cal.config(state=state)
 
     def setup_model_tab(self):
         # Create a big frame that will hold two columns
@@ -713,6 +866,12 @@ class SimFolderSelector(FileSelectBase):
                 self.end_min.set(0)
                 self.end_ampm.set("AM" if end_dt.hour < 12 else "PM")
 
+                self.cond_cal.set_date(start_dt.date())
+                self.cond_start_hr.set(start_dt.hour % 12 or 12)
+                self.cond_start_min.set(0)
+                self.cond_start_ampm.set("AM" if start_dt.hour < 12 else "PM")
+
+
                 # Update internal datetime values
                 self.update_datetime()
 
@@ -779,6 +938,14 @@ class SimFolderSelector(FileSelectBase):
             tk.messagebox.showwarning("Warning", "User class must be instance of ControlClass!")
             window.destroy()
 
+    def _sync_conditioning_to_start(self):
+        # mirror the start date/time into the conditioning widgets
+        self.cond_cal.set_date(self.start_cal.get_date())
+        self.cond_start_hr.set(self.start_hour.get())
+        self.cond_start_min.set(self.start_min.get())
+        self.cond_start_ampm.set(self.start_ampm.get())
+        self.update_datetime()
+
     def update_datetime(self, *args):
         """Update datetime values whenever any input field changes"""
         start_hr = self.convert_to_24_hr_time(self.start_hour.get(), self.start_ampm.get())
@@ -788,6 +955,14 @@ class SimFolderSelector(FileSelectBase):
         end_hr = self.convert_to_24_hr_time(self.end_hour.get(), self.end_ampm.get())
         end_time = time(end_hr, self.end_min.get())
         self.end_datetime = datetime.combine(self.end_cal.get_date(), end_time)
+
+        if self.apply_conditioning.get():
+            cond_hr = self.convert_to_24_hr_time(self.cond_start_hr.get(), self.cond_start_ampm.get())
+            cond_time = time(cond_hr, self.cond_start_min.get())
+            self.cond_datetime = datetime.combine(self.cond_cal.get_date(), cond_time)
+
+            if self.cond_datetime > self.start_datetime:
+                self.root.after_idle(self._sync_conditioning_to_start)
 
         if self.end_datetime < self.start_datetime:
             # User is likely still working on entering dates, don't limit duration
@@ -837,9 +1012,26 @@ class SimFolderSelector(FileSelectBase):
                 input_type = "OpenMeteo" if self.use_open_meteo.get() else "File",
                 file = self.weather_file.get(),
                 mesh_resolution = self.mesh_resolution.get(),
+                conditioning_start=self.cond_datetime,
                 start_datetime = self.start_datetime,
                 end_datetime = self.end_datetime
              )
+
+            fms_map = {}
+            fms_has_live = False
+            live_h = None
+            live_w = None
+            if self.fms_file.get():
+                try:
+                    fms_map, fms_has_live = read_fms_file(self.fms_file.get())
+                except Exception as e:
+                    tk.messagebox.showwarning("Error", f"Failed to read FMS file: {e}")
+                    return
+            else:
+                if not self.use_gsi.get():
+                    live_h = self.live_h_mf.get() / 100
+                    live_w = self.live_w_mf.get() / 100
+                    fms_has_live = True
 
             sim_params = SimParams(
                 map_params = map_params,
@@ -847,6 +1039,10 @@ class SimFolderSelector(FileSelectBase):
                 weather_input = weather_input,
                 t_step_s = self.time_step.get(),
                 init_mf = [self.init_mf_1hr.get()/100, self.init_mf_10hr.get()/100, self.init_mf_100hr.get()/100],
+                fuel_moisture_map = fms_map,
+                fms_has_live = fms_has_live,
+                live_h_mf = live_h,
+                live_w_mf = live_w,
                 model_spotting = self.model_spotting.get(),
                 canopy_species = self.canopy_species,
                 dbh_cm = self.dbh_cm.get(),
@@ -870,7 +1066,7 @@ class VizFolderSelector(FileSelectBase):
     :param submit_callback: Function that should be called when the submit button is pressed
     :type submit_callback: Callable
     """
-    def __init__(self, submit_callback: Callable):
+    def __init__(self, normal_callback: Callable, arrival_callback: Callable):
         """Constructor method, populates tk window with all necessary elements and initializes
         necessary variables
         """
@@ -909,13 +1105,18 @@ class VizFolderSelector(FileSelectBase):
         self.render_visualization = tk.BooleanVar()
         self.render_visualization.set(True)
 
+        self.arrival_time = tk.BooleanVar()
+        self.arrival_time.set(False)
+        self.arrival_time.trace_add("write", self.toggle_arrival_time)
+
         self.has_agents = False
         self.run_folders = ["No runs available, select a folder"]
 
         self.init_location = False
 
         # Save submit callback function
-        self.submit_callback = submit_callback
+        self.normal_callback = normal_callback
+        self.arrival_callback = arrival_callback
 
         frame = self.create_frame(self.root)
 
@@ -973,11 +1174,39 @@ class VizFolderSelector(FileSelectBase):
         self.temp_units_menu = tk.OptionMenu(display_frame, self.temp_units, "Fahrenheit", "Celsius")
         self.temp_units_menu.grid(row=2, column=2, sticky='w')
 
+        # BETA Arrival time
+        arrival_frame = tk.LabelFrame(frame, text="BETA Alternate Visualization", padx=10, pady=5)
+        arrival_frame.grid(row=4, column=0, columnspan=3, sticky='ew', padx=10, pady=5)
+
+        self.arrival_time_checkbox = tk.Checkbutton(
+            arrival_frame,
+            text="Visualize Arrival Time",
+            variable=self.arrival_time
+        )
+
+        self.arrival_time_checkbox.grid(row=0, column=0, sticky='w')
+
         # === Submit Button ===
         self.submit_button = tk.Button(frame, text='Submit', command=self.submit, state='disabled')
-        self.submit_button.grid(row=4, column=0, columnspan=3, pady=10)
+        self.submit_button.grid(row=5, column=0, columnspan=3, pady=10)
 
         self.toggle_video_options()
+
+    def toggle_arrival_time(self, *args):
+        """Disables video options if arrival time plot visualization is selected."""
+        if self.arrival_time.get():
+            # Disable video options completely
+            self.save_video_checkbox.config(state='disabled')
+            self.video_path_field.config(state='disabled')
+            self.vid_path_button.config(state='disabled')
+            self.videoname_field.config(state='disabled')
+            self.frame_rate_spin.config(state='disabled')
+            self.show_viz_checkbox.config(state='disabled')
+        else:
+            # Re-enable video options based on save_video checkbox
+            self.save_video_checkbox.config(state='normal')
+            self.toggle_video_options()
+
 
     def viz_folder_changed(self, *args):
         """Callback function for selecting the log file to be displayed. Checks the file selected
@@ -1151,7 +1380,12 @@ class VizFolderSelector(FileSelectBase):
         if self.has_predictions:
             self.result.prediction_file = self.prediction_file
 
-        self.submit_callback(self.result)
+
+        if self.arrival_time.get():
+            self.arrival_callback(self.result)
+
+        else:
+            self.normal_callback(self.result)
 
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling

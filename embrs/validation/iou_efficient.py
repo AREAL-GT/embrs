@@ -10,8 +10,58 @@ import numpy as np
 import pandas as pd
 import json
 import pickle
+from shapely import affinity
 
-max_time_hr = np.linspace(0.5, 60, 6)
+max_time_hr = np.linspace(0, 60, 9)
+
+def extract_raster_polygons_once(full_raster_path, sim_bounds, max_sim_time, debug=False):
+    cropped_data, cropped_transform, crs, nodata = crop_raster_to_sim(
+        full_raster_path, sim_bounds
+    )
+
+    new_transform = cropped_transform * Affine.translation(0, 0)
+
+    resampled_data, transform = resample_raster(
+        cropped_data, crs, new_transform, 10, Resampling.bilinear, nodata
+    )
+
+    data = np.flipud(resampled_data)
+
+    # Extract all shapes once
+    results = list(shapes(data, mask=(data != nodata)))
+
+    polygons_with_time = []
+    for geom, value in results:
+        if value < 0 or value > max_sim_time * 60:
+            continue  # Ignore out-of-range or NaNs
+        poly = shape(geom)
+        scaled_coords = [(x * 10, y * 10) for x, y in poly.exterior.coords]
+        transformed_polygon = Polygon(scaled_coords)
+        polygons_with_time.append((transformed_polygon, value))
+    
+    return polygons_with_time
+
+
+def extract_hexagons_once(log_path, metadata_path, max_time_hr):
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
+
+    cell_size = metadata['inputs']['cell size']
+
+    df = pd.read_parquet(log_path, columns=["x", "y", "arrival_time"])
+    df = df[df["arrival_time"].notnull()]
+    df = df[df["arrival_time"] >= 0]
+    df = df[df["arrival_time"] != -999]
+    df = df[df["arrival_time"] <= max_time_hr * 60]
+    df = df.sort_values("arrival_time").drop_duplicates(subset=["x", "y"], keep="last")
+
+    hexagons_with_time = []
+    for _, row in df.iterrows():
+        hexagon = create_hexagon(row["x"], row["y"], cell_size)
+        hexagons_with_time.append((hexagon, row["arrival_time"]))
+    
+    return hexagons_with_time
+
 
 def plot_raster_and_sim_bounds(raster_bounds, sim_bounds):
     fig, ax = plt.subplots()
@@ -249,13 +299,15 @@ def plot_polygons_frame(ax, polys, title=""):
     ax.set_aspect('equal')
     ax.set_title(title)
 
-# Create video writer
-output_path = "polygon_overlap.mp4"
-metadata = dict(title='Polygon IOU Over Time', artist='Rui', comment='Sim vs Raster')
-writer = FFMpegWriter(fps=2, metadata=metadata)
+# # Create video writer
+# output_path = "polygon_overlap.mp4"
+# metadata = dict(title='Polygon IOU Over Time', artist='Rui', comment='Sim vs Raster')
+# writer = FFMpegWriter(fps=2, metadata=metadata)
 
-fig, ax = plt.subplots()
-ious = []
+# fig, ax = plt.subplots()
+# plt.tight_layout()
+# fig.subplots_adjust(top=0.92, left=0.02, right=1.0, bottom=0.06)
+# ious = []
 
 
 # # Example usage
@@ -280,36 +332,122 @@ sim_bounds = (bounding_box.left, bounding_box.bottom, bounding_box.right, boundi
 
 ious = []
 
-with writer.saving(fig, output_path, dpi=150):
-    for tm in max_time_hr:
-        raster_polygon = raster_to_polygon_in_sim_coords(
-            full_raster_path=tif_file,
-            sim_bounds=sim_bounds,
-            max_time=tm
-        )
+# Preprocess once
+max_time_max = max(max_time_hr)
+raster_polygons_with_time = extract_raster_polygons_once(
+    full_raster_path=tif_file, sim_bounds=sim_bounds, max_sim_time=max_time_max
+)
 
-        log_polygon = cell_log_to_hex_polygons(
-            log_file, metadata_path, map_params_path, tm
-        )
+hexagons_with_time = extract_hexagons_once(
+    log_file, metadata_path, max_time_max
+)
 
-        intersection_area = log_polygon.intersection(raster_polygon).area
-        union_area = log_polygon.union(raster_polygon).area
-        iou = intersection_area / union_area
+ious = []
 
-        ious.append(iou)
-        print(f"IOU @ {tm:.1f} hr: {iou:.3f}")
+# with writer.saving(fig, output_path, dpi=150):
+#     for tm in max_time_hr:
+#         raster_polygons = [poly for poly, val in raster_polygons_with_time if val <= tm * 60]
+#         sim_polygons = [poly for poly, val in hexagons_with_time if val <= tm * 60]
 
-        # title = f"Simulation Time: {tm:.1f} hr | Jaccard Similarity = {iou:.3f}"
-        # plot_polygons_frame(ax, [raster_polygon, log_polygon], title=title)
-        # writer.grab_frame()
+#         if not raster_polygons or not sim_polygons:
+#             ious.append(0)
+#             continue
+
+#         raster_union = unary_union(raster_polygons)
+#         sim_union = unary_union(sim_polygons)
+
+#         intersection_area = sim_union.intersection(raster_union).area
+#         union_area = sim_union.union(raster_union).area
+#         iou = intersection_area / union_area if union_area != 0 else 0
+
+#         ious.append(iou)
+#         print(f"IOU @ {tm:.1f} hr: {iou:.3f}")
+
+#         # Optional: plot for video
+#         plot_polygons_frame(ax, [raster_union, sim_union], title=f"Sim Time: {tm:.1f}hr | Jaccard Similarity: {iou:.3f}")
+#         writer.grab_frame()
+
+# plt.show()
+
+# plt.plot(max_time_hr, ious)
+# plt.title("Jaccard Similarity vs. Simulation Time")
+# plt.xlabel("Simulation Time (hr)")
+# plt.ylabel("Jaccard Similarity")
+
+# plt.ylim([0.5, 1.0])
+
+# plt.show()
+
+# # Sample arrival times for scatter plotting
+# raster_pts = [poly.centroid for poly, val in raster_polygons_with_time]
+# raster_times = [val for poly, val in raster_polygons_with_time]  # convert min to hr
+
+# sim_pts = [poly.centroid for poly, val in hexagons_with_time]
+# sim_times = [val for poly, val in hexagons_with_time]  # convert min to hr
+
+# # Plot side-by-side
+# fig, axs = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+# fig.suptitle("Arrival Time Comparison", fontsize=16)
+
+# sc1 = axs[0].scatter([pt.x for pt in sim_pts], [pt.y for pt in sim_pts],
+#                      c=sim_times, cmap='viridis', s=2)
+# axs[0].set_title('EMBRS')
+# axs[0].set_aspect('equal')
+
+# sc2 = axs[1].scatter([pt.x for pt in raster_pts], [pt.y for pt in raster_pts],
+#                      c=raster_times, cmap='viridis', s=2)
+# axs[1].set_title('FARSITE')
+# axs[1].set_aspect('equal')
+
+# # Colorbar (shared between both or just one)
+# cbar = fig.colorbar(sc2, ax=axs[1], orientation='vertical', fraction=0.046, pad=0.04)
+# cbar.set_label("Arrival Time (minutes)")
+
+# plt.tight_layout(rect=[0, 0, 1, 0.95])
+# plt.show()
 
 
+from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.collections import PatchCollection
 
-plt.plot(max_time_hr, ious)
-plt.title("Jaccard Similarity vs. Simulation Time")
-plt.xlabel("Simulation Time (hr)")
-plt.ylabel("Jaccard Similarity")
+def plot_polygons_with_time(ax, polygons_with_time, title):
+    patches = []
+    colors = []
 
-plt.ylim([0.5, 1.0])
+    for poly, val in polygons_with_time:
+        
+        scale_factor = 1.5  # Increase slightly to fill in gaps
+        poly_scaled = affinity.scale(poly, xfact=scale_factor, yfact=scale_factor, origin='center')
 
+        if poly_scaled.is_empty:
+            continue
+        coords = np.array(poly_scaled.exterior.coords)
+        patches.append(MplPolygon(coords, closed=True))
+        colors.append(val)
+
+    p = PatchCollection(patches, cmap='viridis', edgecolor='none', linewidth=0.0)
+    p.set_array(np.array(colors))
+    ax.add_collection(p)
+    ax.set_title(title)
+    ax.set_aspect('equal')
+    
+    # Autoscale view
+    ax.autoscale_view()
+    return p  # return for colorbar
+
+# Create side-by-side figure
+fig, axs = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
+fig.suptitle("ATA: 0.922 | Final Jaccard: 0.719", fontsize=16, y=0.96)
+
+# Add polygon collections
+p1 = plot_polygons_with_time(axs[0], hexagons_with_time, "EMBRS")
+p2 = plot_polygons_with_time(axs[1], raster_polygons_with_time, "FARSITE")
+
+# Shared colorbar from one of the collections
+cbar = fig.colorbar(p2, ax=axs[1], orientation='vertical', fraction=0.046, pad=0.04)
+cbar.set_label("Arrival Time (minutes)")
+
+plt.tight_layout(rect=[0, 0, 1, 0.92])
+plt.subplots_adjust(hspace=0)
 plt.show()
+

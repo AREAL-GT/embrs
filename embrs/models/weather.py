@@ -14,10 +14,12 @@ from embrs.utilities.unit_conversions import *
 
 # TODO: Document this file
 
+
 class WeatherStream:
-    def __init__(self, params: WeatherParams, geo: GeoInfo):
+    def __init__(self, params: WeatherParams, geo: GeoInfo, use_gsi: bool = True):
         self.params = params
         self.geo = geo
+        self.use_gsi = use_gsi
         input_type = params.input_type
 
         if input_type == "OpenMeteo":
@@ -38,6 +40,8 @@ class WeatherStream:
         local_tz = pytz.timezone(self.geo.timezone)
 
         # Buffer times and format for OpenMeteo
+        conditioning_start = self.params.conditioning_start
+        conditioning_start = local_tz.localize(conditioning_start)
         start_datetime = self.params.start_datetime
         start_datetime = local_tz.localize(start_datetime)
         buffered_start = start_datetime - timedelta(days=56)
@@ -56,8 +60,7 @@ class WeatherStream:
             "end_date": end_datetime_utc.date().strftime("%Y-%m-%d"),
             "hourly": ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "relative_humidity_2m", "cloud_cover", "shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance", "rain"],
             "wind_speed_unit": "ms",
-            "temperature_unit": "fahrenheit",
-            "timezone": "auto"
+            "temperature_unit": "fahrenheit"
         }
         responses = openmeteo.weather_api(url, params=api_input)
         response = responses[0]
@@ -81,7 +84,7 @@ class WeatherStream:
             end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
             freq=pd.Timedelta(seconds=hourly.Interval()),
             inclusive="left"
-        ).tz_localize(local_tz)
+        ).tz_localize('UTC').tz_convert(local_tz)
 
         self.times = pd.date_range(hourly_data["date"][0], hourly_data["date"][-1], freq='h', tz=local_tz)
 
@@ -100,16 +103,26 @@ class WeatherStream:
         hourly_data["solar_zenith"] = solpos["zenith"].values
         hourly_data["solar_azimuth"] = solpos["azimuth"].values
 
-        # Compute the GSI
-        # Use a 28-day period before the start of the simulation to calculate GSI (56-day for rain)
-        gsi = self.calc_GSI(hourly_data, buffered_start, start_datetime)
-        
-        # Use GSI information to determine what to set live fuel moistures to
-        self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+        if self.use_gsi:
+            # Compute the GSI
+            # Use a 28-day period before the start of the simulation to calculate GSI (56-day for rain)
+            gsi = self.calc_GSI(hourly_data, buffered_start, start_datetime)
 
-        hourly = filter_hourly_data(hourly_data, start_datetime, end_datetime)
+            # Use GSI information to determine what to set live fuel moistures to
+            self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+        else:
+            self.live_h_mf = None
+            self.live_w_mf = None
+
+        hourly = filter_hourly_data(hourly_data, conditioning_start, end_datetime)
+        self.stream_times = pd.DatetimeIndex(hourly["date"])
         self.stream = list(self.generate_stream(hourly))
-        
+
+        try:
+            self.sim_start_idx = self.stream_times.get_loc(start_datetime)
+        except KeyError:
+            self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
+
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
 
@@ -194,6 +207,7 @@ class WeatherStream:
 
         # ── Step 3: Fetch irradiance from Open-Meteo ─────────────────
         # Use buffer around sim dates
+        conditioning_start = local_tz.localize(self.params.conditioning_start)
         start_datetime = local_tz.localize(self.params.start_datetime)
         end_datetime = local_tz.localize(self.params.end_datetime)
 
@@ -262,42 +276,48 @@ class WeatherStream:
         df["solar_zenith"] = solpos["zenith"].values
         df["solar_azimuth"] = solpos["azimuth"].values
 
-        # if skip_gis:
-        # # TODO: actually set this up
-        # # TODO: apply user defined moisture values
-        #     pass
-        # else:
+        if self.use_gsi:
+            # Determine how far back we can go
+            min_date_in_wxs = df.index.min()
+            desired_start = start_datetime - timedelta(days=56)
+            data_start = max(min_date_in_wxs, desired_start)
 
-        # Determine how far back we can go
-        min_date_in_wxs = df.index.min()
-        desired_start = start_datetime - timedelta(days=56)
-        data_start = max(min_date_in_wxs, desired_start)
+            # Calculate GSI
+            gsi = self.calc_GSI(
+                {
+                    "date": df.index,
+                    "temperature": df["temperature"].values,
+                    "rel_humidity": df["rel_humidity"].values,
+                    "rain": df["rain"].values,
+                },
+                data_start,
+                start_datetime
+            )
 
-        # Calculate GSI
-        gsi = self.calc_GSI(
-            {
-                "date": df.index,
-                "temperature": df["temperature"].values,
-                "rel_humidity": df["rel_humidity"].values,
-                "rain": df["rain"].values,
-            },
-            data_start,
-            start_datetime
-        )
-
-        if gsi < 0:
-            # Set to dormant values
-            self.live_h_mf = 0.3
-            self.live_w_mf = 0.6
+            if gsi < 0:
+                # Set to dormant values
+                self.live_h_mf = 0.3
+                self.live_w_mf = 0.6
+            else:
+                self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
         else:
-            self.live_h_mf, self.live_w_mf = self.set_live_moistures(gsi)
+            self.live_h_mf = None
+            self.live_w_mf = None
         
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
 
         # ── Step 8: Package final stream ─────────────────────────────
         df["date"] = df.index
-        hourly_data = filter_hourly_data(df, start_datetime, end_datetime)
+        hourly_data = filter_hourly_data(df, conditioning_start, end_datetime)
+        self.stream_times = pd.DatetimeIndex(hourly_data["date"])
+
+        try:
+            self.sim_start_idx = self.stream_times.get_loc(start_datetime)
+        except KeyError:
+            self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
+
+
         self.stream = list(self.generate_stream(hourly_data))
 
         # ── Step 9: Set metadata attributes ──────────────────────────
@@ -366,8 +386,12 @@ class WeatherStream:
             raise ValueError(f"Unknown units: {units}")
 
         # Set live moisture values
-        self.live_h_mf = 1.4
-        self.live_w_mf = 1.25
+        if self.use_gsi:
+            self.live_h_mf = 1.4
+            self.live_w_mf = 1.25
+        else:
+            self.live_h_mf = None
+            self.live_w_mf = None
 
         # Set Foliar moisture content to 100
         self.fmc = 100

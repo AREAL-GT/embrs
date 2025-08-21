@@ -22,4 +22,4 @@ class ParquetWriter:
         self.counter += 1
 
         table = pa.Table.from_pandas(df)
-        pq.write_table(table, file_path, compression='brotli')
+        pq.write_table(table, file_path, compression='snappy')

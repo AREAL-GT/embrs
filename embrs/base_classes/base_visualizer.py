@@ -27,8 +27,7 @@ class BaseVisualizer:
             mpl.use('Agg')  # Use a non-interactive backend if not rendering
 
         else:
-            # TODO: need to find a better backend, this one is so annoying
-            mpl.use('QtAgg')
+            mpl.use('tkAgg')
 
         self.grid_height = params.sim_shape[0]
         self.grid_width = params.sim_shape[1]
@@ -310,7 +309,7 @@ class BaseVisualizer:
                 if road_color not in added_colors and self.show_legend:
                     added_colors.add(road_color)
                     legend_patch = mpatches.Patch(color=road_color, label=f"Road - {road_type}")
-                    self.legend_elements.append((204 + np.where(road_type == rc.road_types)[0][0], legend_patch))
+                    self.legend_elements.append((204 + np.where(np.array(rc.major_road_types) == road_type)[0][0], legend_patch))
 
         # === Firebreaks ===
         for fire_break, break_width, _ in self.fire_breaks:
@@ -387,7 +386,7 @@ class BaseVisualizer:
         if not time_steps:
             return
 
-        cmap = mpl.cm.get_cmap("Oranges_r")
+        cmap = mpl.cm.get_cmap("viridis")
         norm = plt.Normalize(time_steps[0], time_steps[-1])
 
         # Collect all points and their corresponding times
@@ -401,5 +400,5 @@ class BaseVisualizer:
         if all_points:
             x, y = zip(*all_points)
             self.prediction_scatter = self.h_ax.scatter(x, y, c=all_times, cmap=cmap, norm=norm, 
-                                                        alpha=0.3, zorder=1)
+                                                        s=1, zorder=1)
             self.fig.canvas.draw()

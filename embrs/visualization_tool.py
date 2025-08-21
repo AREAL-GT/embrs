@@ -3,6 +3,9 @@ from embrs.base_classes.base_visualizer import BaseVisualizer
 from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInputs
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry, PredictionEntry
 from embrs.utilities.file_io import VizFolderSelector
+from shapely.geometry import Polygon
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 from shapely.geometry import LineString
 import matplotlib.animation as animation
@@ -158,6 +161,80 @@ class PlaybackVisualizer(BaseVisualizer):
 
         self.close()
 
+
+    def extract_sim_hexagons_and_times(self):
+        """
+        Extract hexagon geometries and arrival times from sim logs.
+
+        Returns:
+            hexagons (list of Polygon)
+            arrival_times (list of float)
+            final_time (float): max arrival time in seconds
+        """
+        
+
+        # Load and filter logs
+        df = pd.read_parquet(self.log_file, columns=["x", "y", "arrival_time"])
+        df = df[(df["arrival_time"].notnull()) &
+                (df["arrival_time"] >= 0)]
+        df = df.sort_values("arrival_time").drop_duplicates(subset=["x", "y"], keep="last")
+
+        # Translate local (0,0)-based sim coordinates to UTM
+        df["x_global"] = df["x"]
+        df["y_global"] = df["y"] 
+
+        hexagons = [
+            create_hexagon(row["x_global"], row["y_global"], self.cell_size)
+            for _, row in df.iterrows()
+        ]
+
+        arrival_times = df["arrival_time"].tolist()
+        return hexagons, arrival_times
+
+    def display_arrival(self):
+        hexes, times = self.extract_sim_hexagons_and_times()
+        
+        pts = [poly.centroid for poly in hexes]
+
+        cmap = mpl.cm.get_cmap("viridis")
+        norm = plt.Normalize(np.nanmin(times), np.nanmax(times))
+
+        sc = self.h_ax.scatter([pt.x for pt in pts], [pt.y for pt in pts], c=times, cmap=cmap, norm=norm, s=5)
+        self.fig.colorbar(sc, ax=self.h_ax, label='Arrival Time (mins)', shrink=0.75)        
+        self.fig.canvas.draw()
+
+
+
+        # df = pd.read_parquet(self.prediction_file)
+
+        # # Convert back from string to original dict[int, Tuple[int, int]]
+        # df["prediction"] = df["prediction"].apply(
+        #     lambda s: {int(k): tuple(v) for k, v in json.loads(s).items()})
+
+        # predictions = [PredictionEntry(**row.to_dict()) for _, row in df.iterrows()]
+
+        # output = predictions[-1].prediction
+
+        # times = sorted(output.keys())
+        
+        # all_points = []
+        # all_times = []
+        # for time in times:
+        #     points = output[time]
+        #     all_points.extend(points)
+        #     all_times.extend([time] * len(points))
+
+        # cmap = mpl.cm.get_cmap("viridis")
+        # norm = plt.Normalize(np.nanmin(times), np.nanmax(times))
+
+        # x, y = zip(*all_points)
+        # sc = self.h_ax.scatter(x, y, c=all_times, cmap=cmap, norm=norm, s=5)
+        # self.fig.colorbar(sc, ax=self.h_ax, label='Arrival Time (mins)', shrink=0.75)        
+        # self.fig.canvas.draw()
+
+
+
+
     def get_entries_between(self, start_time: float, end_time: float):
         agents = []
         actions = []
@@ -198,13 +275,25 @@ class PlaybackVisualizer(BaseVisualizer):
                 self.visualize_prediction(output)
 
         return entries, agents, actions
+    
+def create_hexagon(center_x, center_y, radius):
+    angles = np.linspace(0, 2 * np.pi, 7)[:-1] + np.pi / 6
+    x_vertices = center_x + radius * np.cos(angles)
+    y_vertices = center_y + radius * np.sin(angles)
+    return Polygon(zip(x_vertices, y_vertices))
+
 
 def run(params: PlaybackVisualizerParams):
     viz = PlaybackVisualizer(params)
     viz.run_animation()
 
+def display(params: PlaybackVisualizerParams):
+    viz = PlaybackVisualizer(params)
+    
+    viz.display_arrival()
+
 def main():
-    folder_selector = VizFolderSelector(run)
+    folder_selector = VizFolderSelector(run, display)
     folder_selector.run()
 
 if __name__ == "__main__":

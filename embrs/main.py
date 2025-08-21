@@ -8,7 +8,7 @@ import copy
 import json
 import os
 import pickle
-from typing import Tuple
+from typing import Tuple, Dict, List
 from tqdm import tqdm
 import argparse
 import configparser
@@ -16,7 +16,7 @@ from datetime import datetime
 from embrs.fire_simulator.visualizer import RealTimeVisualizer
 from embrs.utilities.logger import Logger
 from embrs.fire_simulator.fire import FireSim
-from embrs.utilities.file_io import SimFolderSelector, LoaderWindow
+from embrs.utilities.file_io import SimFolderSelector, LoaderWindow, read_fms_file
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.base_classes.control_base import ControlClass
 from embrs.utilities.data_classes import SimParams, WeatherParams
@@ -284,16 +284,46 @@ def load_sim_params(cfg_path: str) -> SimParams:
     if start_datetime >= end_datetime:
         raise ValueError(f"Error in {cfg_path}: Start datetime must be before end datetime.")
 
+
+    cond_iso_datetime = config["Weather"].get("conditioning_start", start_iso_datetime)
+
+    conditioning_start = datetime.fromisoformat(cond_iso_datetime)
+
+    if conditioning_start > start_datetime:
+        conditioning_start = start_datetime
+        raise RuntimeWarning(f"Conditioning start must be before simulation start, no conditioning will occur.")
+
     weather_params = WeatherParams(
         input_type=weather_input_type,
         file=config["Weather"].get("file", None),
         mesh_resolution=mesh_resolution,
+        conditioning_start=conditioning_start,
         start_datetime=start_datetime,
         end_datetime=end_datetime
     )
 
-    init_mf_list_str = config["Weather"].get("init_mf", "0.06, 0.07, 0.08")
-    init_mf_list = [float(val.strip()) for val in init_mf_list_str.split(",")]
+    fms_path = config["Weather"].get("fuel_moisture_file", None)
+    fms_map: Dict[int, List[float]] = {}
+    fms_has_live = False
+    live_h_mf = None
+    live_w_mf = None
+    if fms_path:
+        fms_map, fms_has_live = read_fms_file(fms_path)
+        init_mf_list = [0.06, 0.07, 0.08]
+    else:
+        init_mf_list_str = config["Weather"].get("init_mf", "0.06, 0.07, 0.08")
+        init_mf_list = [float(val.strip()) for val in init_mf_list_str.split(",")]
+        use_gsi = config["Weather"].getboolean("use_gsi", True)
+        if not use_gsi:
+            live_h_mf = config["Weather"].getfloat("live_herb_mf", None)
+            live_w_mf = config["Weather"].getfloat("live_woody_mf", None)
+            if live_h_mf is None or live_w_mf is None:
+                raise ValueError(f"Error in {cfg_path}: 'live_herb_mf' and 'live_woody_mf' must be specified when use_gsi is False.")
+            if live_h_mf > 1:
+                live_h_mf /= 100.0
+            if live_w_mf > 1:
+                live_w_mf /= 100.0
+            fms_has_live = True
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
     log_folder = config["Simulation"].get("log_folder", None)
@@ -335,6 +365,10 @@ def load_sim_params(cfg_path: str) -> SimParams:
         t_step_s=t_step_s,
         cell_size=cell_size,
         init_mf=init_mf_list,
+        fuel_moisture_map=fms_map,
+        fms_has_live=fms_has_live,
+        live_h_mf=live_h_mf,
+        live_w_mf=live_w_mf,
         model_spotting=model_spotting,
         canopy_species=canopy_species,
         dbh_cm=dbh_cm,

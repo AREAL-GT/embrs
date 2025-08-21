@@ -160,7 +160,7 @@ def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, f
             input_speed_units=input_speed_units,
             temperature_units=temperature_units
         )
-        for i, entry in enumerate(weather.stream)
+        for i, entry in enumerate(weather.stream[weather.sim_start_idx:])
     ]
     # Use multiprocessing Pool to parallelize
     num_tasks = len(tasks)
