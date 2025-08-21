@@ -7,7 +7,7 @@ TODO: fill in
 """
 
 from shapely.geometry import Point, Polygon, LineString
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Dict
 from tqdm import tqdm
 import numpy as np
 import pickle
@@ -1671,7 +1671,7 @@ class BaseFireSim:
         return self._cell_grid
 
     @property
-    def cell_dict(self) -> dict:
+    def cell_dict(self) -> Dict[int, Cell]:
         """Dictionary mapping cell IDs to their respective :class:`~fire_simulator.cell.Cell` instances.
         """
         return self._cell_dict
@@ -1737,6 +1737,15 @@ class BaseFireSim:
         Measured as the distance in meters between two parallel sides of the regular hexagon cells.
         """
         return self._cell_size
+    
+    @property
+    def burning_cells(self) -> List[Cell]:
+        """List of currently burning cells at the time called.
+
+        Returns:
+            List[Cell]: All cell objects currently in the FIRE state.
+        """
+        return self._burning_cells
 
     @property
     def sim_duration(self) -> float:
