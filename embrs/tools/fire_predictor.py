@@ -106,7 +106,7 @@ class FirePredictor(BaseFireSim):
 
         return output
     
-    def _set_prediction_forecast(self, cell):
+    def _set_prediction_forecast(self, cell: Cell):
         x_wind = max(cell.x_pos - self.wind_xpad, 0)
         y_wind = max(cell.y_pos - self.wind_ypad, 0)
 
@@ -199,7 +199,7 @@ class FirePredictor(BaseFireSim):
                 if cell._crown_status != CrownStatus.NONE:
                     self.crown_fire[(cell.x_pos, cell.y_pos)] = cell._crown_status
                 
-                self.fli_kw_m[(cell.x_pos, cell.y_pos)] = np.max(cell.I_ss)
+                self.fli_kw_m[(cell.x_pos, cell.y_pos)] = BTU_ft_min_to_kW_m(np.max(cell.I_ss))
                 self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
                 self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
 

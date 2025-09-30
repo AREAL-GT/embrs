@@ -34,6 +34,7 @@ def surface_fire(cell: Cell):
 
     r_list, I_list = calc_vals_for_all_directions(cell, R_h, I_r, alpha, e)
 
+    # r in m/s, I in btu
     cell.r_ss = r_list
     cell.I_ss = I_list
     cell.r_h_ss = np.max(r_list)
