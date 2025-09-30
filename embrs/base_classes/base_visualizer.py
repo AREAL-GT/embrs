@@ -177,7 +177,7 @@ class BaseVisualizer:
         if actions:
             for action in actions:
                 if action.action_type == 'fireline_construction':
-                    self.h_ax.plot(action.x_coords, action.y_coords, color='blue', linewidth=self.meters_to_points(action.width), zorder=4)
+                    self.h_ax.plot(action.x_coords, action.y_coords, color='blue', linewidth=self.meters_to_points(action.width) * 5, zorder=4)
                 elif action.action_type == 'long_term_retardant':
                     if self.retardant_art:
                         self.retardant_art.remove()
@@ -305,7 +305,7 @@ class BaseVisualizer:
             for road, road_type, road_width in self.roads:
                 x, y = road[0], road[1]
                 road_color = rc.road_color_mapping[road_type]
-                self.h_ax.plot(x, y, color=road_color, linewidth=self.meters_to_points(road_width), zorder=2)
+                self.h_ax.plot(x, y, color=road_color, linewidth=self.meters_to_points(road_width) * 5, zorder=2)
                 if road_color not in added_colors and self.show_legend:
                     added_colors.add(road_color)
                     legend_patch = mpatches.Patch(color=road_color, label=f"Road - {road_type}")
@@ -315,7 +315,7 @@ class BaseVisualizer:
         for fire_break, break_width, _ in self.fire_breaks:
             if isinstance(fire_break, LineString):
                 x, y = fire_break.xy
-                self.h_ax.plot(x, y, color='blue', linewidth=self.meters_to_points(break_width), zorder=2)
+                self.h_ax.plot(x, y, color='blue', linewidth=self.meters_to_points(break_width) * 5, zorder=2)
 
         # === Legend ===
         if self.legend_elements and self.show_legend:
