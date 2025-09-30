@@ -144,6 +144,7 @@ class FireSim(BaseFireSim):
         for cell in copy.copy(self._burning_cells):
             if cell.fully_burning:
                 cell._set_state(CellStates.BURNT)
+                self._burnt_cells.add(cell)
                 self._burning_cells.remove(cell)
                 self._updated_cells[cell.id] = cell
                 # self.update_fuel_in_burning_cell(cell)
