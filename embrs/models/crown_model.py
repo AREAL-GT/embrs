@@ -70,7 +70,7 @@ def crown_fire(cell: Cell, fmc: float):
             else:
                 # Passive crown fire
                 # Passive crown fire rate set to surface rate of spread
-                r_actual = cell.r_h_ss
+                r_actual = cell.r_h_ss * 60 # m/min
                 cell._crown_status = CrownStatus.PASSIVE
             
             # Set rate of spread based on crown fire equations
@@ -212,7 +212,7 @@ def calc_crown_vector(cell, R10):
 
     vec_ros *= 3.34 # R10 * 3.34 to get crown fire spread rate
 
-    return vec_ros, vec_dir, vec_mag # ft/min, degrees, ft/min
+    return vec_ros, np.deg2rad(vec_dir), vec_mag # ft/min, radians, ft/min
 
 def calc_crown_eccentricity(wind_slope_vec_mag: float):
     # TODO: a little silly that this is basically identical to regular eccentricity
@@ -236,7 +236,7 @@ def calc_crown_propagation(cell, r_actual, alpha, vec_mag, sfc, cfb):
     cell.e = e
 
     # calculate ros and I along each direction based on e and alpha
-    r_list, I_list = calc_vals_for_all_directions(cell, r_actual, I_h, alpha, e)
+    r_list, I_list = calc_vals_for_all_directions(cell, r_actual, 0, alpha, e, I_h=I_h)
 
     # return values in m/s and BTU/ft/min
     return r_list, I_list
@@ -256,8 +256,7 @@ def crown_intensity(R, sfc, clb):
     # From Rothermel 1991 pp 10, 11
 
     # Convert R to ft/s
-    R /= 60 # m/min to m/s
-    R = m_s_to_ft_min(R)/60 # m/s to ft/s
+    R /= (0.3048 * 60.0) # m/min to ft/s
 
     I_h = np.abs(R * (sfc + clb) * 1586.01) # btu/ft/s
 

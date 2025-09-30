@@ -34,7 +34,7 @@ def surface_fire(cell: Cell):
 
     r_list, I_list = calc_vals_for_all_directions(cell, R_h, I_r, alpha, e)
 
-    # r in m/s, I in btu
+    # r in m/s, I in btu/ft/min
     cell.r_ss = r_list
     cell.I_ss = I_list
     cell.r_h_ss = np.max(r_list)
@@ -93,7 +93,7 @@ def accelerate(cell: Cell, time_step: float):
         cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
 
 
-def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
+def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e, I_h: float = None):
     spread_directions = np.deg2rad(cell.directions)
 
     gamma = np.abs(((alpha + np.deg2rad(cell.aspect)) - spread_directions) % (2*np.pi))
@@ -101,9 +101,13 @@ def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e):
 
     R_gamma = R_h * ((1 - e)/(1 - e * np.cos(gamma)))
 
-    t_r = 384 / cell.fuel.sav_ratio
-    H_a = I_r * t_r
-    I_gamma = H_a * R_gamma
+    if I_h is None:
+        t_r = 384 / cell.fuel.sav_ratio
+        H_a = I_r * t_r
+        I_gamma = H_a * R_gamma # BTU/ft/min
+
+    else:
+        I_gamma = I_h * (R_gamma / R_h) # BTU/ft/min
 
     r_list = ft_min_to_m_s(R_gamma)
     return r_list, I_gamma
