@@ -180,7 +180,7 @@ class Embers:
                 carry.append(ember)
                 continue
             else:
-                curr_cell = self.get_cell_from_xy(sx, sy)                
+                curr_cell = self.get_cell_from_xy(sx, sy, oob_ok=True)                
                 wind_speed, wind_dir = curr_cell.curr_wind()
 
                 eH = m_to_ft(curr_cell.canopy_height)
@@ -304,15 +304,15 @@ class Embers:
                         tx = sx + mXt * np.sin(np.deg2rad(rwinddir))
                         ty = sy + mXt * np.cos(np.deg2rad(rwinddir))
 
+                        curr_cell = self.get_cell_from_xy(tx, ty, oob_ok = True)
+
                         # Make sure the ember doesn't land outside the sim region
-                        if tx >= self.x_lim or tx < 0 or ty >= self.y_lim or ty < 0:
+                        if curr_cell is None:
                             # Ember is out of the map
                             passA = 10
                             abort_flight = True
                             break
                         
-                        curr_cell = self.get_cell_from_xy(tx, ty)
-
 
                         if curr_cell != last_cell:
                             eH = m_to_ft(curr_cell.canopy_height)
