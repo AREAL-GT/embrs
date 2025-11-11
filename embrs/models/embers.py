@@ -357,7 +357,7 @@ class Embers:
                         else:
                             break
 
-                if np.abs(mZt) < 1.0 and curr_time < end_curr_time_step:
+                if np.abs(mZt) < 1.0 and curr_time < end_curr_time_step and not abort_flight:
                     if curr_cell.fuel.burnable:
                         prev_x = temp_ember['x']
                         prev_y = temp_ember['y']
