@@ -5,6 +5,8 @@
 
 """
 
+from embrs.utilities.logger_schemas import AgentLogEntry
+
 class AgentBase:
     """Base class for agents in user code. 
     
@@ -39,25 +41,20 @@ class AgentBase:
         self.marker = marker
         self.color = color
 
-    def to_log_format(self) -> dict:
-        """Returns the agent in a format that the logger can store
+    def to_log_entry(self, timestamp) -> dict:
+        """_summary_
 
-        :return: dictionary with the following fields:
-
-            - "id": unique identifier of the agent
-            - "x_m": x position in meters of the agent within the sim.
-            - "y_m": y position in meters of the agent within the sim.
-            - "marker": marker used to represent the agent when displayed.
-            - "color": color used to represent the agent when displayed.
-        :rtype: dict
+        Returns:
+            dict: _description_
         """
-        data = {
-            "id": self.id,
-            "label": self.label,
-            "x": self.x,
-            "y": self.y,
-            "marker": self.marker,
-            "color": self.color
-        }
+        entry = AgentLogEntry(
+            timestamp=timestamp,
+            id=self.id,
+            label=self.label,
+            x=self.x,
+            y=self.y,
+            marker=self.marker,
+            color=self.color
+        )
 
-        return data
+        return entry

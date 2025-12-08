@@ -1,589 +1,207 @@
 """Module used to run the application that allows users to generate a new map file.
 """
 
-from typing import Tuple
-import xml.etree.ElementTree as ET
+from typing import Tuple, List, Dict, Any
 import json
 import pickle
 import sys
 import os
 import rasterio
+from rasterio.warp import reproject, transform_bounds
+from rasterio.enums import Resampling
+from rasterio.transform import Affine
+from rasterio.windows import from_bounds
 import requests
 import pyproj
-import utm
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
-from shapely.geometry import Polygon, LineString
+from shapely.geometry import Polygon, LineString, Point
 from shapely.geometry import mapping
-from scipy.interpolate import RectBivariateSpline
-from scipy import ndimage, stats
 import numpy as np
 
 from embrs.utilities.file_io import MapGenFileSelector
-from embrs.utilities.map_drawer import PolygonDrawer
+from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
 from embrs.utilities.fire_util import RoadConstants as rc
-from embrs.utilities.fire_util import FuelConstants as fc
+from embrs.models.fuel_models import FuelConstants as fc
+from embrs.utilities.data_classes import MapParams, MapDrawerData, GeoInfo, LandscapeData
 
-DATA_RESOLUTION = 30 # meters
+PX_RES = 30
+DATA_RES = 10
 
-def generate_map_from_file(file_params: dict, data_res: float, min_cell_size: float):
-    """Generate a simulation map. Take in user's selections of fuel and topography files
-    along with the drawings they overlay for initial ignitions and fire-breaks and generate a
-    usable map.
 
-    :param file_params: Dictionary containing the input parameters/files to generate map from
-    :type file_parmas: dict
-    :param data_res: Resolution of the fuel and elevation data
-    :type data_res: float
-    :param min_cell_size: minimum cell size for this map, used for interpolation of elevation
-                          and fuel data
-    :type min_cell_size: float
-    :raises ValueError: if elevation and fuel data selected are not from the same region
+def generate_map_from_file(map_params: MapParams):
+    """_summary_
+
+    Args:
+        map_params (MapParams): _description_
+
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
     """
-
-    # Get file paths for all data files
-    save_path = file_params['Output Map Folder']
-    top_path  = file_params['Topography Map Path']
-    fuel_path = file_params['Fuel Map Path']
-
-    uniform_fuel = file_params["Uniform Fuel"]
-    uniform_elev = file_params["Uniform Elev"]
-
     # Get user choice for importing roads
-    import_roads = file_params['Import Roads']
+    import_roads = map_params.import_roads
 
-    if not uniform_elev and not uniform_fuel:
-        print("Starting fuel parsing")
-        fuel_data, fuel_bounds = parse_fuel_data(fuel_path, import_roads)
-        print("Finished fuel parsing")
-        topography_data, elev_bounds = parse_elevation_data(top_path, data_res, min_cell_size)
-        print("Finished topography parsing")
+    bounds = geotiff_to_numpy(map_params)
 
-        # Ensure that the elevation and fuel data are from same region
-        for e_bound, f_bound in zip(elev_bounds, fuel_bounds):
-            if np.abs(e_bound - f_bound) > 1:
-                raise ValueError('The elevation and fuel data are not from the same region')
-
-        bounds = elev_bounds
-
-        if fuel_data['width_m'] != topography_data['width_m'] or fuel_data['height_m'] != topography_data['height_m']:
-            # set bounds to the smaller of the 2
-
-            width_m = np.min([fuel_data['width_m'], topography_data['width_m']])
-            height_m = np.min([fuel_data['height_m'], topography_data['height_m']])
-
-            fuel_data['width_m'] = int(width_m)
-            topography_data['width_m'] = int(width_m)
-            fuel_data['height_m'] = int(height_m)
-            topography_data['height_m'] = int(height_m)
-
-    elif uniform_fuel and not uniform_elev:
-        # parse elevation map first
-        topography_data, elev_bounds = parse_elevation_data(top_path, data_res, min_cell_size)
-        bounds = elev_bounds
-
-        # create uniform fuel map based on dimensions
-        rows, cols = topography_data["rows"], topography_data["cols"]
-        fuel_type = file_params["Fuel Type"]
-        fuel_data = create_uniform_fuel_map(rows, cols, fuel_type)
-
-    elif not uniform_fuel and uniform_elev:
-        # parse fuel map first
-        fuel_data, fuel_bounds = parse_fuel_data(fuel_path, import_roads)
-        bounds = fuel_bounds
-
-        # create uniform elevation map based on dimensions
-        rows, cols = fuel_data["height_m"], fuel_data["width_m"]
-        topography_data = create_uniform_elev_map(rows, cols)
-    else:
-        # get sim size from parameters
-        rows, cols = file_params["height m"], file_params["width m"]
-        fuel_type = file_params["Fuel Type"]
-
-        # create uniform elevation and fuel maps based on sim size
-        topography_data = create_uniform_elev_map(rows, cols)
-        fuel_data = create_uniform_fuel_map(rows, cols, fuel_type)
-        bounds = None
-
+    map_params.geo_info.bounds = bounds
+    map_params.geo_info.calc_center_coords(map_params.lcp_data.crs)
+    map_params.geo_info.calc_time_zone()
+    
     if import_roads:
-        print("Starting road data retrieval")
-        # get road data
-        metadata_path = file_params['Metadata Path']
-        road_data, bounds = get_road_data(metadata_path)
-        if road_data is not None:
-            roads = parse_road_data(road_data, bounds, fuel_data)
+        # Transform bounds to OSM projection
+        osm_bounds = transform_bounds(map_params.lcp_data.crs, "EPSG:4326", *bounds)
 
-        print("Finished road retrieval")
+        # Fetch OSM data from API
+        roads = fetch_osm_roads(osm_bounds) 
+
+        # Project OSM data to our coordinate system
+        projected_roads = project_osm_roads(roads, "EPSG:4326", map_params.lcp_data.crs)
+
+        # Convert world coordinates to pixel coordinates
+        raster_roads = []
+        for road, road_type, road_width in projected_roads:
+            raster_coords = [world_to_pixel(x, y, map_params.lcp_data.transform, map_params.lcp_data.rows) for x, y in road]
+            raster_roads.append((raster_coords, road_type, road_width))
+
+        # Interpolate points along roads
+        raster_roads = interpolate_roads(raster_roads)
+
+        # Only keep parts of roads within sim boundaries
+        map_params.roads = trim_and_transform_roads(map_params, raster_roads)
+        
     else:
-        roads = None
+        map_params.roads = None
 
-    return {
-        'save_path': save_path,
-        'fuel_data': fuel_data,
-        'topography_data': topography_data,
-        'roads': roads,
-        'bounds': bounds
-    }
+    # Create a color list in the right order
+    colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
 
-    # Get user input from GUI
-    user_data = get_user_data(fig)
+    # Create a colormap from the list
+    cmap = ListedColormap(colors)
 
-    save_to_file(save_path, fuel_data, topography_data, roads, user_data, bounds)
+    # Create a norm object to map your data points to the colormap
+    keys = sorted(fc.fuel_color_mapping.keys())
+    boundaries = keys + [keys[-1] + 1]
+    norm = BoundaryNorm(boundaries, cmap.N)
 
-def save_to_file(save_path: str, fuel_data: dict, topography_data: dict,
-                roads: list, user_data: dict, bounds: list):
-    """Save all generated map data to a file specified in 'save_path'
+    with rasterio.open(map_params.cropped_lcp_path) as src:
+        display_fuel_map = src.read(4)
 
-    :param save_path: Path to save the map files in
-    :type save_path: str
-    :param fuel_data: Dictionary containing all data relevant to the fuel map
-    :type fuel_data: dict
-    :param topography_data: Dictionary containing all data relevant to the topography map
-    :type topography_data: dict
-    :param roads: list of points considered roads each element formatted as ((x, y), road_type)
-    :type roads: list
-    :param user_data: Dictionary containing the data generated by user in the drawing process
-    :type user_data: dict
-    :param bounds: list containing the geographic bounds of the map, corner coordinates listed in
-    following order:[south, north, west, east]
-    :type bounds: list
-    """
-    data = {}
-
-    # Save fuel data
-    fuel_path = save_path + '/fuel.npy'
-
-    np.save(fuel_path, fuel_data['map'])
-
-    if bounds is None:
-        data['geo_bounds'] = None
-
-    else:
-        data['geo_bounds'] = {
-            'south': bounds[0],
-            'north': bounds[1],
-            'west': bounds[2],
-            'east': bounds[3] 
-        }
-
-    data['fuel'] = {'file': fuel_path,
-                        'width_m': fuel_data['width_m'],
-                        'height_m': fuel_data['height_m'],
-                        'rows': fuel_data['rows'],
-                        'cols': fuel_data['cols'],
-                        'resolution': fuel_data['resolution'],
-                        'uniform': fuel_data['uniform']
-                    }
-    
-    if fuel_data['uniform']:
-        data['fuel']['fuel type'] = fuel_data['fuel type']
+    plt.imshow(np.flipud(display_fuel_map), cmap=cmap, norm=norm)
 
 
-    # Save topography data
-    topography_path = save_path + '/topography.npy'
-    np.save(topography_path, topography_data['map'])
+def interpolate_roads(roads: List, spacing_m: float = 0.5):
+    """_summary_
 
-    data['topography'] = {'file': topography_path,
-                        'width_m': topography_data['width_m'],
-                        'height_m': topography_data['height_m'],
-                        'rows': topography_data['rows'],
-                        'cols': topography_data['cols'],
-                        'resolution': topography_data['resolution'],
-                        'uniform': topography_data['uniform']
-                        }
+    Args:
+        roads (List): _description_
+        spacing_m (float, optional): _description_. Defaults to 0.5.
 
-    # Save the roads data
-    road_path = save_path + '/roads.pkl'
-    with open(road_path, 'wb') as f:
-        pickle.dump(roads, f)
-
-    data['roads'] = {'file': road_path}
-
-    data = data | user_data
-
-    # Save data to JSON
-    folder_name = os.path.basename(save_path)
-    with open(save_path + "/" + folder_name + ".json", 'w') as f:
-        json.dump(data, f, indent=4)
-
-def get_road_data(path:str) -> Tuple[dict, list]:
-    """Function that queries the openStreetMap API for the road data at the same region as the
-    elevation and fuel maps
-    
-    :param path: path to the metadata file used to find the geographic region to pull from OSM API
-    :type path: str
-    :return: tuple with dictionary of road data and a list of the geobounds
-    :rtype: Tuple[dict, list]
-    """
-    # Load the xml file
-    tree = ET.parse(path)
-    root = tree.getroot()
-
-    west_bounding = float(root.find(".//westbc").text)
-    east_bounding = float(root.find(".//eastbc").text)
-    north_bounding = float(root.find(".//northbc").text)
-    south_bounding = float(root.find(".//southbc").text)
-
-    overpass_url = "http://overpass-api.de/api/interpreter"
-
-    overpass_query = f"""
-    [out:json];
-    (way["highway"]
-    ({south_bounding}, {west_bounding}, {north_bounding}, {east_bounding});
-    );
-    out body;
-    >;
-    out skel qt;
-    """
-
-    print(f"Querying OSM for road data at: [west: {west_bounding}, north: {north_bounding}," +
-          f"east: {east_bounding}, south: {south_bounding}]")
-
-    print("Awaiting response...")
-
-    response = requests.get(overpass_url, params={'data': overpass_query})
-
-    if response.status_code != 200:
-        print(f"WARNING: Request failed with status {response.status_code}," +
-              "proceeding without road data")
-
-        print(response.text)
-        return None
-
-    road_data = response.json()
-
-    print("Road data retrieved successfully!")
-
-    return road_data, [south_bounding, north_bounding, west_bounding, east_bounding]
-
-def parse_road_data(road_data: dict, bounds: list, data: dict) -> list:
-    """Function that takes the raw road data, trims it to fit with the map and interpolates it to
-    decrease the spacing between points on roads.
-
-    :param road_data: dictionary containing raw road data from openStreetMap
-    :type road_data: dict
-    :param bounds: geographic bounds of the region the data is from
-    :type bounds: list
-    :param data: dictionary containing data about the fuel or elevation map
-    :type data: dict
-    :return: list of roads in the form of [((x,y), road type)]
-    :rtype: list
-    """
-    # Extract the bounding coordinates from the data dictionary
-    bbox = {
-        'south': bounds[0],
-        'north': bounds[1],
-        'west': bounds[2],
-        'east': bounds[3] 
-    }
-
-    # Calculate the central point of the bounding box
-    central_lat = (bbox['south'] + bbox['north']) / 2
-    central_lon = (bbox['west'] + bbox['east']) / 2
-
-    # Get the UTM zone of the central point
-    _, _, utm_zone, _ = utm.from_latlon(central_lat, central_lon)
-
-    # Get projection based on the utm_zone
-    proj = pyproj.Proj(proj='utm', zone=utm_zone, ellps='WGS84')
-
-    # A dict to hold node coordinates
-    nodes = {}
-
-    # Get the origin in x,y coordinates
-    origin_x, origin_y = proj(bbox['west'], bbox['south'])
-
-    # First pass: get all node elements with their coordinates
-    for element in road_data['elements']:
-        if element['type'] == 'node':
-            node_id = element['id']
-            lat = element['lat']
-            lon = element['lon']
-            x, y = proj(lon, lat)
-
-            # account for buffer on other data
-            x -= 120
-            y -= 120
-
-            nodes[node_id] = (x - origin_x, y - origin_y)
-
-    # Second pass: get all way elements that represent major roads
-    roads = []
-    for element in road_data['elements']:
-        if element['type'] == 'way' and 'highway' in element['tags']:
-            road_type = element['tags']['highway']
-            node_ids = element['nodes']
-
-            if road_type in rc.major_road_types:
-                road = [nodes[node_id] for node_id in node_ids if node_id in nodes]
-                if road:
-                    roads.append((road, road_type))
-
-    # Interpolate points so that each point in roads is at most 0.5m apart
-    roads = interpolate_points(roads, 0.5)
-
-    for road in roads:
-        x_trimmed = []
-        y_trimmed = []
-
-        x, y = zip(*road[0])
-        for i in range(len(x)):
-            if 0 < x[i]/30 < data['cols']-1 and 0 < y[i]/30 < data['rows']-1:
-                x_trimmed.append(x[i]/30)
-                y_trimmed.append(y[i]/30)
-
-        x = tuple(xi for xi in x_trimmed)
-        y = tuple(yi for yi in y_trimmed)
-
-        plt.plot(x, y, color=rc.road_color_mapping[road[1]])
-
-    return roads
-
-def interpolate_points(roads: list, max_spacing_m: float) -> list:
-    """Interpolate points along a road so that every consecutive pair of points is less than a
-    certain distance apart
-
-    :param roads: list containing road data in the form [((x,y), road type)]
-    :type roads: list
-    :param max_spacing_m: maximum distance in meters two consecutive points can be apart
-    :type max_spacing_m: float
-    :return: list in the same form as 'roads' but with new interpolated points added in
-    :rtype: list
+    Returns:
+        _type_: _description_
     """
     interpolated_roads = []
+
     for road in roads:
         interpolated_road = []
         for i in range(len(road[0]) - 1):
             start = road[0][i]
             end = road[0][i + 1]
 
-            # Calculate the distance between the two points
             dist_m = np.sqrt((start[0] - end[0])**2 + (start[1] - end[1])**2)
 
-            # If the distance is greater than max_spacing_m, interpolate points
-            if dist_m > max_spacing_m:
-                # Calculate the number of points to interpolate
-                num_points = int(np.ceil(dist_m / max_spacing_m))
+            if dist_m > spacing_m:
+                num_points = int(np.ceil(dist_m/spacing_m))
 
-                # Interpolate the x and y coordinates
                 x = np.linspace(start[0], end[0], num_points)
                 y = np.linspace(start[1], end[1], num_points)
 
-                # Add the interpolated points to the new road
-                interpolated_road.extend(list(zip(x, y)))
+                interpolated_road.extend(list(zip(x,y)))
             else:
-                # If no interpolation is needed, just add the start point
                 interpolated_road.append(start)
 
-        # Add the last point of the road
         interpolated_road.append(road[0][-1])
-
-        # Add the new road to the list of roads
-        interpolated_roads.append((interpolated_road, road[1]))
+        interpolated_roads.append((interpolated_road, road[1], road[2]))
 
     return interpolated_roads
 
+def trim_and_transform_roads(map: MapParams, raster_roads: List) -> List:
+    """_summary_
 
-def parse_elevation_data(top_path: str, data_res: float, cell_size: float) -> dict:
-    """Read elevation data file, rotate and buffer, and interpolate so it can be used for smaller
-    cell sizes.
+    Args:
+        map (MapParams): _description_
+        raster_roads (List): _description_
 
-    :param top_path: path to the elevation data file
-    :type top_path: str
-    :param data_res: resolution of the raw elevation data
-    :type data_res: float
-    :param cell_size: size the elevation data will interpolate to (new resolution)
-    :type cell_size: float
-    :return: dictionary containing all relevant topography data
-    :rtype: dict
+    Returns:
+        List: _description_
     """
-    with rasterio.open(top_path) as elev_data:
-        # read data
-        array = elev_data.read(1)
+    trimmed_roads = []
+    for road, road_type, road_width in raster_roads:
+        x_trimmed, y_trimmed = [], []
+        x, y = zip(*road)
+        x_adj = np.array(x) / (PX_RES/DATA_RES)
+        y_adj = np.array(y) / (PX_RES/DATA_RES)
 
-    # Take out no data values
-    no_data_value = elev_data.nodatavals[0]
+        for i in range(len(x)):
+            if 0 < x[i]*DATA_RES< map.lcp_data.width_m and 0 < y[i]*DATA_RES < map.lcp_data.height_m:
+                x_trimmed.append(x_adj[i])
+                y_trimmed.append(y_adj[i])
 
-    topography_map = rotate_and_buffer_data(array, no_data_value)
+        if x_trimmed and y_trimmed:
+            trimmed_roads.append(((np.array(x_trimmed)*PX_RES, np.array(y_trimmed)*PX_RES), road_type, road_width))
 
-    width_m = topography_map.shape[1] * data_res
-    height_m = topography_map.shape[0] * data_res
+        plt.plot(x_trimmed, y_trimmed, color=rc.road_color_mapping[road_type], linewidth=road_width * 0.25)
 
-    x = np.arange(0, topography_map.shape[1])
-    y = np.arange(0, topography_map.shape[0])
-    X, Y = np.meshgrid(x, y)
-    plt.contour(X, Y, np.flipud(topography_map), colors='k')
+    return trimmed_roads
 
-    # upscale grid
-    scale_factor = int(np.floor(data_res/cell_size))
-
-    x = np.arange(topography_map.shape[1])
-    y = np.arange(topography_map.shape[0])
-
-    # construct the interpolator object
-    interpolator = RectBivariateSpline(y, x, topography_map)
-
-    xnew = np.linspace(0, topography_map.shape[1]-1, topography_map.shape[1]*scale_factor)
-    ynew = np.linspace(0, topography_map.shape[0]-1, topography_map.shape[0]*scale_factor)
-
-    # apply the interpolator
-    topography_map_new = interpolator(ynew, xnew)
-    topography_map_new = topography_map_new.reshape((topography_map.shape[0]*scale_factor,
-                                                     topography_map.shape[1]*scale_factor))
-
-    rows = topography_map_new.shape[0]
-    cols = topography_map_new.shape[1]
-    resolution = width_m / cols
-
-    topography_output = {'width_m': width_m,
-                        'height_m': height_m,
-                        'rows': rows,
-                        'cols': cols,
-                        'resolution': resolution,
-                        'map': topography_map_new,
-                        'uniform': False
-                        }
-
-    return topography_output, elev_data.bounds
-
-def create_uniform_elev_map(rows: int, cols: int) -> dict:
-    """Create an elevation map for the uniform case (all elevation set to 0)
-
-    :param rows: number of rows to populate data for
-    :type rows: int
-    :param cols: number of columns to populate data for
-    :type cols: int
-    :return: dictionary containing relevant topography data for uniform case
-    :rtype: dict
+def project_osm_roads(roads: List[Tuple[List[Tuple[float, float]], str]], src_crs: str, dst_crs: str) -> List[Tuple[List[Tuple[float, float]], str]]:
     """
-    topography_map = np.full((rows, cols), 0)
+    Projects OSM road coordinates from WGS84 (EPSG:4326) to the LCP raster CRS.
 
-    topography_output = {'width_m': cols,
-                    'height_m': rows,
-                    'rows': rows,
-                    'cols': cols,
-                    'resolution': 1,
-                    'map': topography_map,
-                    'uniform': True
-                    }
+    Args:
+        roads (List): List of roads with coordinates in (lon, lat) (EPSG:4326).
+        src_crs (str): Source CRS (typically "EPSG:4326").
+        dst_crs (str): Destination CRS (LCP file CRS).
 
-    return topography_output
-
-def parse_fuel_data(fuel_path: str, import_roads: bool) -> dict:
-    """Read fuel data file, rotate and buffer, outputs dictionary with relevant data
-
-    :param fuel_path: path to the raw fuel data file
-    :type fuel_path: str
-    :param import_roads: boolean to indicate whether roads will be imported, if True function will
-                         replace 'Urban' fuel type in raw data with nearby fuels
-    :type import_roads: bool
-    :raises ValueError: if fuel data contains values that are not one of the 13 Anderson FBFMs
-    :return: dictionary with all relevant fuel data
-    :rtype: dict
+    Returns:
+        List[Tuple[List[Tuple[float, float]], str]]: Roads with reprojected coordinates.
     """
+    transformer = pyproj.Transformer.from_crs(src_crs, dst_crs, always_xy=True)
 
-    with rasterio.open(fuel_path) as fuel_data:
-        array = fuel_data.read(1)
-    no_data_value = fuel_data.nodatavals[0]
+    projected_roads = []
+    for road, road_type, road_width in roads:
+        projected_coords = [transformer.transform(lon, lat) for lon, lat in road]
+        projected_roads.append((projected_coords, road_type, road_width))
 
-    fuel_map = rotate_and_buffer_data(array, no_data_value, order=0)
+    return projected_roads
 
-    if import_roads:
-        fuel_map = replace_clusters(fuel_map)
 
-    for i in range(fuel_map.shape[0]):
-        for j in range(fuel_map.shape[1]):
-            if fuel_map[i, j] not in fc.fbfm_13_keys:
-                raise ValueError("One or more of the fuel values not valid for FBFM13")
-
-    width_m = fuel_map.shape[1] * DATA_RESOLUTION
-    height_m = fuel_map.shape[0] * DATA_RESOLUTION
-
-    rows = fuel_map.shape[0]
-    cols = fuel_map.shape[1]
-
-    # Create a color list in the right order
-    colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
-
-    # Create a colormap from the list
-    cmap = ListedColormap(colors)
-
-    # Create a norm object to map your data points to the colormap
-    norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
-
-    plt.imshow(np.flipud(fuel_map), cmap=cmap, norm=norm)
-
-    resolution = DATA_RESOLUTION
-
-    fuel_output = {
-                    'width_m': width_m,
-                    'height_m': height_m,
-                    'rows': rows,
-                    'cols': cols,
-                    'resolution': resolution,
-                    'map': fuel_map,
-                    'uniform': False
-                }
-
-    return fuel_output, fuel_data.bounds
-
-def create_uniform_fuel_map(height_m: float, width_m: float, fuel_type: fc.fbfm_13_keys) -> dict:
-    """Create a fuel map for the uniform case (all fuel set to same value)
-
-    :param height_m: height in meters of the map that should be generated
-    :type height_m: float
-    :param width_m: width in meters of the map that should be generated
-    :type width_m: float
-    :param fuel_type: fuel type that should be applied across the entire map
-    :type fuel_type: FuelConstants.fbfm_13_keys
-    :return: dictionary containing all the necessary data for the uniform fuel case
-    :rtype: dict
+def world_to_pixel(x: float, y: float, transform: rasterio.Affine, raster_height) -> Tuple[int, int]:
     """
-    fuel_map = np.full((int(np.floor(height_m/DATA_RESOLUTION)),
-                        int(np.floor(width_m/DATA_RESOLUTION))),
-                        int(fuel_type))
+    Converts world (real-world meters) coordinates to raster (pixel) coordinates.
 
-    # Create a color list in the right order
-    colors = [fc.fuel_color_mapping[key] for key in sorted(fc.fuel_color_mapping.keys())]
+    Args:
+        x (float): World X coordinate.
+        y (float): World Y coordinate.
+        transform (Affine): Rasterio affine transformation matrix.
 
-    # Create a colormap from the list
-    cmap = ListedColormap(colors)
-
-    # Create a norm object to map your data points to the colormap
-    norm = BoundaryNorm(list(sorted(fc.fuel_color_mapping.keys())) + [100], cmap.N)
-
-    plt.imshow(fuel_map, cmap=cmap, norm=norm)
-
-    fuel_output = {
-                    'width_m': width_m,
-                    'height_m': height_m,
-                    'rows': int(np.floor(height_m/DATA_RESOLUTION)),
-                    'cols': int(np.floor(width_m/DATA_RESOLUTION)),
-                    'resolution': DATA_RESOLUTION,
-                    'map': fuel_map,
-                    'uniform': True,
-                    'fuel type': fc.fuel_names[fuel_type]
-                }
-
-    return fuel_output
-
-def rotate_and_buffer_data(array: np.ndarray, no_data_value: int, order = 3) -> np.ndarray:
-    """Rotates and buffers raw .tif fuel and elevation files so they are squares and contain no
-    garbage data
-
-    :param array: array of data to be cleaned
-    :type array: np.ndarray
-    :param no_data_value: value that represents no data within the array
-    :type no_data_value: int
-    :param order: order of interpolation for ndimage.rotate, order=0 does not interpolate, defaults
-                  to 3
-    :type order: int, optional
-    :return: cleaned array
-    :rtype: np.ndarray
+    Returns:
+        (int, int): (col, row) in raster coordinates.
     """
-    array = np.where(array == no_data_value, -100, array)
+    x, y = ~transform * (x, y)
+    y = raster_height - y  
+    return x, y
 
+def find_warping_angle(array: np.ndarray) -> float:
+    """_summary_
+
+    Args:
+        array (np.ndarray): _description_
+
+    Returns:
+        float: _description_
+    """
     # find top left corner
     corner_1 = None
     for i in range(array.shape[1]):
@@ -605,87 +223,406 @@ def rotate_and_buffer_data(array: np.ndarray, no_data_value: int, order = 3) -> 
         
         if corner_2 is not None:
             break
-    
-    if corner_2 == 0:
+
+    if corner_2[1] == 0:
         angle = 0
     else:
-        angle = np.arctan(corner_1[0]/corner_2[1]) * (180/np.pi)
+        angle = np.arctan(corner_1[0]/corner_2[1])
 
-    # rotate data to align it with x, y axes
-    rotated_data = ndimage.rotate(array, angle, order=order)
+    return angle
 
-    # Get the indices of valid elevation values
-    valid_indices = np.where((rotated_data > 0))
+def crop_map_data(map_params: MapParams) -> float:
+    """_summary_
 
-    # Get rough min and max valid indices
-    min_row = np.min(valid_indices[0])
-    max_row = np.max(valid_indices[0])
-    min_col = np.min(valid_indices[1])
-    max_col = np.max(valid_indices[1])
+    Args:
+        file_params (str): _description_
 
-    # Trim data
-    new_array = rotated_data[min_row:max_row, min_col:max_col]
-
-    # buffer 10 values on each side to remove any garbage data
-    new_array = new_array[10:-10, 10:-10]
-
-    return new_array
-
-def replace_clusters(fuel_map: np.ndarray, invalid_value=91) -> np.ndarray:
-    """Function to replace clusters of invalid values with their neighboring values
-
-    :param fuel_map: 2d array containing fuel data
-    :type fuel_map: np.ndarray
-    :param invalid_value: value to be replaced, defaults to 91 ('Urban')
-    :type invalid_value: int, optional
-    :return: 2d array containing fuel data with 'invalid_value' replaced
-    :rtype: np.ndarray
+    Returns:
+        float: _description_
     """
-    # Check if fuel_map contains any invalid_value
-    if invalid_value not in fuel_map:
-        return fuel_map
+    # Get bounding box from user input
 
-    # Generate a mask for the invalid cells
-    invalid_mask = fuel_map == invalid_value
+    crop_done = False
 
-    # Label each cluster of invalid cells
-    labels, num_labels = ndimage.label(invalid_mask)
+    lcp_path = map_params.lcp_filepath
+    lcp_output_path = os.path.join(map_params.folder, "cropped_lcp.tif")
+    fccs_path = map_params.fccs_filepath
 
-    # Create a dilation structuring element (SE)
-    selem = ndimage.generate_binary_structure(2,2)  # 2x2 square SE
+    # Add the FCCS layer to the landscape file
+    merge_tiffs(lcp_path, fccs_path, lcp_output_path, map_params.include_fccs)
 
-    # Initialize an output array to store the final fuel_map
-    output_map = fuel_map.copy()
+    while not crop_done:
 
-    # Process each label (cluster of invalid cells)
-    for label in range(1, num_labels + 1):
-        # Create a mask for this label only
-        label_mask = labels == label
+        fig = plt.figure(figsize=(15, 10))
 
-        # Dilation operation: for this label, expand it to its neighbors
-        dilated_mask = ndimage.binary_dilation(label_mask, structure=selem)
+        crop_tool = CropTiffTool(fig, lcp_path)
+        plt.show()
 
-        # Exclude the original label cells from the dilated mask
-        outer_ring_mask = np.logical_and(dilated_mask, np.logical_not(label_mask))
+        bounds = crop_tool.get_coords()
+        angle = find_warping_angle(crop_tool.fuel_data)
+        crop_done = crop_and_save_tiff(lcp_output_path, lcp_output_path, bounds)
 
-        # Extract the values of the cells in the outer ring
-        outer_ring_values = fuel_map[outer_ring_mask]
+    map_params.cropped_lcp_path = lcp_output_path
+    map_params.geo_info = GeoInfo()
+    map_params.geo_info.north_angle_deg = np.rad2deg(angle)
 
-        # Exclude any invalid values in the outer ring
-        outer_ring_values = outer_ring_values[outer_ring_values != invalid_value]
+def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str, include_fccs: bool) -> None:
+    # Open the LCP file and read its data and metadata
+    with rasterio.open(lcp_path) as lcp_src:
+        lcp_data = lcp_src.read()  # shape: (bands, height, width)
+        meta = lcp_src.meta.copy()
+        height, width = lcp_data.shape[1:]
 
-        # Find the most common value
-        if len(outer_ring_values) > 0:
-            most_common = stats.mode(outer_ring_values, keepdims=True)[0][0]
-        else:
-            most_common = invalid_value
+    if include_fccs:
+        # Open and read the FCCS file
+        with rasterio.open(fccs_path) as fccs_src:
+            fccs_data = fccs_src.read(1)  # shape: (height, width)
 
-        # Replace the label cells in the output_map with the most common value
-        output_map[label_mask] = most_common
+        if (height, width) != fccs_data.shape:
+            raise ValueError("The dimensions of LCP and FCCS images do not match.")
+    else:
+        # Create a dummy FCCS band with -1s
+        fccs_data = np.full((height, width), fill_value=-1, dtype=np.float32)
 
-    return output_map
+    # Expand FCCS to match band format
+    fccs_data = fccs_data[np.newaxis, :, :]
 
-def get_user_data(fig: matplotlib.figure.Figure) -> dict:
+    # Concatenate bands
+    merged_data = np.concatenate([lcp_data, fccs_data], axis=0)
+    meta.update(count=merged_data.shape[0])
+
+    with rasterio.open(output_path, "w", **meta) as dst:
+        dst.write(merged_data)
+
+
+def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
+    """_summary_
+
+    Args:
+        input_path (str): _description_
+        output_path (str): _description_
+        bounds (list): _description_
+
+    Returns:
+        int: _description_
+    """
+
+    left, bottom = bounds[0]
+    right, top = bounds[1]
+
+    with rasterio.open(input_path) as src:
+        nodata_value = -9999
+
+        window = from_bounds(left, bottom, right, top, src.transform)
+
+        cropped_data = src.read(window=window)
+
+        if np.any(cropped_data == nodata_value):
+            return False
+
+        new_transform = src.window_transform(window)
+
+        out_meta = src.meta.copy()
+        out_meta.update({
+            "height": cropped_data.shape[1],
+            "width": cropped_data.shape[2],
+            "transform": new_transform,
+            "crs": src.crs
+        })
+
+    with rasterio.open(output_path, "w", **out_meta) as dest:
+        dest.write(cropped_data)
+
+    return True
+    
+def save_to_file(map_params: MapParams, user_data: MapDrawerData):
+    """_summary_
+
+    Args:
+        params (dict): _description_
+        user_data (dict): _description_
+        north_dir (float): _description_
+    """
+
+    # Extract relevant data from params
+    save_path = map_params.folder
+    lcp_data = map_params.lcp_data
+    roads = map_params.roads
+
+    if map_params.geo_info is not None:
+        bounds = map_params.geo_info.bounds
+    else:
+        bounds = None
+
+    data = {}
+
+    if bounds is None:
+        data['geo_info'] = None
+        map_params.geo_info = None
+
+    else:
+        data['geo_info'] = {
+            'south_lim': bounds[0],
+            'north_lim': bounds[1],
+            'west_lim': bounds[2],
+            'east_lim': bounds[3],
+            'center_lat': map_params.geo_info.center_lat,
+            'center_lon': map_params.geo_info.center_lon,
+            'timezone': map_params.geo_info.timezone,
+            'north_angle_deg': map_params.geo_info.north_angle_deg
+        }
+
+    # Save numpy arrays to files for debugging
+    elev_path = save_path + '/elev.npy'
+    np.save(elev_path, lcp_data.elevation_map)
+
+    aspect_path = save_path + '/aspect.npy'
+    np.save(aspect_path, lcp_data.aspect_map)
+
+    slope_path = save_path + '/slope.npy'
+    np.save(slope_path, lcp_data.slope_map)
+
+    fuel_path = save_path + '/fuel.npy'
+    np.save(fuel_path, lcp_data.fuel_map)
+    
+    canopy_cover_path = save_path + '/canopy_cover.npy'
+    np.save(canopy_cover_path, lcp_data.canopy_cover_map)
+    
+    canopy_height_path = save_path + '/canopy_height.npy'
+    np.save(canopy_height_path, lcp_data.canopy_height_map)
+
+    canopy_base_height_path = save_path + '/canopy_base_height.npy'
+    np.save(canopy_base_height_path, lcp_data.canopy_base_height_map)
+
+    canopy_bulk_density_path = save_path + '/canopy_bulk_density.npy'
+    np.save(canopy_bulk_density_path, lcp_data.canopy_bulk_density_map)
+
+    data['landscape_info'] = {
+        'elev_file': elev_path,
+        'aspect_file': aspect_path,
+        'slope_file': slope_path,
+        'fuel_file': fuel_path,
+        'canopy_cover_file': canopy_cover_path,
+        'canopy_height_file': canopy_base_height_path,
+        'canopy_base_height_file': canopy_base_height_path,
+        'canopy_bulk_density_file': canopy_bulk_density_path,
+        'rows': lcp_data.rows,
+        'cols': lcp_data.cols,
+        'resolution': lcp_data.resolution,
+        'width_m': lcp_data.width_m,
+        'height_m': lcp_data.height_m,
+        'fbfm_type': map_params.fbfm_type
+    }
+
+    # Save the roads data
+    road_path = save_path + '/roads.pkl'
+    with open(road_path, 'wb') as f:
+        pickle.dump(roads, f)
+
+    data['roads'] = {'file': road_path}
+
+    data['initial_igntion'] = [mapping(polygon) for polygon in user_data.initial_ign]
+    data['fire_breaks'] = [{"geometry": mapping(line), "break_width": break_width} for line, break_width in zip(user_data.fire_breaks, user_data.break_widths)]
+
+    map_params.scenario_data = user_data
+
+    with open(save_path + "/map_params.pkl", 'wb') as f:
+        pickle.dump(map_params, f)
+
+    # Save data to JSON
+    folder_name = os.path.basename(save_path)
+    with open(save_path + "/" + folder_name + ".json", 'w') as f:
+        json.dump(data, f, indent=4)
+
+def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Dict[str, Any]]:
+    """
+    Fetches road data from OpenStreetMap (OSM) Overpass API within the specified bounding box.
+    
+    Args:
+        bounds (Tuple): (left, bottom, right, top) in WGS84 coordinates (EPSG:4326).
+
+    Returns:
+        List[Dict]: List of dictionaries containing road coordinates, type, and width-related metadata.
+    """
+    left, bottom, right, top = bounds
+    overpass_url = "http://overpass-api.de/api/interpreter"
+
+    overpass_query = f"""
+    [out:json];
+    (way["highway"]
+    ({bottom}, {left}, {top}, {right});
+    );
+    out body;
+    >;
+    out skel qt;
+    """
+
+    print(f"Querying OSM for road data in bounds: {bounds}")
+    response = requests.get(overpass_url, params={'data': overpass_query})
+
+    if response.status_code != 200:
+        print(f"WARNING: Request failed with status {response.status_code}")
+        return []
+
+    osm_data = response.json()
+
+    # Extract node coordinates
+    nodes = {elem['id']: (elem['lon'], elem['lat']) for elem in osm_data['elements'] if elem['type'] == 'node'}
+
+    # Extract roads
+    roads = []
+    for elem in osm_data['elements']:
+        if elem['type'] == 'way' and 'highway' in elem['tags']:
+            tags = elem['tags']
+            road_type = tags.get('highway')
+            road_coords = [nodes[node_id] for node_id in elem['nodes'] if node_id in nodes]
+            if not road_coords or road_type not in rc.major_road_types:
+                continue
+
+            if tags.get('width'):
+                road_width = float(tags.get('width'))
+
+            elif tags.get('est_width'):
+                road_width = float(tags.get('est_width'))
+            
+            else: # Have to estimate the width
+                num_lanes = tags.get('lanes')
+                lane_width = tags.get('lane_width')
+
+                if num_lanes is not None:
+                    num_lanes = int(num_lanes)
+                    if lane_width is not None:
+                        lane_width = float(lane_width)
+                        road_width = num_lanes * lane_width + rc.shoulder_widths_m[road_type]
+
+                    else:
+                        if road_type == 'motorway' and num_lanes > 2:
+                            road_type = 'big_motorway'
+
+                        road_width = num_lanes * rc.lane_widths_m[road_type] + rc.shoulder_widths_m[road_type]
+
+                elif lane_width is not None :
+                    lane_width = float(lane_width)
+                    road_width = rc.default_lanes * lane_width + rc.shoulder_widths_m[road_type]
+                
+                else:
+                    road_width = rc.default_lanes * rc.lane_widths_m[road_type] + rc.shoulder_widths_m[road_type]
+
+            roads.append((road_coords, road_type, road_width))
+            
+    print(f"Fetched {len(roads)} roads from OSM.")
+    return roads
+
+def resample_raster(array, crs, transform, target_resolution, method):
+    """TODO: insert docstring
+
+    Args:
+        array (_type_): _description_
+        crs (_type_): _description_
+        transform (_type_): _description_
+        target_resolution (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    scale_factor = transform.a / target_resolution
+
+    new_height = int(array.shape[0] * scale_factor)
+    new_width = int(array.shape[1] * scale_factor)
+    
+    # Create the resampled array
+    resampled_array = np.empty((new_height, new_width), dtype=np.float32)
+
+    # Compute the new transform (apply scale inversely)
+    new_transform = transform * transform.scale(1 / scale_factor, 1 / scale_factor)
+    # Perform resampling
+    reproject(
+        source=array.astype(np.float32),
+        destination=resampled_array,
+        src_transform=transform,
+        dst_transform=new_transform,
+        src_crs=crs,
+        dst_crs=crs,
+        resampling=method
+    )
+
+    # Restore NoData values
+    resampled_array[resampled_array == -9999] = np.nan 
+
+    return resampled_array, new_transform
+
+def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
+    """_summary_
+
+    Args:
+        filepath (str): _description_
+        fill_value (int, optional): _description_. Defaults to -9999.
+
+    Returns:
+        Tuple[np.ndarray, list]: _description_
+    """
+    with rasterio.open(map_params.cropped_lcp_path) as src:
+        # Read the lcp file
+        array = src.read() 
+        transform = src.transform
+
+        # Remove NoData rows/cols for all bands
+        non_empty_rows = np.any(array[0] != fill_value, axis=1)
+        non_empty_cols = np.any(array[0] != fill_value, axis=0)
+        array = array[:, non_empty_rows][:, :, non_empty_cols]
+
+        # Adjust transform for cropped data
+        new_transform = transform * Affine.translation(
+            non_empty_cols.argmax(), non_empty_rows.argmax()
+        )
+
+        # Separate processing for categorical and continuous data 
+        resampled_bands = []
+
+        for i in range(array.shape[0]):  # Iterate through all bands
+            if i >= 3: # Check if processing categorical data
+                # Use nearest-neighbor resampling for categorical data
+                resampling_method = Resampling.nearest
+            else:
+                # Use bilinear resampling for continuous data
+                resampling_method = Resampling.bilinear
+            resampled_band, transform = resample_raster(array[i], src.crs, new_transform, DATA_RES, resampling_method)
+            resampled_bands.append(resampled_band)
+
+        resampled_array = np.stack(resampled_bands, axis=0)
+
+    rows, cols = resampled_array.shape[1:]
+
+    map_params.lcp_data = LandscapeData(
+        elevation_map=resampled_array[0],
+        slope_map=resampled_array[1],
+        aspect_map=resampled_array[2],
+        fuel_map=resampled_array[3],
+        canopy_cover_map=resampled_array[4],
+        canopy_height_map=resampled_array[5]/10, # Adjust for how LANDFIRE handles canopy height
+        canopy_base_height_map=resampled_array[6]/10, # Adjust for how LANDFIRE handles canopy base height
+        canopy_bulk_density_map=resampled_array[7]/100, # Adjust for how LANDFIRE handles canopy bulk density
+        fccs_map=resampled_array[8],
+        rows=rows,
+        cols=cols,
+        resolution=DATA_RES,
+        width_m=cols*DATA_RES,
+        height_m=rows*DATA_RES,
+        transform=transform,
+        crs = src.crs
+
+    )
+    
+    # Auto-detect the FBFM used in the input map
+    fuel_values = np.unique(resampled_array[3])
+    if np.any(fuel_values >= 101):
+        map_params.fbfm_type = "ScottBurgan"
+    else:
+        map_params.fbfm_type = "Anderson"
+
+    return src.bounds
+
+def get_user_data(fig: matplotlib.figure.Figure, lcp_data: LandscapeData) -> dict:
     """Function that generates GUI for user to specify initial ignitions and fire-breaks. Returns
     dictionary containing user inputs.
 
@@ -697,47 +634,52 @@ def get_user_data(fig: matplotlib.figure.Figure) -> dict:
     user_data = {}
 
     # display map
-    drawer = PolygonDrawer(fig)
+    drawer = PolygonDrawer(lcp_data, fig)
     plt.show()
 
     if not drawer.valid:
         print("Incomplete data provided. Not writing data to file, terminating...")
         sys.exit(0)
 
-    polygons = drawer.get_ignitions()
-    transformed_polygons = transform_polygons(polygons)
-    shapely_polygons = get_shapely_polys(transformed_polygons)
+    ignitions = drawer.get_ignitions()
+    initial_ignitions = transform_geometries(ignitions)
 
-    polygons = [mapping(polygon) for polygon in shapely_polygons]
+    breaks, break_widths, break_ids = drawer.get_fire_breaks()
+    fire_breaks = transform_geometries(breaks)
 
-    user_data["initial_ignition"] = polygons
-
-    lines, fuel_vals = drawer.get_fire_breaks()
-
-    transformed_lines = transform_lines(lines, DATA_RESOLUTION)
-
-    line_strings = [LineString(line) for line in transformed_lines]
-
-    user_data["fire_breaks"] = [{"geometry": mapping(line), "fuel_value": fuel_value} for line, fuel_value in zip(line_strings, fuel_vals)]
+    user_data = MapDrawerData(
+        fire_breaks = fire_breaks,
+        break_widths = break_widths,
+        break_ids = break_ids,
+        initial_ign = initial_ignitions
+    )
 
     return user_data
 
-def transform_polygons(polygons: list) -> list:
-    """Function to transform polygons to the proper scale for the sim map
+def transform_geometries(geometries: list) -> list:
+    """Transform geometry coordinates to the sim map scale (e.g., scale by 30)."""
+    transformed_geometries = []
 
-    :param polygons: list of polygons drawn by user
-    :type polygons: list
+    for geo in geometries:
+        if isinstance(geo, Point):
+            transformed_pt = Point(geo.x * PX_RES, geo.y * PX_RES)
+            transformed_geometries.append(transformed_pt)
 
-    :return: list of polygons scaled up appropriately
-    :rtype: list
-    """
-    transformed_polygons = []
-    for polygon in polygons:
+        elif isinstance(geo, LineString):
+            scaled_coords = [(x * PX_RES, y * PX_RES) for x, y in geo.coords]
+            scaled_coords = remove_consec_duplicates(scaled_coords)
+            transformed_line = LineString(scaled_coords)
+            transformed_geometries.append(transformed_line)
 
-        transformed_polygon = [(x*DATA_RESOLUTION, y*DATA_RESOLUTION) for x,y in polygon]
-        transformed_polygons.append(transformed_polygon)
+        elif isinstance(geo, Polygon):
+            scaled_coords = [(x * PX_RES, y * PX_RES) for x, y in geo.exterior.coords]
+            transformed_polygon = Polygon(scaled_coords)
+            transformed_geometries.append(transformed_polygon)
 
-    return transformed_polygons
+        else:
+            raise ValueError(f"Unknown geometry type: {type(geo)}")
+
+    return transformed_geometries
 
 def transform_lines(line_segments: list, scale_factor: float) -> list:
     """Function to transform lines to the proper scale for the sim map
@@ -790,21 +732,23 @@ def get_shapely_polys(polygons: list) -> list:
 
 def main():
     file_selector = MapGenFileSelector()
-    file_params = file_selector.run()
+    map_params = file_selector.run()
 
-    if file_params is None:
+    if map_params is None:
         print("User exited before submitting necessary files.")
         sys.exit(0)
 
-    # Initialize figure for GUI
+    # Prompt user to crop their ROI
+    crop_map_data(map_params)
+
+    # Initialize figure for user data GUI
     fig = plt.figure(figsize=(15, 10))
     plt.tick_params(left = False, right = False, bottom = False, labelleft = False,
                     labelbottom = False)
 
-    params = generate_map_from_file(file_params, DATA_RESOLUTION, 1)
-    user_data = get_user_data(fig)
-    save_to_file(params['save_path'], params['fuel_data'], params['topography_data'], params['roads'], user_data, params['bounds'])
-
+    generate_map_from_file(map_params)
+    user_data = get_user_data(fig, map_params.lcp_data)
+    save_to_file(map_params, user_data)
 
 if __name__ == "__main__":
     main()

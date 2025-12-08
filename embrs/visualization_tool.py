@@ -1,525 +1,364 @@
-"""Module responsible for running the visualization tool that allows users to load log files and
-visualize them.
-"""
-import pickle
+from embrs.base_classes.base_visualizer import BaseVisualizer
+from embrs.utilities.data_classes import PlaybackVisualizerParams, VisualizerInputs
+from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry, PredictionEntry
+from embrs.utilities.file_io import VizFolderSelector
+from shapely.geometry import Polygon, LineString
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+import pyarrow.parquet as pq
+import pandas as pd
+from tqdm import tqdm
+import json
 import sys
 import os
-import matplotlib as mpl
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-from matplotlib.animation import FuncAnimation
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
-import matplotlib.colors as mcolors
-from matplotlib import cm
-from shapely.geometry import LineString
-import pandas as pd
+import io
+import zlib
+import base64
+from datetime import datetime
 import numpy as np
-import msgpack
-
-from embrs.utilities.file_io import VizFolderSelector, LoaderWindow
-from embrs.utilities.fire_util import CellStates, FireTypes
-from embrs.utilities.fire_util import FuelConstants as fc, RoadConstants as rc, UtilFuncs as util
+from dataclasses import fields as dc_fields, MISSING
 
 
-class VisualizationTool:
-    """Class for visualizing fire simulations from their log files
+class PlaybackVisualizer(BaseVisualizer):
+    def __init__(self, params: PlaybackVisualizerParams):
 
-    :param data: dictionary of data retrieved from visualization tool's file IO interface
-    :type data: dict
-    """
-    def __init__(self, data: dict):
-        """Constructor method that takes in dictionary of visualization data and generates the
-        initial figure.
-        """
-        if data is None:
+        if params is None:
             sys.exit(0)
 
-        self.loader_window = LoaderWindow('Loading...', max_value=8)
-        self.loader_window.set_text("Loading sim data...")
+        self.config_params = params
 
-        log_file = data['file']
-        self.update_freq_s = data['freq']
-        self.scale_km = data['scale_km']
-        self.show_legend = data['legend']
-        init_location = data['init_location']
-        self.has_agents = data['has_agents']
+        self.log_file = params.cell_file
+        self.update_freq_s = float(params.freq)
+        self.show_legend = params.show_legend
+        init_location = params.init_location
+        self.has_agents = params.has_agents
+        self.has_actions = params.has_actions
+        self.has_predictions = params.has_predictions
 
         if self.has_agents:
-            agent_file = data['agent_file']
+            self.agent_file = params.agent_file
 
-        filename = os.path.basename(log_file)
-        run_folder = os.path.dirname(log_file)
+        if self.has_actions:
+            self.action_file = params.action_file
+
+        if self.has_predictions:
+            self.prediction_file = params.prediction_file
+
+        self.save_video = params.save_video
+
+        run_folder = os.path.dirname(self.log_file)
         log_folder = os.path.dirname(run_folder)
 
-        # Get initial state of the system
+        if self.save_video:
+            self.video_name = params.video_name
+            self.video_fps = params.video_fps
+            self.save_folder = params.video_folder
+            self.save_path = os.path.join(self.save_folder, f"{self.video_name}")
+
+        self.show_viz = params.show_visualization
+
         if init_location:
-            init_path = f"{log_folder}/init_fire_state.pkl"
+            init_path = f"{log_folder}/init_state.parquet"
         else:
-            init_path = f"{os.path.dirname(log_folder)}/init_fire_state.pkl"
+            init_path = f"{os.path.dirname(log_folder)}/init_state.parquet"
 
-        with open(init_path, 'rb') as f:
-            self.sim = pickle.load(f)
+        input_params = self.get_input_params(init_path)
 
-        # Get wind object
-        self.wind = self.sim['wind_vec']
+        # Build all frame caches BEFORE calling BaseVisualizer (so we know max_frame etc.)
+        self._build_frame_caches()
 
-        grid_width = self.sim['grid_width']
-        grid_height = self.sim['grid_height']
-        cell_size = self.sim['cell_size']
+        super().__init__(input_params, render=self.show_viz)
 
-        width_m = grid_width * np.sqrt(3) * cell_size
-        height_m = grid_height * 1.5 * cell_size
+    # ---------- Fast pre-load & conversion ----------
 
-        # Get all sim data
-        with open(run_folder + '/' + filename, 'rb') as f:
-            self.data = msgpack.unpack(f, strict_map_key = False)
+    def _dc_field_names(self, cls):
+        return [f.name for f in dc_fields(cls)]
 
-        self.loader_window.set_text("Clustering data based on display frequency...")
-        # Cluster the data based on update frequency
-        self.cluster_data()
-
-        # Get agent data if present
-        if self.has_agents:
-            with open(agent_file, 'rb') as f:
-                self.agent_data = pickle.load(f)
-
-        self.loader_window.increment_progress()
-        self.loader_window.set_text("Initializing figure...")
-
-        # Set axis parameters
-        h_fig = plt.figure(figsize=(10, 10))
-        h_ax = h_fig.add_axes([0.05, 0.05, 0.9, 0.9])
-        h_ax.set_aspect('equal')
-        h_ax.axis([0, self.sim['cell_size']*self.sim['grid_width']*np.sqrt(3) -
-                 (self.sim['cell_size']*np.sqrt(3)/2), 0,
-                  self.sim['cell_size']*1.5*self.sim['grid_height'] - (self.sim['cell_size']*1.5)])
-
-        plt.tick_params(left = False,
-                        right = False,
-                        bottom = False,
-                        labelleft = False,
-                        labelbottom = False)
-
-        self.loader_window.increment_progress()
-        self.loader_window.set_text("Generating contour map...")
-
-        # Generate contour map
-        x = np.arange(0, self.sim['grid_width']+1)
-        y = np.arange(0, self.sim['grid_height']+1)
-        X, Y = np.meshgrid(x, y)
-
-        cont = h_ax.contour(X*self.sim['cell_size']*np.sqrt(3),Y*self.sim['cell_size']*1.5,
-                            self.sim['coarse_topography'], colors='k', zorder=2)
-        h_ax.clabel(cont, inline=True, fontsize=10, zorder=3)
-
-        self.loader_window.increment_progress()
-        self.loader_window.set_text("Adding patches for each cell...")
-
-        # Add low and high polygons to prevent weird color mapping
-        low_poly = mpatches.RegularPolygon((-10, -10), numVertices=6,
-                                           radius=1/np.sqrt(3),orientation=0)
-
-        high_poly = mpatches.RegularPolygon((-10, -10), numVertices=6,
-                                            radius=1/np.sqrt(3),orientation=0)
-
-        fire_patches = [low_poly, high_poly]
-        prescribe_patches = [low_poly, high_poly]
-        tree_patches = [low_poly, high_poly]
-        burnt_patches = []
-        fire_breaks = [low_poly, high_poly]
-        alpha_arr = [0, 1]
-        break_fuel_arr = [0, 1]
-
-        added_colors = set()
-        legend_elements = []
-
-        # Draw each cell based on initial states
-        for curr_cell in self.sim['cell_dict'].values():
-            polygon = mpatches.RegularPolygon((curr_cell.x_pos, curr_cell.y_pos),
-                                               numVertices=6, radius=self.sim['cell_size'],
-                                               orientation=0)
-
-            if curr_cell.state == CellStates.FUEL:
-                color = fc.fuel_color_mapping[curr_cell.fuel_type.fuel_type]
-                if color not in added_colors:
-                    added_colors.add(color)
-                    legend_elements.append(mpatches.Patch(color = color,
-                                                          label = curr_cell.fuel_type.name))
-
-                if curr_cell.fuel_content < 1 and curr_cell.fuel_type.fuel_type < 90:
-                    fire_breaks.append(polygon)
-                    break_fuel_arr.append(curr_cell.fuel_content)
-
-                else:
-                    polygon.set(color = color)
-                    tree_patches.append(polygon)
-
-            elif curr_cell.state == CellStates.FIRE:
-                if curr_cell.fire_type == FireTypes.WILD:
-                    fire_patches.append(polygon)
-                    alpha_arr.append(curr_cell.fuel_content)
-                else:
-                    prescribe_patches.append(polygon)
-
+    def _dc_default_map(self, cls):
+        d = {}
+        for f in dc_fields(cls):
+            if f.default is not MISSING:
+                d[f.name] = f.default
+            elif getattr(f, "default_factory", MISSING) is not MISSING:  # type: ignore[attr-defined]
+                d[f.name] = f.default_factory()  # type: ignore[attr-defined]
             else:
-                burnt_patches.append(polygon)
+                d[f.name] = None
+        return d
 
-        # Add all patches to collections
-        if tree_patches:
-            tree_patches = np.array(tree_patches)
-            tree_coll =  PatchCollection(tree_patches, match_original=True)
-            h_ax.add_collection(tree_coll)
-        if fire_patches:
-            fire_patches = np.array(fire_patches)
-            fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
-            fire_coll.set(array=np.array(alpha_arr), cmap=mpl.colormaps["gist_heat"])
-            h_ax.add_collection(fire_coll)
-        if prescribe_patches:
-            prescribe_patches = np.array(prescribe_patches)
-            prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='pink')
-            h_ax.add_collection(prescribe_coll)
-        if burnt_patches:
-            burnt_patches = np.array(burnt_patches)
-            burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
-            h_ax.add_collection(burnt_coll)
-
-        if len(fire_breaks) > 0:
-            breaks_coll = PatchCollection(fire_breaks, edgecolor='none')
-            breaks_coll.set(array= break_fuel_arr, cmap=mpl.colormaps["gist_gray"])
-            h_ax.add_collection(breaks_coll)
-
-        self.loader_window.increment_progress()
-        self.loader_window.set_text("Adding info artists...")
-
-        # Generate time display area
-        self.time_box = mpatches.Rectangle((0,self.sim['grid_height']*1.5*self.sim['cell_size']
-                                            -(150/6000)*height_m), (1000/6000)*width_m,
-                                            (150/6000)*height_m, facecolor='white',
-                                            edgecolor='black', linewidth=1, zorder=3, alpha = 0.75)
-        h_ax.add_patch(self.time_box)
-
-        sim_time_s = 0
-        time_str = util.get_time_str(sim_time_s)
-
-        rx, ry = self.time_box.get_xy()
-        cx = rx + self.time_box.get_width()/2
-        cy = ry + self.time_box.get_height()/2
-
-        self.simtext = h_ax.text(2*cx - 20, cy, time_str, ha='right', va='center')
-        timeheader = h_ax.text(20, cy, 'Time: ', ha='left',va ='center')
-        h_ax.add_artist(timeheader)
-
-        # Generate wind display area
-        self.wind_box = mpatches.Rectangle((0, self.sim['grid_height']*1.5*self.sim['cell_size']
-                                            -(650/6000)*height_m), (500/6000)*width_m,
-                                            (500/6000)*height_m, facecolor='white',
-                                            edgecolor = 'black', linewidth=1, zorder = 3,
-                                            alpha = 0.75)
-
-        h_ax.add_patch(self.wind_box)
-
-        wx, wy = self.wind_box.get_xy()
-        cx = wx + self.wind_box.get_width()/2
-
-        windheader = h_ax.text(cx, wy + 0.85 * self.wind_box.get_height(), 'Wind:', ha = 'center',
-                               va = 'center')
-
-        h_ax.add_artist(windheader)
-
-        # Generate scale area
-        scale_box = mpatches.Rectangle((0, 10), self.scale_km*1000 + 100, (200/6000)*height_m,
-                                       facecolor='white', edgecolor='k', linewidth= 1, alpha=0.75,
-                                       zorder= 3)
-        h_ax.add_patch(scale_box)
-
-        num_cells_scale = self.scale_km * 1000
-
-        if self.scale_km < 1:
-            scale_size = str(self.scale_km * 1000) + "m"
+    def _read_parquet(self, path, columns=None, sort_by=None):
+        """Read parquet with optional column projection & stable sort."""
+        if columns is None:
+            df = pd.read_parquet(path)
         else:
-            scale_size = str(self.scale_km) + "km"
+            # Intersect requested columns with available ones
+            schema = pq.read_schema(path)
+            names = set(schema.names)
+            keep = [c for c in columns if c in names]
+            df = pd.read_parquet(path, columns=(keep if keep else None))
+        if sort_by:
+            keep = [c for c in sort_by if c in df.columns]
+            if keep:
+                df = df.sort_values(keep, kind="mergesort")
+        return df
 
-        scalebar = AnchoredSizeBar(h_ax.transData, num_cells_scale, scale_size, 'lower left',
-                                   color ='k', pad = 0.1, frameon=False)
+    def _to_entries(self, df: pd.DataFrame, cls):
+        """Convert DataFrame rows to dataclass instances, selecting exactly the fields and filling defaults."""
+        if df is None or len(df) == 0:
+            return []
+        names = self._dc_field_names(cls)
+        defaults = self._dc_default_map(cls)
+        # Make sure all fields exist
+        for c in names:
+            if c not in df.columns:
+                df[c] = defaults.get(c, None)
+        # Select exactly the dataclass fields (drop extras like 'frame')
+        view = df[names]
+        return [cls(**row._asdict()) for row in view.itertuples(index=False)]
 
-        h_ax.add_artist(scalebar)
-
-        self.loader_window.increment_progress()
-
-        # Plot roads if they exist
-        if 'roads' in self.sim.keys():
-            self.loader_window.set_text("Plotting roads...")
-            roads = self.sim['roads']
-
-            for road in roads:
-                x_trimmed = []
-                y_trimmed = []
-
-                x, y = zip(*road[0])
-                for i in range(len(x)):
-                    if 0 <x[i]/30 <self.sim['grid_width'] and 0 < y[i]/30 <self.sim['grid_height']:
-                        x_trimmed.append(x[i])
-                        y_trimmed.append(y[i])
-
-                x = tuple(xi for xi in x_trimmed)
-                y = tuple(yi for yi in y_trimmed)
-
-                road_color = rc.road_color_mapping[road[1]]
-
-                h_ax.plot(x, y, color= road_color)
-
-                if road_color not in added_colors:
-                    added_colors.add(road_color)
-                    legend_elements.append(mpatches.Patch(color=road_color,
-                                                          label = f"Road - {road[1]}"))
-
-
-        fire_breaks = self.sim['fire_breaks']
-
-        # Create a colormap for grey shades
-        cmap = mpl.colormaps["Greys_r"]
-
-        for fire_break in fire_breaks:
-            line = fire_break['geometry']
-            fuel_val = fire_break['fuel_value']
-            if isinstance(line, LineString):
-                # Normalize the fuel_val between 0 and 1
-                normalized_fuel_val = fuel_val / 100.0
-                color = cmap(normalized_fuel_val)
-                x, y = line.xy
-                h_ax.plot(x, y, color=color)
-
-        self.loader_window.increment_progress()
-
-        # Add legend area
-        if self.show_legend:
-            h_ax.legend(handles=legend_elements, loc='upper right', borderaxespad=0)
-
-        # Create class objects
-        self.arrow_obj = None
-        self.windtext = None
-        self.anim = None
-        self.static_artists = []
-        self.h_ax = h_ax
-        self.fig = h_fig
-
-        self.loader_window.increment_progress()
-        self.loader_window.set_text("Rendering...")
-
-        # Pause to allow rendering to complete
-        plt.pause(1)
-
-        self.loader_window.close()
-
-    def update_viz(self, frame: int) -> list:
-        """Function that updates the visualization based on all the changes to the state since the
-        last frame
-
-        :param frame: current frame the visualization is on
-        :type frame: int
-        :return: list of artists drawn
-        :rtype: list
-        """
-        # Create an array to hold elements to be changed
-        artists = []
-
-        # Reset static artists if viz has restarted
-        if frame == 0:
-            self.static_artists = []
-
-        # Get current time in seconds
-        curr_time = frame * self.update_freq_s
-
-        # Get updated cells for this iteration
-        updated_cells = self.data[frame]
-
-        # Update wind vector
-        self.wind._update_wind(curr_time)
-
-        # Add low and high polygons to prevent weird color mapping
-        low_poly = mpatches.RegularPolygon((-10, -10), numVertices=6, radius=1/np.sqrt(3),
-                                            orientation=0)
-
-        high_poly = mpatches.RegularPolygon((-10, -10), numVertices=6, radius=1/np.sqrt(3),
-                                            orientation=0)
-
-        fire_patches = [low_poly, high_poly]
-        tree_patches = [low_poly, high_poly]
-        burnt_patches = []
-        prescribe_patches = [low_poly, high_poly]
-
-        alpha_arr = [0,1]
-
-        soak_xs = []
-        soak_ys = []
-        c_vals = []
-
-        # Get initial state to apply static properties of cells
-        cell_dict = self.sim['cell_dict']
-
-        # Draw all the cells that need to be updated
-        for cell in updated_cells:
-            c = cell_dict[cell['id']]
-
-            polygon = mpatches.RegularPolygon((c.x_pos, c.y_pos), numVertices=6,
-                                              radius=self.sim['cell_size'], orientation=0)
-
-            if cell['state'] == CellStates.FUEL:
-                color=np.array(list(mcolors.to_rgba(fc.fuel_color_mapping[c.fuel_type.fuel_type])))
-                # Scale color based on cell's fuel content
-                color = color *  cell['fuel_content']
-                polygon.set_facecolor(color)
-                tree_patches.append(polygon)
-
-                if cell['dead_m'] > 0.08: # fuel moisture not nominal
-                    soak_xs.append(c.x_pos)
-                    soak_ys.append(c.y_pos)
-                    c_val = cell['dead_m']/fc.dead_fuel_moisture_ext_table[c.fuel_type.fuel_type]
-                    c_val = np.min([1, c_val])
-                    c_vals.append(c_val)
-
-            elif cell['state'] == CellStates.FIRE:
-                if cell['fire_type'] == FireTypes.WILD:
-                    fire_patches.append(polygon)
-                    alpha_arr.append(cell['fuel_content'])
-                else:
-                    prescribe_patches.append(polygon)
-
-            else:
-                burnt_patches.append(polygon)
-
-        color_map = cm.get_cmap('Blues')
-        norm = mcolors.Normalize(vmin=0, vmax=1)
-        moisture_viz = self.h_ax.scatter(soak_xs, soak_ys, c=c_vals, cmap=color_map, marker='2',
-                                         norm=norm)
-
-        self.static_artists.append(moisture_viz)
-
-        # Add patches to collections
-        if tree_patches:
-            tree_patches = np.array(tree_patches)
-            tree_coll =  PatchCollection(tree_patches, match_original=True)
-            self.h_ax.add_collection(tree_coll)
-            artists.append(tree_coll)
-        if fire_patches:
-            fire_patches = np.array(fire_patches)
-            fire_coll = PatchCollection(fire_patches, edgecolor='none', facecolor='#F97306')
-            fire_coll.set(array=np.array(alpha_arr), cmap=mpl.colormaps["gist_heat"])
-            self.h_ax.add_collection(fire_coll)
-            artists.append(fire_coll)
-        if prescribe_patches:
-            prescribe_patches = np.array(prescribe_patches)
-            prescribe_coll = PatchCollection(prescribe_patches, edgecolor='none', facecolor='pink')
-            self.h_ax.add_collection(prescribe_coll)
-            artists.append(prescribe_coll)
-        if burnt_patches:
-            burnt_patches = np.array(burnt_patches)
-            burnt_coll = PatchCollection(burnt_patches, edgecolor='none', facecolor='k')
-            artists.append(burnt_coll)
-            self.h_ax.add_collection(burnt_coll)
-            self.static_artists.append(burnt_coll)
-
-        # Update wind text
-        wx, wy = self.wind_box.get_xy()
-        cx = wx + self.wind_box.get_width()/2
-        cy = wy + self.wind_box.get_height()/2
-
-        self.windtext = self.h_ax.text(cx, wy + 0.1 * self.wind_box.get_height(),
-                                       str(np.round(self.wind.wind_speed,2)) + " m/s",
-                                       ha = 'center', va = 'center')
-
-        artists.append(self.windtext)
-
-        # Update wind vector
-        if self.wind.wind_speed != 0:
-            wind_dir_vec = self.wind.vec/np.linalg.norm(self.wind.vec)
-            dx = wind_dir_vec[0]
-            dy = wind_dir_vec[1]
-            arrow_len = self.wind_box.get_height()/3
-
-            self.arrow_obj = self.h_ax.arrow(cx-(arrow_len*dx) , cy-(arrow_len*dy), dx*arrow_len,
-                                             dy*arrow_len, width=10, head_width = 50, color = 'r',
-                                             zorder= 3)
-
+    def _bin_by_frame(self, df: pd.DataFrame, id_col: str | None = "id"):
+        """Compute frame index and keep last row per (frame,id)."""
+        if "timestamp" not in df.columns:
+            return pd.DataFrame(columns=df.columns.tolist() + ["frame"])
+        # Clean timestamps
+        df = df[pd.notnull(df["timestamp"])]
+        df = df[df["timestamp"] >= 0]
+        # Compute frame indices
+        df = df.copy()
+        df["frame"] = np.floor_divide(df["timestamp"].to_numpy(float), self.update_freq_s).astype(np.int64)
+        # Keep last per (frame, id) if id exists, else last per frame
+        if id_col and (id_col in df.columns):
+            df = df.sort_values([id_col, "timestamp"], kind="mergesort")
+            df = df.groupby(["frame", id_col], sort=False, as_index=False).tail(1)
         else:
-            self.arrow_obj = self.h_ax.text(cx, cy, 'X', fontsize = 20, color = 'r', ha='center',
-                                            va = 'center')
+            df = df.sort_values(["frame", "timestamp"], kind="mergesort")
+            df = df.groupby(["frame"], sort=False, as_index=False).tail(1)
+        return df
 
-        artists.append(self.arrow_obj)
+    def _build_frame_caches(self):
+        """Load once, bin into frames once, convert to dataclasses once."""
+        # ---- Cells (driver) ----
+        # Read ALL columns to satisfy CellLogEntry (unknown fields) + id/timestamp
+        cell_df = self._read_parquet(self.log_file)
+        cell_df = self._bin_by_frame(cell_df, id_col="id")
+        self.max_frame = int(cell_df["frame"].max()) if not cell_df.empty else -1
 
-        # Update time string
-        time_str = util.get_time_str(curr_time)
+        self.cells_by_frame = {}
+        for f, g in cell_df.groupby("frame", sort=True):
+            self.cells_by_frame[int(f)] = self._to_entries(g, CellLogEntry)
 
-        rx, ry = self.time_box.get_xy()
-        cx = rx + self.time_box.get_width()/2
-        cy = ry + self.time_box.get_height()/2
-
-        # Plot agents for this iteration
+        # ---- Agents (optional) ----
+        self.agents_by_frame = {}
         if self.has_agents:
-            if curr_time in self.agent_data:
-                agents = self.agent_data[curr_time]
+            ag_df = self._read_parquet(self.agent_file)
+            ag_df = self._bin_by_frame(ag_df, id_col="id")
+            for f, g in ag_df.groupby("frame", sort=True):
+                self.agents_by_frame[int(f)] = self._to_entries(g, AgentLogEntry)
+            if self.max_frame < 0 and not ag_df.empty:
+                self.max_frame = int(ag_df["frame"].max())
 
-                for a in agents:
-                    agent_disp = self.h_ax.scatter(a["x"], a["y"], marker=a["marker"],
-                                                   color=a["color"])
-                    if a["label"] is not None:
-                        agent_label = self.h_ax.annotate(str(a["label"]), (a["x"], a["y"]))
-                        artists.append(agent_label)
-                    artists.append(agent_disp)
+        # ---- Actions (optional) ----
+        self.actions_by_frame = {}
+        if self.has_actions:
+            act_df = self._read_parquet(self.action_file)
+            act_df = self._bin_by_frame(act_df, id_col=None)  # actions may not have 'id'
+            for f, g in act_df.groupby("frame", sort=True):
+                self.actions_by_frame[int(f)] = self._to_entries(g, ActionsEntry)
+            if self.max_frame < 0 and not act_df.empty:
+                self.max_frame = int(act_df["frame"].max())
 
-        self.simtext.set_visible(False)
-        self.simtext = self.h_ax.text(2*cx - 20 , cy, time_str, ha='right', va='center')
-        artists.append(self.simtext)
+        # ---- Predictions (optional) ----
+        self.prediction_by_frame = {}
+        if self.has_predictions:
+            pr_df = self._read_parquet(self.prediction_file, columns=["timestamp", "prediction"], sort_by=["timestamp"])
+            if "timestamp" in pr_df.columns:
+                pr_df = pr_df.copy()
+                pr_df["frame"] = np.floor_divide(pr_df["timestamp"].to_numpy(float), self.update_freq_s).astype(np.int64)
+                # Keep last per frame
+                pr_df = pr_df.groupby("frame", sort=False, as_index=False).tail(1)
+                # Decode JSON once
+                if "prediction" in pr_df.columns:
+                    pr_df["prediction"] = pr_df["prediction"].map(
+                        lambda s: {int(k): tuple(v) for k, v in json.loads(s).items()} if isinstance(s, str) else s
+                    )
+                for f, row in pr_df.set_index("frame").iterrows():
+                    self.prediction_by_frame[int(f)] = row.get("prediction", None)
+                if self.max_frame < 0 and not pr_df.empty:
+                    self.max_frame = int(pr_df["frame"].max())
 
-        return artists + self.static_artists
+        # Final guard
+        if self.max_frame < 0:
+            self.max_frame = 0
+
+    # ---------- BaseVisualizer inputs / init_state ----------
+
+    def get_input_params(self, init_path: str):
+        table = pq.read_table(init_path)
+        metadata = table.schema.metadata
+
+        if metadata and b"init_metadata" in metadata:
+            meta_dict = json.loads(metadata[b"init_metadata"].decode("utf-8"))
+        else:
+            meta_dict = {}
+
+        decoded_wind = self.deserialize_array(meta_dict["wind_forecast"])
+
+        fire_breaks = []
+        for fb in meta_dict["fire_breaks"]:
+            ls_dict = fb[0]
+            fire_breaks.append((LineString(ls_dict["coordinates"]), fb[1], fb[2]))
+
+        params = VisualizerInputs(
+            cell_size=meta_dict["cell_size"],
+            sim_shape=(meta_dict["rows"], meta_dict["cols"]),
+            sim_size=(meta_dict["width_m"], meta_dict["height_m"]),
+            start_datetime=datetime.fromisoformat(meta_dict["start_datetime"]),
+            north_dir_deg=meta_dict["north_dir_deg"],
+            wind_forecast=decoded_wind,
+            wind_resolution=meta_dict["wind_resolution"],
+            wind_t_step=meta_dict["wind_time_step"],
+            wind_xpad=meta_dict["wind_xpad"],
+            wind_ypad=meta_dict["wind_ypad"],
+            temp_forecast=meta_dict["temp_forecast"],
+            rh_forecast=meta_dict["rh_forecast"],
+            forecast_t_step=meta_dict["forecast_t_step"],
+            elevation=meta_dict["elevation"],
+            roads=meta_dict["roads"],
+            fire_breaks=fire_breaks,
+            init_entries=self.get_init_entries(init_path),
+            scale_bar_km=self.config_params.scale_km,
+            show_legend=self.show_legend,
+            show_wind_cbar=self.config_params.show_wind_cbar,
+            show_wind_field=self.config_params.show_wind_field,
+            show_weather_data=self.config_params.show_weather_data,
+            show_compass=self.config_params.show_compass,
+            show_temp_in_F=self.config_params.show_temp_in_F,
+        )
+
+        return params
+
+    def deserialize_array(self, encoded_str: str):
+        compressed = base64.b64decode(encoded_str)
+        decompressed = zlib.decompress(compressed)
+        buffer = io.BytesIO(decompressed)
+        return np.load(buffer, allow_pickle=False)
+
+    def get_init_entries(self, init_pq_file: str) -> list[CellLogEntry]:
+        df = pd.read_parquet(init_pq_file)
+        # Convert to dataclasses (in case schema contains extras)
+        names = self._dc_field_names(CellLogEntry)
+        for c in names:
+            if c not in df.columns:
+                df[c] = None
+        df = df[names]
+        entries = [CellLogEntry(**row._asdict()) for row in df.itertuples(index=False)]
+        return entries
+
+    # ---------- Fast animation loop (no parquet reads, no heavy work) ----------
 
     def run_animation(self):
-        """Runs animation based on the time steps of the simulation
+        if self.save_video:
+            os.makedirs(self.save_folder, exist_ok=True)
+
+        writer = None
+        if self.save_video:
+            FFMpegWriter = animation.writers["ffmpeg"]
+            writer = FFMpegWriter(
+                fps=self.video_fps, metadata=dict(artist="EMBRS"), bitrate=1800
+            )
+            # Slightly lower DPI can speed up encoding notably
+            writer.setup(self.fig, self.save_path, dpi=80)
+
+        total_frames = self.max_frame + 1
+        pbar = tqdm(total=total_frames, desc="Playback Progress:", unit="frame")
+
+        for f in range(total_frames):
+            t = f * self.update_freq_s
+
+            cells = self.cells_by_frame.get(f, [])
+            agents = self.agents_by_frame.get(f, []) if self.has_agents else []
+            actions = self.actions_by_frame.get(f, []) if self.has_actions else []
+            pred = self.prediction_by_frame.get(f, None) if self.has_predictions else None
+
+            if pred is not None:
+                self.visualize_prediction(pred)
+
+            # IMPORTANT: BaseVisualizer.update_grid expects dataclass lists.
+            self.update_grid(t, cells, agents, actions)
+
+            if writer:
+                writer.grab_frame()
+
+            pbar.update(1)
+
+        if writer:
+            writer.finish()
+
+        self.close()
+
+    # ---------- One-off arrival plot (kept out of the loop) ----------
+
+    def extract_sim_hexagons_and_times(self):
         """
-        time_steps = self.data.keys()
-        self.anim = FuncAnimation(self.fig, self.update_viz, frames=time_steps, interval=1,
-                                  blit=True)
-
-        plt.show()
-
-    def cluster_data(self):
-        """Function that clusters data into groups of time steps based on the user's selection
-        of sim time per frame to be displayed
+        Extract hexagon geometries and arrival times from sim logs.
+        Returns:
+            hexagons (list of Polygon)
+            arrival_times (list of float)
         """
-        # Convert the dictionary into a DataFrame
-        df = pd.concat({k: pd.DataFrame(v) for k, v in self.data.items()}, names=['timestamp'])
+        df = pd.read_parquet(self.log_file, columns=["x", "y", "arrival_time"])
+        df = df[(df["arrival_time"].notnull()) & (df["arrival_time"] >= 0)]
+        df = df.sort_values("arrival_time").drop_duplicates(subset=["x", "y"], keep="last")
 
-        # Reset the index to get timestamp as a column
-        df.reset_index(level=0, inplace=True)
+        df["x_global"] = df["x"]
+        df["y_global"] = df["y"]
 
-        # Create a new column 'bins' that will represent the new intervals
-        df['bins'] = df['timestamp'] // self.update_freq_s
+        hexagons = [
+            create_hexagon(row["x_global"], row["y_global"], self.cell_size)
+            for _, row in df.iterrows()
+        ]
 
-        # Group by 'id' and 'bins', and keep the last entry in each group
-        df = df.groupby(['id', 'bins']).last()
+        arrival_times = df["arrival_time"].tolist()
+        return hexagons, arrival_times
 
-        # Reset index to get back original structure
-        df.reset_index(inplace=True)
+    def display_arrival(self):
+        hexes, times = self.extract_sim_hexagons_and_times()
 
-        # Group by 'bins' and convert each group to a dictionary, then convert to a dictionary
-        result = df.groupby('bins').apply(lambda x: x.drop(columns=['bins']).to_dict('records')).to_dict()
+        pts = [poly.centroid for poly in hexes]
+        # Convert to minutes if your arrival_time is in seconds
+        times = np.asarray(times, dtype=float) / 60.0
 
-        self.data = result
+        cmap = mpl.cm.get_cmap("viridis")
+        norm = plt.Normalize(np.nanmin(times), np.nanmax(times))
 
-def run(data: dict):
-    """Function to run after a user selects the visualization parameters to run. Constructs a 
-    VisualizationTool instance with input data and calls the 'run_animation' function
+        sc = self.h_ax.scatter([pt.x for pt in pts], [pt.y for pt in pts], c=times, cmap=cmap, norm=norm, s=5)
+        self.fig.colorbar(sc, ax=self.h_ax, label="Arrival Time (mins)", shrink=0.75)
+        self.fig.canvas.draw()
 
-    :param data: _description_
-    :type data: dict
-    """
-    viz = VisualizationTool(data)
+
+# ---------- helpers outside the class ----------
+
+def create_hexagon(center_x, center_y, radius):
+    angles = np.linspace(0, 2 * np.pi, 7)[:-1] + np.pi / 6
+    x_vertices = center_x + radius * np.cos(angles)
+    y_vertices = center_y + radius * np.sin(angles)
+    return Polygon(zip(x_vertices, y_vertices))
+
+
+def run(params: PlaybackVisualizerParams):
+    viz = PlaybackVisualizer(params)
     viz.run_animation()
 
+
+def display(params: PlaybackVisualizerParams):
+    viz = PlaybackVisualizer(params)
+    viz.display_arrival()
+
+
 def main():
-    folder_selector = VizFolderSelector(run)
+    folder_selector = VizFolderSelector(run, display)
     folder_selector.run()
+
 
 if __name__ == "__main__":
     main()

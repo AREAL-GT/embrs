@@ -1,4 +1,13 @@
-"""Core fire simulation model.
+"""
+Core fire simulation model.
+
+This module defines the `FireSim` class, which implements a **wildfire simulation** 
+based on fire spread dynamics, wind conditions, and terrain influences. It extends 
+`BaseFireSim` and incorporates **hexagonal grid modeling** to track fire behavior 
+at a cellular level.
+
+Classes:
+    - FireSim: The main wildfire simulation model.
 
 .. autoclass:: FireSim
     :members:
@@ -6,265 +15,315 @@
 
 from tqdm import tqdm
 import numpy as np
+import copy
 
 from embrs.base_classes.base_fire import BaseFireSim
-from embrs.utilities.fire_util import CellStates, FireTypes, FuelConstants
-from embrs.utilities.fire_util import ControlledBurnParams
+from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
+from embrs.utilities.data_classes import SimParams
 from embrs.fire_simulator.cell import Cell
-from embrs.fire_simulator.wind import Wind
+
+from embrs.models.rothermel import *
+from embrs.models.crown_model import crown_fire
 
 class FireSim(BaseFireSim):
-    """Fire simulator class utilizing a probabilistic fire model.
-    
-    Based on the work of `Trucchia et. al <https://www.mdpi.com/2571-6255/3/3/26>`_. The basis of
-    the simulator is a hexagonal grid, each cell in the  grid is a 
-    :class:`~fire_simulator.cell.Cell` object that contains all the pertinent fire spread parameters
-    for that cell. The simulator takes into account the effects of fuel, slope, and wind on the
-    fire propagation.
+    """A hexagonal grid-based wildfire simulation model.
 
-    :param fuel_map: 2D array that represents the spatial distribution of fuel types in the sim.
-                     Each element must be one of the
-                     `13 Anderson FBFMs <https://www.fs.usda.gov/rm/pubs_int/int_gtr122.pdf>`_.
-                     Note: array is flipped across the horizontal axis after input.
-    :type fuel_map: np.ndarray
-    :param fuel_res: Resolution of the fuel map in meters. How many meters each row/column
-                     represents in space
-    :type fuel_res: float
-    :param topography_map: 2D array that represents the elevation in meters at each point in space.
-                           Note: array is flipped across the
-                           horizontal axis after input.
-    :type topography_map: np.ndarray
-    :param topography_res: Resolution of the topography map in meters. How many meters each
-                           row/column represents in space.
-    :type topography_res: float
-    :param wind_vec: Wind object defining the wind conditions for the simulation.
-    :type wind_vec: :class:`~fire_simulator.wind.Wind`
-    :param roads: List of points that will be considered roads for the simulation. Format for each
-                  element in list: ((x,y), fuel_content). Where (x,y) is a tuple containing the
-                  spatial in the sim measured in meters, and fuel_content is the amount of fuel to
-                  be modeled at that point (between 0 and 1)
-    :type roads: list
-    :param fire_breaks: List of dictionaries representing fire-breaks where each dictionary has a
-                        "geometry" key with a :py:attr:`shapely.LineString` value and a 
-                        "fuel_value" key with a float value which represents the amount of fuel
-                        modeled along the :py:attr:`shapely.LineString`.
-    :type fire_breaks: list
-    :param time_step: Time step of the simulation, defines the amount of time each iteration will
-                      model.
-    :type time_step: int
-    :param cell_size: Size of each cell in the simulation, measured as the distance in meters
-                    between two parallel sides of the regular hexagon cells.
-    :type cell_size: float
-    :param duration_s: Duration of time (in seconds) the simulation should run for, the sim will
-                       run for this duration unless the fire is extinguished before the duration
-                       has passed.
-    :type duration_s: float
-    :param initial_ignition: List of shapely polygons that represent the regions of the sim that
-                             should start as initially on fire.
-    :type initial_ignition: list
-    :param size: Size of the simulation backing array (rows, cols)
-    :type size: tuple
-    :param display_freq_s: The amount of time (in seconds) between updating the real-time
-                           visualizer, only used if real-time visualization is selected, defaults
-                           to 300
-    :type display_freq_s: int, optional
+    `FireSim` extends `BaseFireSim` and models wildfire spread using **Rothermel's 
+    fire spread equations**. It focuses on the core fire behavior simulation while
+    inheriting grid management, weather, and terrain functionality from BaseFire.
+
+    Attributes:
+        burnout_thresh (float): The fraction of fuel consumption at which a cell is 
+                                considered fully burned.
+        logger (Optional[Logger]): A logging utility for storing simulation outputs.
+        progress_bar (Optional[tqdm]): A progress bar for tracking simulation steps.
+        _updated_cells (dict): Stores cells that have been modified during the current iteration.
+        _soaked (list): Stores cells that have been suppressed or extinguished.
+        _burning_cells (list): Contains all currently burning cells.
+        _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
+        _agent_list (list): Tracks agents (e.g., firefighters, sensors) interacting with the fire.
+        _agents_added (bool): Indicates whether agents have been added to the simulation.
+        _visualizer (Optional[Visualizer]): Reference to the visualizer for visualization.
+
+    Methods:
+        iterate(): Advances the simulation by one time step.
+        ignite_neighbors(): Attempts to ignite neighboring cells based on spread conditions.
+        _init_iteration(): Resets and updates key variables at the start of each time step.
+        log_changes(): Records simulation updates for logging and visualization.
+        set_visualizer(): Sets the visualizer reference for this simulation.
+        visualize_prediction(): Visualizes a prediction grid on top of the current simulation visualization.
+
+    Notes:
+        - The fire simulation operates on a **point-up hexagonal grid** managed by BaseFire.
+        - Fire spread is calculated using **Rothermel's fire behavior model**.
+        - The simulation tracks both fire progression and suppression efforts.
     """
-    def __init__(self, fuel_map: np.ndarray, fuel_res: float, topography_map: np.ndarray,
-                topography_res: float, wind_vec: Wind, roads: list, fire_breaks: list,
-                time_step: int, cell_size: float, duration_s: float, initial_ignition: list,
-                size: tuple, burnt_cells: list = None, display_freq_s = 300):
-        """Constructor method to initialize a fire simulation instance. Saves input parameters,
-        creates backing array, populates cell_grid and cell_dict with cells, sets initial ignition,
-        applies fire-breaks and roads.
+    def __init__(self, sim_params: SimParams):
+        """Initializes the wildfire simulation with input parameters and sets up core tracking structures.
+
+        This constructor initializes key attributes related to fire progression, cell state tracking, 
+        and agent interactions. It also sets up logging and a progress bar for monitoring 
+        the simulation.
+
+        Args:
+            sim_params (SimParams): A structured input object containing all necessary simulation parameters, 
+                                including terrain, fuel, wind conditions, and ignition points.
+
+        Attributes Initialized:
+            - **Logging & Monitoring:**
+                - `logger` (Optional[Logger]): Handles simulation logging.
+                - `progress_bar` (Optional[tqdm]): Tracks simulation progress visually.
+
+            - **Agent Tracking:**
+                - `_agent_list` (list): Holds agents (firefighters, sensors, etc.) interacting with the fire.
+                - `_agents_added` (bool): Indicates whether agents have been added to the simulation.
         """
-
-        print("Simulation Initializing...")
-
-        # Fuel fraction to be considered BURNT
-        self.burnout_thresh =FuelConstants.burnout_thresh
-
-        self.logger = None
+        print("Fire Simulation Initializing...")
+        
+        # Variable to store tqdm progress bar
         self.progress_bar = None
 
-        self._updated_cells = {}
-        self._curr_updates = []
-
-        self._partially_burnt = []
-        self._soaked = []
-
+        # Variables to keep track of agents in sim
         self._agent_list = []
         self._agents_added = False
 
-        self._curr_fires_cache = []
-        self._curr_fires_anti_cache = []
-        self._curr_fires = set()
+        # Reference to visualizer
+        self._visualizer = None
 
-        self.w_vals = []
-        self.fuels_at_ignition = []
-        self.ignition_clocks = []
+        # Reference to active prediction
+        self.curr_prediction = None
 
-        super().__init__(fuel_map, fuel_res, topography_map,
-                topography_res, wind_vec, roads, fire_breaks,
-                time_step, cell_size, duration_s, initial_ignition,
-                size, burnt_cells = burnt_cells, display_freq_s= display_freq_s)
+        super().__init__(sim_params)
+        
+        # Log frequency (set to 1 hour by default)
+        self._log_freq = int(np.floor(3600 / self._time_step))
 
-        self._init_iteration()
+        self._init_iteration(True)
 
     def iterate(self):
-        """Step forward the fire simulation a single time-step
+        """Advances the fire simulation by one time step.
+
+        This function updates fire propagation, wind conditions, and the state of burning cells.
+        It handles new ignitions, spreads fire based on calculated rates of spread (ROS), 
+        and removes cells that have fully burned.
+
+        Behavior:
+            - On the first iteration (`_iters == 0`):
+                - Marks `self.weather_changed` as `True`.
+                - Initializes `_new_ignitions` with `starting_ignitions`.
+                - Sets the state of newly ignited cells to `CellStates.FIRE` and computes 
+                their initial fire spread parameters.
+            - Adds new ignitions to `_burning_cells` and resets `_new_ignitions`.
+            - Calls `_init_iteration()` to prepare for the time step.
+            - Iterates through burning cells and:
+                1. **Updates wind and fire spread parameters** if wind has changed or if 
+                the cell hasn't reached steady-state ROS.
+                2. **Calculates steady-state rate of spread (`r_ss`) and fireline intensity (`I_ss`)** 
+                using `calc_propagation_in_cell()`.
+                3. **Computes real-time ROS (`r_t`) and fireline intensity (`I_t`)**.
+                4. **Advances fire spread** by updating `fire_spread` distances.
+                5. **Determines if fire has reached the cell edge**, calling `ignite_neighbors()` 
+                to attempt ignition of adjacent cells.
+                6. **Removes fully burned cells** from `_burning_cells` and updates their state 
+                to `CellStates.BURNT`.
+                7. **Increments elapsed time for fire acceleration calculations**.
+            - Calls `log_changes()` to record updates.
+
+        Notes:
+            - Fire spread is calculated using a **hexagonal grid model**.
+            - ROS is updated dynamically based on wind changes and fire behavior.
+            - Fire can only ignite neighboring cells that are still in a **burnable** state.
+            - A mass-loss approach for fuel consumption is **not yet implemented**.
         """
         # Set-up iteration
         if self._init_iteration():
             self._finished = True
             return
-
-        # Update wind
-        self.wind_changed = self._wind_vec._update_wind(self._curr_time_s)
-
-        # Iterate over currently burning cells
-        for curr_cell in self._curr_fires:
-
-            # iterate over burnable neighbors
-            neighbors_to_remove = []
-            for neighbor_id, (dx, dy) in curr_cell._burnable_neighbors:
-                neighbor = self._cell_dict[neighbor_id]
-
-                neighbor_burnable = self.check_if_burnable(curr_cell, neighbor)
-
-                if not neighbor_burnable:
-                    if neighbor.fire_type != FireTypes.PRESCRIBED:
-                        neighbors_to_remove.append((neighbor_id, (dx, dy)))
-
-                else:
-                    prob, v_prop = self._calc_prob(curr_cell, neighbor, (dx, dy))
-
-                    if np.random.random() < prob:
-                        self.set_state_at_cell(neighbor, CellStates.FIRE, curr_cell.fire_type)
-                        neighbor._set_vprop(v_prop)
-                        # Add cell to update dictionary
-                        self._updated_cells[neighbor.id] = neighbor
-
-                        if neighbor.to_log_format() not in self._curr_updates:
-                            self._curr_updates.append(neighbor.to_log_format())
-
-
-                        if neighbor in self._frontier:
-                            self._frontier.remove(neighbor)
-                    else:
-                        if neighbor not in self._frontier:
-                            self._frontier.add(neighbor)
-
-            curr_cell._burnable_neighbors.difference_update(neighbors_to_remove)
-
-            self.capture_cell_changes(curr_cell)
-
-        self.update_fuel_contents()
-
-        self.log_changes()
-
-    def log_changes(self):
-        """Log the changes in state from the current iteration
-        """
-        self._curr_updates.extend(self._partially_burnt)
-        self._curr_updates.extend(self._soaked)
-        self._soaked = []
-        self._iters += 1
-        if self.logger:
-            self.logger.add_to_cache(self._curr_updates.copy(), self.curr_time_s)
-
-            if self.agents_added:
-                self.logger.add_to_agent_cache(self._get_agent_updates(), self.curr_time_s)
-
-    def update_fuel_contents(self):
-        """Update the fuel content of all the burning cells based on the mass-loss algorithm in 
-            `(Coen 2005) <http://dx.doi.org/10.1071/WF03043>`_
-        """
-        curr_fires = self._curr_fires
-        burnout_thresh = self.burnout_thresh
-        time_step = self.time_step
-
-        ignition_clocks = np.array(self.ignition_clocks)
-        fuels_at_ignition = np.array(self.fuels_at_ignition)
-        w_vals = np.array(self.w_vals)
-
-        ignition_clocks += time_step
-        fuel_contents = fuels_at_ignition * np.minimum(1, np.exp(-ignition_clocks/w_vals))
-
-        relational_dict = self._relational_dict
-        updated_cells = self._updated_cells
-        curr_updates = self._curr_updates
-
-        for cell, fuel_content, ignition_clock in zip(curr_fires, fuel_contents, ignition_clocks):
-            cell._fuel_content = fuel_content
-            cell.ignition_clock = ignition_clock
-
-            burnout_thresh = cell.fuel_at_ignition * ControlledBurnParams.burnout_fuel_frac if cell.fire_type == FireTypes.PRESCRIBED else self.burnout_thresh
-
-            if fuel_content < burnout_thresh:
-                self.set_state_at_cell(cell, CellStates.BURNT)
-                # Add cell to update dictionary
-                self._updated_cells[cell.id] = cell
-
-                if cell.to_log_format() not in self._curr_updates:
-                    self._curr_updates.append(cell.to_log_format())
-
-
-                for neighbor_id, _ in cell.neighbors:
-                    key = (cell.id, neighbor_id)
-                    if key in relational_dict:
-                        del relational_dict[key]
-
-            updated_cells[cell.id] = cell
-            curr_updates.append(cell.to_log_format())
-
-    def capture_cell_changes(self, curr_cell: Cell):
-        """Update data structures with values relating to a burning cell's fuel.
         
-        Data structures are later used by :py:attr:`~fire_simulator.fire.update_fuel_contents`
+        # Loop over surface fires
+        for cell in copy.copy(self._burning_cells):
+            if cell.fully_burning:
+                cell._set_state(CellStates.BURNT)
+                self._burnt_cells.add(cell)
+                self._burning_cells.remove(cell)
+                self._updated_cells[cell.id] = cell
+                # self.update_fuel_in_burning_cell(cell)
+                # No need to compute spread for these cells
+                continue
 
-        :param curr_cell: Burning cell to grab values from
-        :type curr_cell: Cell
+            # Check if conditions have changed
+            if self.weather_changed or not cell.has_steady_state: 
+                # Update moisture in cell
+                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
+
+                # Updates the cell's steady-state rate of spread and fireline intensity
+                # Also checks for crown fire initiation
+                self.update_steady_state(cell)
+
+            # Set real time ROS and fireline intensity (vals stored in cell.avg_ros, cell.I_t)
+            accelerate(cell, self.time_step)
+
+            # Update extent of fire along each direction and check for ignition
+            self.propagate_fire(cell)
+
+            # Remove any neighbors that are no longer burnable
+            self.remove_neighbors(cell)
+
+            self._updated_cells[cell.id] = cell
+
+        # Get set of spot fires started in this time step
+        if self.model_spotting and self._spot_ign_prob > 0:
+            self.propagate_embers()
+
+        self.update_control_interface_elements()
+
+        if self.logger:
+            self._log_changes()
+
+            if self._iters % self._log_freq == 0:
+                self.logger.flush()
+
+        if self._visualizer:
+            self._visualizer.cache_changes(self._get_cell_updates())
+
+        self._updated_cells.clear()
+        self._iters += 1
+
+    def _log_changes(self):
+        self.logger.cache_cell_updates(self._get_cell_updates())
+
+        if self.agents_added:
+            self.logger.cache_agent_updates(self._get_agent_updates())
+
+        if self.curr_prediction is not None:
+            self.logger.cache_prediction(self.get_prediction_entry())
+            self.curr_prediction = None
+
+        self.logger.cache_action_updates(self.get_action_entries(logger=True))
+
+    def _init_iteration(self, in_constructor: bool = False) -> bool:
+        """Initialize or update the simulation state for the current iteration.
+
+        This method handles both first-time initialization (when _iters == 0) and 
+        subsequent iteration updates. It manages:
+        - Progress bar initialization and updates
+        - Weather condition updates
+        - New ignition processing
+        - Fire spread parameter calculations
+        - Crown fire status updates
+        - Fuel consumption history computation
+
+        Returns:
+            bool: True if the simulation should terminate (due to time limit or no active fires),
+                 False otherwise.
         """
-        self.w_vals.append(curr_cell.W)
-        self.fuels_at_ignition.append(curr_cell.fuel_at_ignition)
-        self.ignition_clocks.append(curr_cell.ignition_clock)
-
-    def _init_iteration(self) -> bool:
-        """Set up the next iteration. Reset and update relevant data structures based on last 
-        iteration. 
-
-        :return: Boolean value representing if the simulation should be terminated.
-        :rtype: bool
-        """
-        if self._iters == 0:
-            self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
+        if in_constructor:
+            if self.progress_bar is None:
+                self.progress_bar = tqdm(total=self._sim_duration/self.time_step,
                                      desc='Current sim ', position=0, leave=False)
 
-        self._curr_updates.clear()
+            self.weather_changed = True
+            self._new_ignitions = []
+            for cell, loc in self.starting_ignitions:
+                cell._arrival_time = self.curr_time_m
+                cell.get_ign_params(loc)
+
+                if not cell.fuel.burnable:
+                    continue
+                
+                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
+                cell._set_state(CellStates.FIRE)
+                surface_fire(cell)
+                crown_fire(cell, self.fmc)
+
+                cell.has_steady_state = True
+                accelerate(cell, self.time_step)
+
+                self._updated_cells[cell.id] = cell
+                self._new_ignitions.append(cell)
+        
+        else:
+            for cell in self._new_ignitions:
+                cell._arrival_time = self.curr_time_m
+                surface_fire(cell)
+                crown_fire(cell, self.fmc)
+
+                for neighbor in list(cell.burnable_neighbors.keys()):
+                    self._frontier.add(neighbor)
+
+                if cell._break_width > 0:
+                    flame_len_ft = calc_flame_len(cell)
+                    flame_len_m = ft_to_m(flame_len_ft)
+
+                    hold_prob = cell.calc_hold_prob(flame_len_m)
+                    
+                    rand = np.random.random()
+
+                    cell.breached = rand > hold_prob
+
+                else:
+                    cell.breached = True
+
+                cell.has_steady_state = True
+
+                if self.model_spotting:
+                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self._spot_ign_prob > 0:
+                        self.embers.loft(cell, self.curr_time_m)
+
+                accelerate(cell, self.time_step)
 
         # Update current time
         self._curr_time_s = self.time_step * self._iters
-        self.progress_bar.update()
+        if self.progress_bar:
+            self.progress_bar.update()
 
-        self._curr_fires = self._curr_fires | set(self._curr_fires_cache)
-        self._curr_fires.difference_update(self._curr_fires_anti_cache)
+        # # Compute the fuel consumption over time for each new ignition
+        # self.compute_burn_histories(self._new_ignitions)
 
-        self._curr_fires_cache = []
-        self._curr_fires_anti_cache = []
+        # Add any new ignitions to the current set of burning cells
+        self._burning_cells.extend(self._new_ignitions)
+        # Reset new ignitions
+        self._new_ignitions = []
 
-        self.w_vals = []
-        self.fuels_at_ignition = []
-        self.ignition_clocks = []
+        if self._curr_time_s >= self._sim_duration or (self._iters != 0 and len(self._burning_cells) == 0):
+            if self.progress_bar:
+                self.progress_bar.close()
 
-        if len(self._curr_fires) == 0 or self._curr_time_s >= self._sim_duration:
-            self.progress_bar.close()
-
-            if len(self._curr_fires) == 0:
-                if self.logger:
-                    self.logger.log_message("Fire extinguished! Terminating early.")
             return True
 
+        # Update wind if necessary
+        self.weather_changed = self._update_weather()
+
         return False
+
+
+    def update_fuel_in_burning_cell(self, cell: Cell):
+        # TODO: Need to figure out how we want to visualize this state
+        cell.burn_idx += 1
+
+        if cell.burn_idx == len(cell.burn_history):
+
+            # Set static fuel load to new value
+            cell.fuel.set_fuel_loading(cell.dynamic_fuel_load)
+
+            # Check if there is enough fuel remaining to set back to fuel
+            if cell.fuel.w_n_dead < self.burnout_thresh:
+                # if not set to burnt
+                self.set_state_at_cell(cell, CellStates.BURNT)
+                self._burnt_cells.add(cell)
+            else:
+                self.set_state_at_cell(cell, CellStates.FUEL)
+                                
+            # remove from burning cells
+            self._burning_cells.remove(cell)
+            
+            cell.burn_idx = -1
+
+        else:
+            cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
+            
+        # Add cell to update dictionary
+        self._updated_cells[cell.id] = cell
 
     def _get_agent_updates(self):
         """Returns a list of dictionaries describing the location of each agent in __agent_list
@@ -273,29 +332,33 @@ class FireSim(BaseFireSim):
                  display preferences
         :rtype: list
         """
-        agent_data = []
-
-        for agent in self.agent_list:
-            agent_data.append(agent.to_log_format())
-
+        agent_data = [agent.to_log_entry(self.curr_time_s) for agent in self.agent_list]
         return agent_data
+    
+    def _get_cell_updates(self):
+        cell_data = [cell.to_log_entry(self.curr_time_s) for cell in list(self._updated_cells.values())]
 
-    @property
-    def updated_cells(self) -> dict:
-        """Dictionary containing cells updated since last time real-time visualization was updated.
-        Dict keys are the ids of the :class:`~fire_simulator.cell.Cell` objects.
-        """
-        return self._updated_cells
+        return cell_data
 
-    @property
-    def curr_updates(self) -> list:
-        """List of cells updated during the most recent iteration.
+    def set_visualizer(self, visualizer):
+        """Sets the visualizer reference for this simulation.
         
-        Cells are in their log format as generated by 
-        :func:`~fire_simulator.cell.Cell.to_log_format()`
+        Args:
+            visualizer: The Visualizer instance to use for visualization
         """
-        return self._curr_updates
+        self._visualizer = visualizer
 
+    def visualize_prediction(self, prediction_grid):
+        """Visualizes a prediction grid on top of the current simulation visualization.
+        
+        Args:
+            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
+                                  representing predicted fire spread
+        """
+        if self._visualizer is not None:
+            self._visualizer.visualize_prediction(prediction_grid)
+
+        self.curr_prediction = prediction_grid
 
     @property
     def agent_list(self) -> list:
