@@ -139,9 +139,6 @@ class Cell:
         # Check if cell has a canopy
         self.has_canopy = self.canopy_height > 0 and self.canopy_cover > 0
 
-        # Duff loading (tons/acre)
-        self.wdf = cell_data.wdf
-
         # Wind adjustment factor based on sheltering condition
         self._set_wind_adj_factor()
 
@@ -156,12 +153,6 @@ class Cell:
 
         if self.fuel.burnable:
             self.set_arrays()
-
-        # Fuel loading for each class over time starting from end of flame residence time
-        self.burn_history = []
-
-        self.dynamic_fuel_load = []
-        self.burn_idx = -1
 
         # Default state is fuel
         self._state = CellStates.FUEL

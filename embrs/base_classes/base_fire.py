@@ -26,7 +26,6 @@ from embrs.models.crown_model import crown_fire
 from embrs.models.weather import WeatherStream
 from embrs.fire_simulator.cell import Cell
 from embrs.models.embers import Embers
-from embrs.models.burnup import Burnup
 from embrs.models.rothermel import *
 
 class BaseFireSim:
@@ -118,13 +117,6 @@ class BaseFireSim:
             else:
                 self.embers = PerrymanSpotting(self._spot_delay_s, limits)
 
-        # Load Duff loading lookup table from LANDFIRE FCCS
-        base_dir = os.path.dirname(__file__)
-        duff_path = os.path.join(base_dir, '..', 'utilities', 'duff_loading.pkl')
-        duff_path = os.path.normpath(duff_path)
-
-        with open(duff_path, "rb") as file:
-            duff_lookup = pickle.load(file)
 
         # Populate cell_grid with cells
         id = 0
@@ -189,14 +181,6 @@ class BaseFireSim:
 
                     # Get canopy bulk density from cbd map
                     cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
-
-                    # Get duff fuel loading from fccs map
-                    fccs_id = int(self._fccs_map[data_row, data_col])
-                    if not prediction and duff_lookup.get(fccs_id) is not None:
-                        cell_data.wdf = duff_lookup[fccs_id] # tons/acre
-                    else:
-                        # Default to 0 duff loading
-                        cell_data.wdf = 0
 
                     # Get data for cell
                     new_cell._set_cell_data(cell_data)
@@ -303,7 +287,6 @@ class BaseFireSim:
         self._ch_map = np.flipud(lcp_data.canopy_height_map)
         self._cbh_map = np.flipud(lcp_data.canopy_base_height_map)
         self._cbd_map = np.flipud(lcp_data.canopy_bulk_density_map)
-        self._fccs_map = np.flipud(lcp_data.fccs_map)
 
         # Get resolution for data products
         self._data_res = lcp_data.resolution
@@ -664,125 +647,6 @@ class BaseFireSim:
                 self._updated_cells[cell.id] = cell
 
                 self._long_term_retardants.remove(cell)
-
-    def generate_burn_history_entry(self, cell, fuel_loads) -> List[float]:
-        """_summary_
-
-        Args:
-            cell (_type_): _description_
-            fuel_loads (_type_): _description_
-
-        Returns:
-            List[float]: _description_
-        """
-        entry = np.zeros_like(cell.fuel.w_0)
-        j = 0
-        for i in range(len(cell.fuel.w_0)):
-            if i in cell.fuel.rel_indices:
-                entry[i] = fuel_loads[j]
-                j += 1
-
-        return entry
-
-    def compute_burn_histories(self, new_ignitions):
-        """_summary_
-
-        Args:
-            new_ignitions (_type_): _description_
-        """
-        curr_weather = self._weather_stream.stream[self._curr_weather_idx]
-        wind_speed = curr_weather.wind_speed
-
-        if self._uniform_map:
-            t_ambF = 75
-        else:
-            t_ambF = curr_weather.temp
-
-        dt = self._time_step
-
-        for cell in new_ignitions:
-            # Reset cell burn history
-            cell.burn_history = []
-
-            # Get cell duff loading (tons/acre)
-            wdf = cell.wdf
-
-            I_r = cell.reaction_intensity  # BTU/ft2/min
-
-            # Calculate wind speed at midflame height
-            u = wind_speed * cell.wind_adj_factor
-            
-            # Get fuel bed depth
-            depth = cell.fuel.fuel_depth_ft
-
-            # Calculate duff moisture content
-            if 2 in cell.fuel.rel_indices:
-                mx = cell.fmois[2]
-            elif 1 in cell.fuel.rel_indices:
-                mx = cell.fmois[1]
-            else:
-                mx = cell.fmois[0]
-
-            dfm = -0.347 + 6.42 * mx
-            dfm = max(dfm, 0.10)
-
-            # Calculate Residence time using FARSITE equation
-            fli = np.max(cell.I_ss) # BTU/ft/min
-            ros = m_s_to_ft_min(np.max(cell.r_ss)) #ft/min
-            
-            t_r = (fli*60) / (ros * I_r) # residence time in seconds
-            
-            # Clip to allowable values in FOFEM
-            t_r = np.min([t_r, 120])
-            t_r = np.max([t_r, 10])
-
-            burn_mgr = Burnup(cell)
-            burn_mgr.set_fire_data(3000, I_r, t_r, u, depth, t_ambF, dt, wdf, dfm)
-
-            burn_mgr.arrays()
-            now = 1
-            d_time = burn_mgr.ti
-            burn_mgr.duff_burn()
-
-            if not (burn_mgr.start(d_time, now)):
-                # Burnup does not predict ignition
-                # Set to amount consumed in flaming front
-                # This is how farsite does it
-                fuel_loads = burn_mgr.get_flaming_front_consumption()
-                entry = self.generate_burn_history_entry(cell, fuel_loads)
-                cell.burn_history = [entry]
-
-                continue
-
-            burn_mgr.fi = burn_mgr.fire_intensity()
-
-            if d_time > burn_mgr.tdf:
-                burn_mgr.dfi = 0
-
-            while now <= burn_mgr.ntimes:
-                burn_mgr.step(burn_mgr.dt, d_time, burn_mgr.dfi)
-                now += 1
-
-                d_time += burn_mgr.dt
-                if d_time > burn_mgr.tdf:
-                    burn_mgr.dfi = 0
-
-                burn_mgr.fi = burn_mgr.fire_intensity()
-                
-                if burn_mgr.fi <= burn_mgr.fi_min:
-                    break
-
-                fuel_loads = burn_mgr.get_updated_fuel_loading()
-                entry = self.generate_burn_history_entry(cell, fuel_loads)
-                cell.burn_history.append(entry)
-
-            if len(cell.burn_history) == 0:
-                # Intensity was not high enough to ignite
-                # Set to amount consumed in flaming front
-                # This is how farsite does it
-                fuel_loads = burn_mgr.get_flaming_front_consumption()
-                entry = self.generate_burn_history_entry(cell, fuel_loads)
-                cell.burn_history = [entry]
 
     def calc_wind_padding(self, forecast: np.ndarray) -> Tuple[float, float]:
         """_summary_

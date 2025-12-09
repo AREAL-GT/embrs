@@ -147,8 +147,6 @@ class FireSim(BaseFireSim):
                 self._burnt_cells.add(cell)
                 self._burning_cells.remove(cell)
                 self._updated_cells[cell.id] = cell
-                # self.update_fuel_in_burning_cell(cell)
-                # No need to compute spread for these cells
                 continue
 
             # Check if conditions have changed
@@ -277,9 +275,6 @@ class FireSim(BaseFireSim):
         if self.progress_bar:
             self.progress_bar.update()
 
-        # # Compute the fuel consumption over time for each new ignition
-        # self.compute_burn_histories(self._new_ignitions)
-
         # Add any new ignitions to the current set of burning cells
         self._burning_cells.extend(self._new_ignitions)
         # Reset new ignitions
@@ -295,35 +290,6 @@ class FireSim(BaseFireSim):
         self.weather_changed = self._update_weather()
 
         return False
-
-
-    def update_fuel_in_burning_cell(self, cell: Cell):
-        # TODO: Need to figure out how we want to visualize this state
-        cell.burn_idx += 1
-
-        if cell.burn_idx == len(cell.burn_history):
-
-            # Set static fuel load to new value
-            cell.fuel.set_fuel_loading(cell.dynamic_fuel_load)
-
-            # Check if there is enough fuel remaining to set back to fuel
-            if cell.fuel.w_n_dead < self.burnout_thresh:
-                # if not set to burnt
-                self.set_state_at_cell(cell, CellStates.BURNT)
-                self._burnt_cells.add(cell)
-            else:
-                self.set_state_at_cell(cell, CellStates.FUEL)
-                                
-            # remove from burning cells
-            self._burning_cells.remove(cell)
-            
-            cell.burn_idx = -1
-
-        else:
-            cell.dynamic_fuel_load = cell.burn_history[cell.burn_idx]
-            
-        # Add cell to update dictionary
-        self._updated_cells[cell.id] = cell
 
     def _get_agent_updates(self):
         """Returns a list of dictionaries describing the location of each agent in __agent_list

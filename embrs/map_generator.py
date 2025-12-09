@@ -246,10 +246,6 @@ def crop_map_data(map_params: MapParams) -> float:
 
     lcp_path = map_params.lcp_filepath
     lcp_output_path = os.path.join(map_params.folder, "cropped_lcp.tif")
-    fccs_path = map_params.fccs_filepath
-
-    # Add the FCCS layer to the landscape file
-    merge_tiffs(lcp_path, fccs_path, lcp_output_path, map_params.include_fccs)
 
     while not crop_done:
 
@@ -265,35 +261,6 @@ def crop_map_data(map_params: MapParams) -> float:
     map_params.cropped_lcp_path = lcp_output_path
     map_params.geo_info = GeoInfo()
     map_params.geo_info.north_angle_deg = np.rad2deg(angle)
-
-def merge_tiffs(lcp_path: str, fccs_path: str, output_path: str, include_fccs: bool) -> None:
-    # Open the LCP file and read its data and metadata
-    with rasterio.open(lcp_path) as lcp_src:
-        lcp_data = lcp_src.read()  # shape: (bands, height, width)
-        meta = lcp_src.meta.copy()
-        height, width = lcp_data.shape[1:]
-
-    if include_fccs:
-        # Open and read the FCCS file
-        with rasterio.open(fccs_path) as fccs_src:
-            fccs_data = fccs_src.read(1)  # shape: (height, width)
-
-        if (height, width) != fccs_data.shape:
-            raise ValueError("The dimensions of LCP and FCCS images do not match.")
-    else:
-        # Create a dummy FCCS band with -1s
-        fccs_data = np.full((height, width), fill_value=-1, dtype=np.float32)
-
-    # Expand FCCS to match band format
-    fccs_data = fccs_data[np.newaxis, :, :]
-
-    # Concatenate bands
-    merged_data = np.concatenate([lcp_data, fccs_data], axis=0)
-    meta.update(count=merged_data.shape[0])
-
-    with rasterio.open(output_path, "w", **meta) as dst:
-        dst.write(merged_data)
-
 
 def crop_and_save_tiff(input_path: str, output_path: str, bounds: list) -> int:
     """_summary_
@@ -602,7 +569,6 @@ def geotiff_to_numpy(map_params: MapParams, fill_value: int =-9999):
         canopy_height_map=resampled_array[5]/10, # Adjust for how LANDFIRE handles canopy height
         canopy_base_height_map=resampled_array[6]/10, # Adjust for how LANDFIRE handles canopy base height
         canopy_bulk_density_map=resampled_array[7]/100, # Adjust for how LANDFIRE handles canopy bulk density
-        fccs_map=resampled_array[8],
         rows=rows,
         cols=cols,
         resolution=DATA_RES,

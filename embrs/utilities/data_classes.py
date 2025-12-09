@@ -57,7 +57,6 @@ class LandscapeData:
     canopy_height_map: np.ndarray
     canopy_base_height_map: np.ndarray
     canopy_bulk_density_map: np.ndarray
-    fccs_map: np.ndarray
     rows: int
     cols: int
     resolution: int
@@ -76,7 +75,6 @@ class UniformMapParams:
     canopy_height: Optional[float] = 0
     canopy_base_height: Optional[float] = 0
     canopy_bulk_density: Optional[float] = 0
-    fccs_id: Optional[int] = 0
     height: Optional[float] = None
     width: Optional[float] = None
 
@@ -86,8 +84,6 @@ class MapParams:
     uniform_data: Optional[UniformMapParams] = None
     folder: Optional[str] = None
     lcp_filepath: Optional[str] = None
-    include_fccs: Optional[bool] = True
-    fccs_filepath: Optional[str] = None
     cropped_lcp_path: Optional[str] = None
     import_roads: Optional[bool] = None
     lcp_data: Optional[LandscapeData] = None
@@ -256,7 +252,6 @@ class CellData:
     canopy_height: Optional[float] = None
     canopy_base_height: Optional[float] = None
     canopy_bulk_density: Optional[float] = None
-    wdf: Optional[float] = None
     init_dead_mf: Optional[float] = 0.08
     live_h_mf: Optional[float] = 0.3
     live_w_mf: Optional[float] = 0.3

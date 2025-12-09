@@ -21,7 +21,6 @@ def generate_uniform_map(map_params: MapParams):
     canopy_height_map = np.array([[map_params.uniform_data.canopy_height]])
     canopy_base_height_map = np.array([[map_params.uniform_data.canopy_base_height]])
     canopy_bulk_density_map = np.array([[map_params.uniform_data.canopy_bulk_density]])
-    fccs_map = np.array([[map_params.uniform_data.fccs_id]])
 
     map_params.lcp_data = LandscapeData(
         elevation_map=elevation_map,
@@ -32,7 +31,6 @@ def generate_uniform_map(map_params: MapParams):
         canopy_height_map=canopy_height_map,
         canopy_base_height_map=canopy_base_height_map,
         canopy_bulk_density_map=canopy_bulk_density_map,
-        fccs_map=fccs_map,
         rows=1,
         cols=1,
         resolution=10e10,

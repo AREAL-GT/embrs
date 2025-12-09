@@ -264,7 +264,6 @@ class UniformMapCreator(FileSelectBase):
         self.canopy_height = tk.DoubleVar()
         self.canopy_base_height = tk.DoubleVar()
         self.canopy_bulk_density = tk.DoubleVar()
-        self.fccs_id = tk.IntVar()
 
         self.width_m = tk.DoubleVar()
         self.height_m = tk.DoubleVar()
@@ -301,9 +300,6 @@ class UniformMapCreator(FileSelectBase):
 
         # Create frame for canopy bulk density selection
         self.create_spinbox_with_two_labels(frame, "Canopy Bulk Density:       ", 1e7, self.canopy_bulk_density, "kg/m^3", row=7)
-
-        # Create frame for duff loading selection
-        self.create_spinbox_with_two_labels(frame, "FCCS Type:       ", 1e7, self.fccs_id, "", row=8)
 
         # Create frame for width selection
         self.create_spinbox_with_two_labels(frame, "Width:       ", 1e7, self.width_m, "meters", row=9)
@@ -347,7 +343,6 @@ class UniformMapCreator(FileSelectBase):
         uniform_data.canopy_height = self.canopy_height.get()
         uniform_data.canopy_base_height = self.canopy_base_height.get()
         uniform_data.canopy_bulk_density = self.canopy_bulk_density.get()
-        uniform_data.fccs_id = self.fccs_id.get()
         uniform_data.height = self.height_m.get()
         uniform_data.width = self.width_m.get()
 
@@ -378,9 +373,6 @@ class MapGenFileSelector(FileSelectBase):
         # Define variables
         self.output_map_folder = tk.StringVar()
         self.lcp_filename = tk.StringVar()
-        self.fccs_filename = tk.StringVar()
-        self.include_fccs = tk.BooleanVar()
-        self.include_fccs.set(True)
         self.import_roads = tk.BooleanVar()
         self.import_roads.set(False)
 
@@ -395,11 +387,6 @@ class MapGenFileSelector(FileSelectBase):
                                                 [("Tagged Image File Format","*.tif"),
                                                 ("Tagged Image File Format","*.tiff")])
         
-        _, self.fccs_entry, self.fccs_button, self.fccs_frame = self.create_file_selector(frame, "FCCS File:         ",
-                                                self.fccs_filename,
-                                                [("Tagged Image File Format","*.tif"),
-                                                ("Tagged Image File Format","*.tiff")])
-        
         # Create frame for importing roads
         import_road_frame = tk.Frame(frame)
         import_road_frame.grid(pady=10)
@@ -410,42 +397,19 @@ class MapGenFileSelector(FileSelectBase):
 
         self.import_roads_button.grid(row=5, column=0)
 
-        # Create frame for fccs option
-        include_fccs_frame = tk.Frame(frame)
-        include_fccs_frame.grid(pady=10)
-
-        self.include_fccs_button = tk.Checkbutton(include_fccs_frame,
-                                   text='Include FCCS for Duff Loading',
-                                   variable = self.include_fccs, anchor="center")
-
-        self.include_fccs_button.grid(row=6, column=0)
-
         # Create a submit button
         self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
         self.submit_button.grid(pady=10)
-
         
         self.output_map_folder.trace_add("write", self.validate_fields)
         self.lcp_filename.trace_add("write", self.validate_fields)
-        self.include_fccs.trace_add("write", self.toggle_fccs)
-
-
-    def toggle_fccs(self, *args):
-        if self.include_fccs.get():
-            self.fccs_button.configure(state='normal')
-            self.fccs_entry.configure(state='normal')
-        else:
-            self.fccs_button.configure(state='disabled')
-            self.fccs_entry.configure(state='disabled')
-
-        self.validate_fields()
 
     def validate_fields(self, *args):
         """Function used to validate the inputs, primarily responsible for activating/disabling
         the submit button based on if all necessary input has been provided.
         """
         # Check that all fields are filled before enabling submit button
-        if self.lcp_filename.get() and self.output_map_folder.get() and (self.fccs_filename.get() or not self.include_fccs.get()):
+        if self.lcp_filename.get() and self.output_map_folder.get():
             self.submit_button.config(state='normal')
 
         else:
@@ -460,14 +424,6 @@ class MapGenFileSelector(FileSelectBase):
         map_params.uniform_map = False
         map_params.folder = self.output_map_folder.get()
         map_params.lcp_filepath = self.lcp_filename.get()
-        map_params.include_fccs = self.include_fccs.get()
-
-        if not self.include_fccs.get():
-            map_params.fccs_filepath = ''
-
-        else:
-            map_params.fccs_filepath = self.fccs_filename.get()
-        
         map_params.import_roads = self.import_roads.get()
 
         self.result = map_params
