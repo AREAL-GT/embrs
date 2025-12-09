@@ -1,0 +1,15 @@
+{
+  "sim_start": "2025-08-01T16:59:24.952234",
+  "messages": [
+    "[2025-08-02T02:50:27.603102]: Simulation complete. Sim time: 60 h 0 min, took 9 h 50 min 40 s seconds to compute."
+  ],
+  "latest_flush": "2025-08-02T02:53:27.214055",
+  "results": {
+    "user interrupted": false,
+    "cells burnt": 0,
+    "burnt area (m^2)": 0.0,
+    "fire extinguished": false,
+    "burning cells remaining": 3658,
+    "burning area remaining (m^2)": 950376.278113043
+  }
+}

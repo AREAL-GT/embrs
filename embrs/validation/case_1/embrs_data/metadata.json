@@ -1,0 +1,172 @@
+{
+  "inputs": {
+    "cell size": 10,
+    "time step (sec)": 1,
+    "duration (sec)": 216000.0,
+    "init dead moisture": [
+      0.03,
+      0.04,
+      0.07
+    ],
+    "roads imported": false,
+    "spotting modeled": false
+  },
+  "sim size": {
+    "rows": 1037,
+    "cols": 917,
+    "total cells": 950929,
+    "width (m)": 15870,
+    "height (m)": 15540
+  },
+  "weather": {
+    "input type": "File",
+    "weather file": "/Users/rui/Documents/Research/Code/embrs/embrs/test_code/OakKnoll2016.wxs",
+    "wind mesh resolution": 250,
+    "start datetime": "2016-07-16T08:00:00",
+    "end datetime": "2016-07-18T20:00:00"
+  },
+  "imported code": {
+    "imported module location": "",
+    "imported class name": ""
+  },
+  "map": {
+    "map file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/happy_validation.json",
+    "map contents": {
+      "geo_info": {
+        "south_lim": 449968.116883117,
+        "north_lim": 4618237.116883117,
+        "west_lim": 465838.116883117,
+        "east_lim": 4633777.116883117,
+        "center_lat": 41.78480055565052,
+        "center_lon": -123.5066035171609,
+        "timezone": "America/Los_Angeles",
+        "north_angle_deg": 0.0
+      },
+      "landscape_info": {
+        "elev_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/elev.npy",
+        "aspect_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/aspect.npy",
+        "slope_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/slope.npy",
+        "fuel_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/fuel.npy",
+        "canopy_cover_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/canopy_cover.npy",
+        "canopy_height_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/canopy_base_height.npy",
+        "canopy_base_height_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/canopy_base_height.npy",
+        "canopy_bulk_density_file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/canopy_bulk_density.npy",
+        "rows": 1554,
+        "cols": 1587,
+        "resolution": 10,
+        "width_m": 15870,
+        "height_m": 15540,
+        "fbfm_type": "ScottBurgan"
+      },
+      "roads": {
+        "file": "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/roads.pkl"
+      },
+      "initial_igntion": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                5906.150090221345,
+                8617.964671170921
+              ],
+              [
+                5821.180190944724,
+                8504.671472135815
+              ],
+              [
+                5810.558953535146,
+                8471.037553672795
+              ],
+              [
+                5821.180190944724,
+                8386.067654395592
+              ],
+              [
+                5851.273696938515,
+                8331.19126111269
+              ],
+              [
+                5915.001121395981,
+                8265.69363042072
+              ],
+              [
+                5953.94565856448,
+                8263.923424184904
+              ],
+              [
+                6021.2134954917565,
+                8283.395692769554
+              ],
+              [
+                6084.940919949222,
+                8329.42105487804
+              ],
+              [
+                6166.370406755959,
+                8364.825179576874
+              ],
+              [
+                6261.961543442158,
+                8332.961467347923
+              ],
+              [
+                6338.080411544142,
+                8309.948786293971
+              ],
+              [
+                6398.2674235317245,
+                8324.110436172923
+              ],
+              [
+                6415.969485881069,
+                8419.701572859776
+              ],
+              [
+                6343.391030248895,
+                8462.186522497796
+              ],
+              [
+                6286.744430731196,
+                8471.037553672795
+              ],
+              [
+                6207.085150159401,
+                8543.61600930395
+              ],
+              [
+                6191.153294044998,
+                8616.194464936852
+              ],
+              [
+                6171.681025460784,
+                8658.679414574872
+              ],
+              [
+                6129.196075822474,
+                8687.00271433394
+              ],
+              [
+                6063.698445130067,
+                8697.623951743008
+              ],
+              [
+                6021.2134954917565,
+                8694.083539273706
+              ],
+              [
+                5941.554214919888,
+                8651.598589635105
+              ],
+              [
+                5906.150090221345,
+                8617.964671170921
+              ]
+            ]
+          ]
+        }
+      ],
+      "fire_breaks": []
+    }
+  }
+}
