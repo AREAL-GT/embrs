@@ -1,0 +1,262 @@
+{
+  "inputs": {
+    "cell size": 10,
+    "time step (sec)": 5,
+    "duration (sec)": 309600.0,
+    "init dead moisture": [
+      0.03,
+      0.04,
+      0.07
+    ],
+    "roads imported": false,
+    "spotting modeled": true
+  },
+  "sim size": {
+    "rows": 741,
+    "cols": 737,
+    "total cells": 546117,
+    "width (m)": 12750,
+    "height (m)": 11100
+  },
+  "weather": {
+    "input type": "File",
+    "weather file": "/Users/rui/Documents/Research/Code/embrs/embrs/test_code/OakKnoll2016.wxs",
+    "wind mesh resolution": 250,
+    "start datetime": "2016-08-12T10:00:00",
+    "end datetime": "2016-08-16T00:00:00"
+  },
+  "imported code": {
+    "imported module location": "",
+    "imported class name": ""
+  },
+  "map": {
+    "map file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/cougar_creek_validation.json",
+    "map contents": {
+      "geo_info": {
+        "south_lim": 623103.3116883117,
+        "north_lim": 5102506.610389611,
+        "west_lim": 635853.3116883117,
+        "east_lim": 5113606.610389611,
+        "center_lat": 46.11380289934465,
+        "center_lon": -121.32440424522758,
+        "timezone": "America/Los_Angeles",
+        "north_angle_deg": 0.0
+      },
+      "landscape_info": {
+        "elev_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/elev.npy",
+        "aspect_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/aspect.npy",
+        "slope_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/slope.npy",
+        "fuel_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/fuel.npy",
+        "canopy_cover_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/canopy_cover.npy",
+        "canopy_height_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/canopy_base_height.npy",
+        "canopy_base_height_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/canopy_base_height.npy",
+        "canopy_bulk_density_file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/canopy_bulk_density.npy",
+        "rows": 1110,
+        "cols": 1275,
+        "resolution": 10,
+        "width_m": 12750,
+        "height_m": 11100,
+        "fbfm_type": "ScottBurgan"
+      },
+      "roads": {
+        "file": "/Users/rui/Documents/Research/Code/embrs_maps/cougar_creek_validation/roads.pkl"
+      },
+      "initial_igntion": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                5041.457097815437,
+                4938.133661594475
+              ],
+              [
+                5041.457097815437,
+                4921.191568220966
+              ],
+              [
+                5041.457097815437,
+                4904.249474846874
+              ],
+              [
+                5041.457097815437,
+                4887.307381473365
+              ],
+              [
+                5041.457097815437,
+                4870.365288100438
+              ],
+              [
+                5041.457097815437,
+                4853.423194726929
+              ],
+              [
+                5041.457097815437,
+                4836.481101352838
+              ],
+              [
+                5041.457097815437,
+                4819.539007979329
+              ],
+              [
+                5064.00045041657,
+                4808.244279064238
+              ],
+              [
+                5086.543803017703,
+                4796.949550147983
+              ],
+              [
+                5109.087155618909,
+                4785.654821232893
+              ],
+              [
+                5131.6305082200415,
+                4774.360092316638
+              ],
+              [
+                5148.538022670837,
+                4796.949550147983
+              ],
+              [
+                5165.445537121705,
+                4819.539007979329
+              ],
+              [
+                5182.353051572645,
+                4842.128465810674
+              ],
+              [
+                5199.260566023513,
+                4864.71792364202
+              ],
+              [
+                5216.168080474308,
+                4887.307381473365
+              ],
+              [
+                5233.075594925176,
+                4909.896839304711
+              ],
+              [
+                5249.983109376117,
+                4932.486297136056
+              ],
+              [
+                5266.890623826985,
+                4955.075754967402
+              ],
+              [
+                5261.25478567672,
+                4983.312577257166
+              ],
+              [
+                5255.618947526382,
+                5011.5493995457655
+              ],
+              [
+                5249.983109376117,
+                5039.786221834947
+              ],
+              [
+                5244.347271225706,
+                5068.023044124129
+              ],
+              [
+                5238.711433075441,
+                5096.259866413893
+              ],
+              [
+                5233.075594925176,
+                5124.496688702493
+              ],
+              [
+                5227.439756774911,
+                5152.733510991675
+              ],
+              [
+                5221.803918624646,
+                5180.970333280857
+              ],
+              [
+                5210.532242324043,
+                5166.851922135684
+              ],
+              [
+                5199.260566023513,
+                5152.733510991675
+              ],
+              [
+                5187.98888972291,
+                5138.615099847666
+              ],
+              [
+                5176.71721342238,
+                5124.496688702493
+              ],
+              [
+                5165.445537121705,
+                5110.378277557902
+              ],
+              [
+                5154.1738608211745,
+                5096.259866413893
+              ],
+              [
+                5142.902184520572,
+                5082.14145526872
+              ],
+              [
+                5131.6305082200415,
+                5068.023044124129
+              ],
+              [
+                5120.358831919439,
+                5053.90463298012
+              ],
+              [
+                5109.087155618909,
+                5039.786221834947
+              ],
+              [
+                5097.815479318233,
+                5025.6678106909385
+              ],
+              [
+                5086.543803017703,
+                5011.5493995457655
+              ],
+              [
+                5075.2721267171,
+                4997.430988401175
+              ],
+              [
+                5064.00045041657,
+                4983.312577257166
+              ],
+              [
+                5052.728774115967,
+                4969.194166111993
+              ],
+              [
+                5041.457097815437,
+                4955.075754967402
+              ],
+              [
+                5041.457097815437,
+                4938.133661594475
+              ]
+            ]
+          ]
+        }
+      ],
+      "fire_breaks": []
+    }
+  },
+  "spotting inputs": {
+    "canopy species": 5,
+    "dbh (cm)": 50.0,
+    "min. spot dist": 30.0,
+    "spot delay (s)": 1800
+  }
+}

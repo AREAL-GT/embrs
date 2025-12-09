@@ -7,6 +7,9 @@ from rasterio.windows import from_bounds
 from rasterio.transform import Affine
 import matplotlib.pyplot as plt
 
+# Change case number to run different validation case:
+case_num = 1
+
 def generate_eval_points(bounds, spacing=10):
     x_min, y_min, x_max, y_max = bounds
     xs = np.arange(x_min, x_max, spacing)
@@ -208,11 +211,11 @@ def crop_raster_to_sim(full_raster_path, sim_bounds, debug=False):
         return cropped_data, cropped_transform, crs, nodata
 
 
-# Set file paths
-tif_file = "/Users/rui/Documents/Research/Code/embrs/embrs/validation/happy/fmp_happy2.tif"
-log_file = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/happy/happy_7/run_0/cell_logs.parquet'
-metadata_path = '/Users/rui/Documents/Research/Code/embrs/embrs/validation/happy/happy_7/metadata.json'
-map_params_path = "/Users/rui/Documents/Research/Code/embrs_maps/happy_validation/map_params.pkl"
+# Get files
+tif_file = f"embrs/validation/case_{case_num}/farsite.tif"
+log_file = f"embrs/validation/case_{case_num}/embrs_data/run_0/cell_logs.parquet"
+metadata_path = f"embrs/validation/case_{case_num}/embrs_data/metadata.json"
+map_params_path = f"embrs/validation/case_{case_num}/embrs_data/map_params.pkl"
 
 time = 60
 

@@ -165,6 +165,7 @@ sample_wind_forecasts/burnout_wind_forecast.json
 
 embrs/test_code/
 embrs/config_files/
+embrs/configs/
 embrs/validation/happy/
 embrs/validation/cougar/
 embrs/validation/flatland/
@@ -175,5 +176,6 @@ embrs/validation/flatland/
 *.pkl
 *.sqlite
 *.yml
+*.parquet
 
 

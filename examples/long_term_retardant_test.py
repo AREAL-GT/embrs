@@ -14,21 +14,28 @@ class TestRetardant(ControlClass):
 
     def process_state(self, fire: FireSim):
 
-        if (fire.curr_time_s - self.last_intervention) >= self.interval or self.last_intervention == -1:
-            
-            x, y = fire.get_avg_fire_coord()
+        if (fire.curr_time_s - self.last_intervention) >= self.interval:
+            # 
+            # x, y = fire.get_avg_fire_coord()
 
-            angles = np.linspace(0, np.pi * 2, 200)
+            # frontier = fire.frontier
 
-            self.r += 500
+            # xs = [cell.x_pos for cell in frontier]
+            # ys = [cell.y_pos for cell in frontier]
 
-            xs = x + self.r * np.cos(angles)
-            ys = y + self.r * np.sin(angles)
+            # angles = np.linspace(0, np.pi * 2, 200)
 
-            locs = zip(xs, ys)
+            # self.r += 500
 
-            for loc in locs:
-                fire.add_retardant_at_xy(loc[0], loc[1], 2, self.r/(500*10))
+            # xs = x + self.r * np.cos(angles)
+            # ys = y + self.r * np.sin(angles)
+
+            # locs = zip(xs, ys)
+
+            for cell_id in fire.frontier:
+                cell = fire.cell_dict[cell_id]
+                fire.add_retardant_at_cell(cell, 3, 1)
+                # fire.add_retardant_at_xy(loc[0], loc[1], 2, 1)
 
             self.last_intervention = fire.curr_time_s
 
