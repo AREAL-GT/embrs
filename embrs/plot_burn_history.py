@@ -126,7 +126,7 @@ def burnt_counts_from_change_log(df: pd.DataFrame) -> pd.Series:
 
 
 def reindex_to_grid(series: pd.Series, duration_s: float, dt_s: float) -> pd.DataFrame:
-    """
+    """a
     Reindex a stepwise series (indexed by timestamps) to a regular grid [0, duration_s] with step dt_s.
     Forward-fills between events.
     """

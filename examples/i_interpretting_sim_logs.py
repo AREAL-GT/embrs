@@ -23,7 +23,7 @@ from embrs.utilities.fire_util import CellStates
 # Paths to your simulation output (edit these)
 # -----------------------------------------------------------------------------
 
-log_folder = "/Users/rjdp3/Library/Mobile Documents/com~apple~CloudDocs/Documents/Research/Thesis/Proposal/Figures/Firefighting/fire_logs/ex_1/ex_1_with_actions"
+log_folder = "path/to/your/simulation/logs"
 run_number = 0
 
 init_path = f"{log_folder}/init_state.parquet"
