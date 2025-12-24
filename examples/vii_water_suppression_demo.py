@@ -1,9 +1,11 @@
+"""Demonstration of how to implement a water suppression system using the embrs library."""
+
 from embrs.base_classes.control_base import ControlClass
 from embrs.fire_simulator.fire import FireSim
 
 import numpy as np
 
-class TestWaterRain(ControlClass):
+class WaterSuppressionDemo(ControlClass):
 
     def __init__(self, fire):
         self.interval = 2300 * 1 # interval in seconds

@@ -1,19 +1,17 @@
+"""Control class implementing the fireline construction example strategy described in the EMBRS paper."""
+
 from embrs.base_classes.control_base import ControlClass
 from embrs.fire_simulator.fire import FireSim
 from embrs.base_classes.agent_base import AgentBase
-
 from embrs.utilities.data_classes import PredictorParams
 from embrs.tools.fire_predictor import FirePredictor
-
+from embrs.utilities.unit_conversions import *
 
 from scipy.spatial import KDTree
-
 from shapely.geometry import LineString, Point
 from shapely.affinity import translate
-
 import numpy as np
 
-from embrs.utilities.unit_conversions import *
 
 TRAVEL, CONSTRUCTION, PLANNING, ADAPT, IDLE = 0, 1, 2, 3, 4
 
@@ -46,12 +44,12 @@ class FirelineConstruction(ControlClass):
         # Working with Hardwood Litter (Type I Crew Indirect: 455 ft/hr)
         self.ln_prod_rate_ms = ft_to_m(376 / 3600) # convert to m/s
 
-        self.plan_buffer = 500 # TODO: find a citable value for this
+        self.plan_buffer = 500
         self.adapt_buffer = 1500
         self.abs_min = 500
         self.k = 4
 
-        self.line_width = 10 # TODO: find a citable value for this
+        self.line_width = 10
         
     def process_state(self, fire: FireSim):
 
@@ -132,7 +130,6 @@ class FirelineConstruction(ControlClass):
         time_horizon = (time_est / 3600) + 2 # add 2 hours buffer to the estimated time
         time_step = self.fire.time_step
         
-        # TODO: play with the bias parameters and such
         pred_input = PredictorParams(
             time_horizon_hr=time_horizon,
             time_step_s=time_step*3,

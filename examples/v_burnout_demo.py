@@ -1,3 +1,5 @@
+"""Control Class implementing the burnout example strategy described in the EMBRS paper."""
+
 from embrs.base_classes.control_base import ControlClass
 from embrs.base_classes.agent_base import AgentBase
 from embrs.fire_simulator.fire import FireSim
@@ -86,7 +88,6 @@ class Burnout(ControlClass):
         return segments
     
     def plan(self):
-        # TODO: play with parameters
         pred_input = PredictorParams(
             time_horizon_hr=self.t_horizon,
             time_step_s=self.fire.time_step,
