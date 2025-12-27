@@ -28,7 +28,7 @@ class WeatherStream:
             if geo is not None:
                 self.get_stream_from_wxs()
             else:
-                self.get_uniform_stream()
+                raise ValueError("GeoInfo must be provided when using 'File' weather input_type")
         else:
             raise ValueError("Invalid weather input_type, must be either 'OpenMeteo' or 'File'")
 

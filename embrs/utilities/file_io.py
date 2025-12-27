@@ -17,7 +17,7 @@ import json
 import sys
 import os
 
-from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, UniformMapParams, PlaybackVisualizerParams
+from embrs.utilities.data_classes import MapParams, SimParams, WeatherParams, PlaybackVisualizerParams
 from embrs.utilities.fire_util import CanopySpecies
 from embrs.models.fuel_models import FuelConstants
 from embrs.base_classes.control_base import ControlClass
@@ -243,122 +243,6 @@ class FileSelectBase:
         :raises NotImplementedError: not implemented here
         """
         raise NotImplementedError
-    
-
-class UniformMapCreator(FileSelectBase):
-    def __init__(self):
-
-        super().__init__("Uniform Map Creator")
-
-        # Define variables
-        self.map_folder = tk.StringVar()
-
-        self.map_folder.trace_add("write", self.validate_fields)
-        
-        self.slope = tk.DoubleVar()
-        self.aspect = tk.DoubleVar()
-        self.fuel_selection = tk.StringVar()
-        self.fuel_selection.set("Short grass")
-        self.fuel_selection_val = 1
-        self.canopy_cover = tk.DoubleVar()
-        self.canopy_height = tk.DoubleVar()
-        self.canopy_base_height = tk.DoubleVar()
-        self.canopy_bulk_density = tk.DoubleVar()
-
-        self.width_m = tk.DoubleVar()
-        self.height_m = tk.DoubleVar()
-
-        frame = self.create_frame(self.root)
-
-        # Create field to select save destination
-        self.create_folder_selector(frame, "Save map to:   ", self.map_folder)
-
-        # Create frame for slope selection
-        self.create_spinbox_with_two_labels(frame, "Slope:       ", 90, self.slope, "degrees", row = 1)
-
-        # Create frame for aspect selection
-        self.create_spinbox_with_two_labels(frame, "Aspect:       ", 360, self.aspect, "degrees", row = 2)
-
-        # Create frame for fuel selection
-        fuel_frame = tk.Frame(frame)
-        fuel_frame.grid(padx=10,pady=5)
-        tk.Label(fuel_frame, text="Uniform Fuel Type:",
-                 anchor="center").grid(row=2, column=0)
-
-        tk.OptionMenu(fuel_frame, self.fuel_selection,
-                      *FuelConstants.fuel_names.values()).grid(row=2, column=1)
-
-
-        # Create frame for canopy height selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Height:       ", 1e7, self.canopy_height, "meters", row =4)
-
-        # Create frame for canopy cover selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Cover:       ", 100, self.canopy_cover, "%", row=5)
-
-        # Create frame for canopy base height selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Base Height:       ", 1e7, self.canopy_base_height, "meters", row=6)
-
-        # Create frame for canopy bulk density selection
-        self.create_spinbox_with_two_labels(frame, "Canopy Bulk Density:       ", 1e7, self.canopy_bulk_density, "kg/m^3", row=7)
-
-        # Create frame for width selection
-        self.create_spinbox_with_two_labels(frame, "Width:       ", 1e7, self.width_m, "meters", row=9)
-
-        # Create frame for height selection
-        self.create_spinbox_with_two_labels(frame, "Height:       ", 1e7, self.height_m, "meters", row=10)
-
-        # Create a submit button
-        self.submit_button = tk.Button(frame, text="Submit", command=self.submit, state='disabled')
-        self.submit_button.grid(pady=10)
-
-        self.width_m.trace_add("write", self.validate_fields)
-        self.height_m.trace_add("write", self.validate_fields)
-        self.fuel_selection.trace_add("write", self.fuel_selection_changed)
-
-
-    def fuel_selection_changed(self, *args):
-        """Callback function to handle the uniform fuel type value being changed
-        """
-        self.fuel_selection_val = FuelConstants.fuel_type_reverse_lookup[self.fuel_selection.get()]
-
-    def validate_fields(self, *args):
-        """Function used to validate the inputs, primarily responsible for activating/disabling
-        the submit button based on if all necessary input has been provided.
-        """
-        # Check that all fields are filled before enabling submit button
-        if self.map_folder.get() and self.width_m.get() != 0 and self.height_m.get() != 0:
-            self.submit_button.config(state='normal')
-
-        else:
-            self.submit_button.config(state='disabled')
-
-    def submit(self):
-
-        uniform_data = UniformMapParams()
-
-        uniform_data.slope = self.slope.get()
-        uniform_data.aspect = self.aspect.get()
-        uniform_data.fuel = self.fuel_selection_val
-        uniform_data.canopy_cover = self.canopy_cover.get()
-        uniform_data.canopy_height = self.canopy_height.get()
-        uniform_data.canopy_base_height = self.canopy_base_height.get()
-        uniform_data.canopy_bulk_density = self.canopy_bulk_density.get()
-        uniform_data.height = self.height_m.get()
-        uniform_data.width = self.width_m.get()
-
-        params = MapParams()
-
-        params.uniform_map = True
-        params.uniform_data = uniform_data
-        params.folder = self.map_folder.get()
-        params.import_roads = False
-
-        self.result = params
-
-        # Close the window
-        self.root.withdraw()
-        self.root.quit()
-
 
 class MapGenFileSelector(FileSelectBase):
     """Class used to prompt user for map generation files
@@ -420,8 +304,6 @@ class MapGenFileSelector(FileSelectBase):
         variable so it can be retrieved
         """
         map_params = MapParams()
-
-        map_params.uniform_map = False
         map_params.folder = self.output_map_folder.get()
         map_params.lcp_filepath = self.lcp_filename.get()
         map_params.import_roads = self.import_roads.get()

@@ -306,9 +306,6 @@ class Cell:
                 bp0) # Current observation's stick barometric pressure (cal/cm^3)
 
     def _update_moisture(self, idx: float, weather_stream: WeatherStream):
-        if self._parent()._uniform_map:
-            return
-
         # Make target time the midpoint of the weather interval
         target_time_s = (idx + 0.5) * self._parent().weather_t_step  # Convert index to seconds
 

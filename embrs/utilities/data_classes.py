@@ -65,23 +65,9 @@ class LandscapeData:
     transform: any
     crs: any
 
-@dataclass
-class UniformMapParams:
-    elevation: Optional[float] = 0
-    slope: Optional[float] = 0
-    aspect: Optional[float] = 0
-    fuel: Optional[int] = None
-    canopy_cover: Optional[float] = 0
-    canopy_height: Optional[float] = 0
-    canopy_base_height: Optional[float] = 0
-    canopy_bulk_density: Optional[float] = 0
-    height: Optional[float] = None
-    width: Optional[float] = None
 
 @dataclass
 class MapParams:
-    uniform_map: Optional[bool] = None
-    uniform_data: Optional[UniformMapParams] = None
     folder: Optional[str] = None
     lcp_filepath: Optional[str] = None
     cropped_lcp_path: Optional[str] = None

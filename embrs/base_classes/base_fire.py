@@ -15,7 +15,7 @@ import copy
 import os
 
 from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
-from embrs.models.wind_forecast import run_windninja, create_uniform_wind
+from embrs.models.wind_forecast import run_windninja
 from embrs.utilities.logger_schemas import ActionsEntry, PredictionEntry
 from embrs.models.fuel_models import Anderson13, ScottBurgan40
 from embrs.utilities.fire_util import CellStates, CrownStatus
@@ -301,69 +301,45 @@ class BaseFireSim:
         # Grab starting datetime
         self._start_datetime = sim_params.weather_input.start_datetime
 
-        # Handle regular map
-        if not map_params.uniform_map:
-            self._uniform_map = False
-            self._north_dir_deg = map_params.geo_info.north_angle_deg
+        # Grab north direction
+        self._north_dir_deg = map_params.geo_info.north_angle_deg
 
-            # If loading from lcp file change aspect to uphill direction
-            self._aspect_map = (180 + self._aspect_map) % 360 
+        # If loading from lcp file change aspect to uphill direction
+        self._aspect_map = (180 + self._aspect_map) % 360 
 
-            if self.is_prediction():
-                # Set prediction wind forecast to zeros initially
-                self.wind_forecast = np.zeros((1, 1, 1, 2))
-                self.flipud_forecast = self.wind_forecast
-                self._wind_res = 10e10
+        if self.is_prediction():
+            # Set prediction wind forecast to zeros initially
+            self.wind_forecast = np.zeros((1, 1, 1, 2))
+            self.flipud_forecast = self.wind_forecast
+            self._wind_res = 10e10
 
-                self.wind_xpad = 0
-                self.wind_ypad = 0
+            self.wind_xpad = 0
+            self.wind_ypad = 0
 
-                self._curr_weather_idx = 0
-            # Generate a weather stream
-            else:
-                self._weather_stream = WeatherStream(
-                    sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
-                )
-                self.sim_start_w_idx = self._weather_stream.sim_start_idx
-                self._curr_weather_idx = self._weather_stream.sim_start_idx
-                self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
-                
-                # Get wind data
-                self._wind_res = sim_params.weather_input.mesh_resolution
-                self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
-
-                self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
-
-                self.flipud_forecast = np.empty(self.wind_forecast.shape)
-
-            # Iterate over each layer (time step or vertical level, depending on the dataset structure)
-            for layer in range(self.wind_forecast.shape[0]):
-                self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
-            
-            self.wind_forecast = self.flipud_forecast
-
-        # Handle uniform map
+            self._curr_weather_idx = 0
+        # Generate a weather stream
         else:
-            self._uniform_map = True
-
-            # Set north to straight up
-            self._north_dir_deg = 0
-            
-            # Check that OpenMeteo option is not selected (if it is throw an error)
-            if sim_params.weather_input.input_type == "OpenMeteo":
-                raise ValueError(f"Error: If using a uniform map, OpenMeteo can not be used. Must specify a weather file")
-
-            # Create weather stream (just consisting of wind)
             self._weather_stream = WeatherStream(
                 sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
             )
+            self.sim_start_w_idx = self._weather_stream.sim_start_idx
+            self._curr_weather_idx = self._weather_stream.sim_start_idx
             self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
-
-            # Create a uniform wind forecast
-            self._wind_res = 10e10
-            self.wind_forecast = create_uniform_wind(self._weather_stream)
+            
+            # Get wind data
+            self._wind_res = sim_params.weather_input.mesh_resolution
+            self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
 
             self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
+
+            self.flipud_forecast = np.empty(self.wind_forecast.shape)
+
+        # Iterate over each layer (time step or vertical level, depending on the dataset structure)
+        for layer in range(self.wind_forecast.shape[0]):
+            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
+        
+        self.wind_forecast = self.flipud_forecast
+
 
         self.model_spotting = sim_params.model_spotting
         self._spot_ign_prob = 0.0

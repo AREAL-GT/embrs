@@ -274,43 +274,6 @@ def create_forecast_array(num_files: int) -> np.ndarray:
 
     return forecast
 
-def create_uniform_wind(weather_stream: WeatherStream) -> np.ndarray:
-    """Creates a uniform wind forecast for all time steps.
-
-    This function generates a uniform wind forecast with the same speed and direction 
-    for each time step. It produces a 4D NumPy array suitable for fire simulation.
-
-    Args:
-        wind_speed (float): Wind speed in m/s.
-        wind_dir (float): Wind direction in degrees.
-        num_files (int): Number of time steps.
-        height (int): Height of the raster grid.
-        width (int): Width of the raster grid.
-
-    Returns:
-        np.ndarray: A 4D NumPy array with shape `(num_files, height, width, 2)`, 
-                    where:
-                    - `[:,:,0]` = Wind speed (m/s).
-                    - `[:,:,1]` = Wind direction (converted to Cartesian).
-
-    Notes:
-        - Assumes wind direction is given in degrees (0-360).
-        - The last axis of the array stores wind components:
-            - `[:,:,0]` = Wind speed.
-            - `[:,:,1]` = Wind direction
-    """
-
-    stream = weather_stream.stream
-    num_entries = len(stream)
-
-    forecast = np.zeros((num_entries, 1, 1, 2))
-
-    for i in range(num_entries):
-        forecast[i, 0, 0, 0] = stream[i].wind_speed
-        forecast[i, 0, 0, 1] = stream[i].wind_dir_deg
-        
-    return forecast
-
 def convert_to_cartesian(direction_data: np.ndarray) -> np.ndarray:
     """Converts wind direction data to a Cartesian-compatible format.
 
