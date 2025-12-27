@@ -175,7 +175,7 @@ embrs/validation/flatland/
 *.png
 *.pkl
 *.sqlite
-*.yml
+# *.yml
 *.parquet
 
 

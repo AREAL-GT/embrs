@@ -1,0 +1,47 @@
+site_name: EMBRS
+repo_url: https://github.com/AREAL-GT/embrs
+docs_dir: docs_raw
+site_dir: site
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.annotate
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+  - autorefs
+  - section-index
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+nav:
+  - Home: intro.md
+  - Tutorials:
+      - Background: background.md
+      - Raw Data: raw_data.md
+      - Map Creation: map_creation.md
+      - Wind Forecast: wind_forecast.md
+      - Running a Simulation: running_sim.md
+      - Log Files: log_files.md
+      - Visualization: visualization.md
+  - User Reference:
+      - User Code: user_code.md
+      - Interface Reference: interface_reference.md
+      - Fire Prediction: fire_prediction.md
+      - Simulation Documentation: sim_documentation.md
+      - Base Class Documentation: base_class_documentation.md
+      - Other Documentation: other_documentation.md
+      - Example Index: example_index.md
+  - Theory and Background:
+      - Fire Modelling: fire_modelling.md
+      - Interpreting Visualizations: interpreting_visualizations.md

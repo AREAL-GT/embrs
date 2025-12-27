@@ -12,7 +12,7 @@ run_embrs_sim
 
 After running this command you should now see the following window:
 
-![Sim opening window](/images/sim_open_window.png)
+![Sim opening window](images/sim_open_window.png)
 
 This window is where you specify all the input parameters for your EMBRS sim.
 

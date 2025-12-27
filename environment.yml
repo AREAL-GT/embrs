@@ -1,0 +1,12 @@
+name: embrs
+dependencies:
+  - numpy
+  - shapely
+  - tqdm
+  - matplotlib
+  - requests
+  - requests-cache
+  - geopandas
+  - pyproj
+  - rasterio
+  - pytz

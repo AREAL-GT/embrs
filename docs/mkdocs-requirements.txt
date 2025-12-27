@@ -1,0 +1,6 @@
+mkdocs
+mkdocs-material
+mkdocs-autorefs
+mkdocstrings[python]
+mkdocs-section-index
+pymdown-extensions
