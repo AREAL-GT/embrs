@@ -5,7 +5,7 @@ One of the core features of EMBRS is the ability to import custom control classe
 
 ### Base Class Implementation
 
-- Custom classes must implement the provided abstract base class called [`ControlClass`](./_autosummary/embrs.base_classes.control_base.rst) which is provided in 'base_classes/base_control_class.py'.
+- Custom classes must implement the provided abstract base class called [`ControlClass`](./_autosummary/embrs.base_classes.control_base.rst) in `embrs/base_classes/control_base.py`.
 - The base class requires the implementation of the `process_state` method. This is the method that is called after each iteration of an EMBRS simulation. It must take only a `FireSim` object as an input and shouldn't return anything.
 - The implementation of the body of this method is completely up to the user, but it acts as the 'bridge' between the custom control class and the EMBRS simulation.
 

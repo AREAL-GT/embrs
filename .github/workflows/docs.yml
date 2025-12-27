@@ -34,6 +34,11 @@ jobs:
         run: pip install -r docs/mkdocs-requirements.txt
       - name: Build site
         run: mkdocs build --clean
+      - name: Inspect build output
+        run: |
+          ls -la
+          ls -la site
+          find site -maxdepth 2 -type f | head
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

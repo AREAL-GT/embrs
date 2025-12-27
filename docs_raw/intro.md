@@ -25,24 +25,18 @@ pip install -e embrs
 
 ## Usage
 ### Launching EMBRS Applications
-Once EMBRS is installed, to launch the provided EMBRS applications to run a sim, run a visualization, create a map, and create a wind forecast you can use the following terminal commands.
+With the package installed in your environment, launch the GUIs directly via the modules:
 
 ```bash
-# Run a simulation
-run_embrs_sim
+# Run a simulation (GUI if no args; --config to load a .cfg)
+python -m embrs.main
+python -m embrs.main --config path/to/config.cfg
 
-
-# Run a visualization
-run_embrs_viz
-
+# Visualize a finished run
+python -m embrs.visualization_tool
 
 # Create an EMBRS map
-create_embrs_map
-
-
-# Create a wind forecast
-create_embrs_wind
-
+python -m embrs.map_generator
 ```
 
-Upon running these commands you will see GUI windows allowing you to specify each process. Read the rest of this site for information on how to use each.
+Each command opens a GUI for that workflow. Read the rest of this site for the inputs each tool expects.

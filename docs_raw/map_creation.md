@@ -7,7 +7,7 @@ EMBRS comes equipped with a map generation tool to guide you through generating 
 - Run the following command in your terminal:
 
 ```
-create_embrs_map
+python -m embrs.map_generator
 ```
 
 - You should now see a window like this:

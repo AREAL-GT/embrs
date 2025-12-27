@@ -4,13 +4,13 @@ Now, it is finally time to run an EMBRS simulation. In order to do this you need
 
 ## Step 1: Open the Simulator Tool
 
-- Run the following command in your terminal.
+- From your project environment, run the simulator module:
 
 ```
-run_embrs_sim
+python -m embrs.main
 ```
 
-After running this command you should now see the following window:
+Add `--config path/to/config.cfg` to load a saved configuration without using the GUI. After running without `--config` you should see the configuration window:
 
 ![Sim opening window](images/sim_open_window.png)
 

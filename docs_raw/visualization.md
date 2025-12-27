@@ -4,13 +4,13 @@ As mentioned in ['Running a Sim'](./running_sim.md) EMBRS simulations can be vis
 
 ## Step 1: Open the Visualization Tool
 
-- Run the following command in your terminal.
+- Run the visualization module from your environment:
 
 ```
-run_embrs_viz
+python -m embrs.visualization_tool
 ```
 
-After running this command you should now see the following window:
+After running this command you should see the configuration window:
 
 ```{figure} /images/viz_open_window.png
 ---
@@ -18,9 +18,9 @@ scale: 50%
 ---
 ```
 
-## Step 2: Select Log File
-- The first field prompts you to provide a log file for the sim to visualize.
-- Click 'Browse' and navigate to the folder that holds the log file for the simulation would like to visualize. This should be in the 'run' folder and it should be named `log.msgpack`. Make sure that there is an `init_fire_state.pkl` file in the directory above the log file.
+## Step 2: Select Log Folder
+- The first field prompts you to provide the log folder for the sim to visualize (the parent containing `log_<timestamp>/`).
+- Click 'Browse' and navigate to the folder that holds your run folders (see [Log Files](./log_files.md) for structure). Pick which `run_*` to play back from the dropdown. The tool reads `init_state.parquet` plus the Parquet logs in that run.
 
 ## Step 3: Select Visualization Parameters
 - Once you have selected the log file there are three visualization parameters to set before running a visualization.

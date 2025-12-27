@@ -6,19 +6,20 @@ Once your simulation(s) has finished running, the log folder you specified will 
 Here's an overview of the log folder file structure:
 
 ```
-Log Folder (Directory input when running sim)
-├── log_dd-mmm-yyyy-hh-mm-ss 
-│   ├── run_0 
-│   │   ├── agents.msgpack
-│   │   ├── log.msgpack 
-│   │   └── status_log.json 
-│   ├── run_1
-│   │   ├── agents.msgpack
-│   │   ├── log.msgpack 
+log_folder/
+├── log_dd-mmm-yyyy-hh-mm-ss/
+│   ├── init_state.parquet
+│   ├── run_0/
+│   │   ├── cell_logs.parquet
+│   │   ├── agent_logs.parquet
+│   │   ├── action_logs.parquet
+│   │   ├── prediction_logs.parquet
 │   │   └── status_log.json
-│   ├──init_fire_state.pkl
-├── ...
-
+│   ├── run_1/
+│   │   ├── ...
+│   │   └── status_log.json
+│   └── ...
+└── ...
 ```
 
 ```{warning}
@@ -29,19 +30,22 @@ Do not change the folder structure of the logs! This will affect the ability to 
 - Each log within a log folder will be automatically dated as shown in the structure above.
 
 ## Initial Fire State Log
-- In the top level of a log will be a file called `init_fire_state.pkl`.
-- This file captures the initial state of the sim which will be the same for each run of a simulation
-- It is used by the visualization tool to load the initial state of each sim
-- You would also need to load this file if trying to reconstruct a state at a certain time step of the sim (see example x)
+- In the top level of a log will be a file called `init_state.parquet`.
+- This file captures the initial state of the sim which will be the same for each run of a simulation.
+- It is used by the visualization tool to load the initial state of each sim.
+- You would also need this file if trying to reconstruct a state at a certain time step of the sim.
 
 ## Run Folder
 - Each simulation run gets a dedicated folder within a log that is numbered by the order of execution
 - All the data specific to that simulation run is stored in this folder
 
-## Simulation Log File
-- Within the run folder you will find the simulation log file titled `log.msgpack`. This file stores the changes to the state at each time-step
-- This is the file that is loaded by the visualization tool to replay the states of the simulation over time.
-- If you would like to reconstruct a state at a certain time step you would need to load this file [see the example code.](examples:sim_logs)
+## Simulation Log Files
+- Within each `run_*` folder you will find Parquet files capturing the simulation:
+  - `cell_logs.parquet`: cell state changes over time.
+  - `agent_logs.parquet`: agent positions (if any).
+  - `action_logs.parquet`: actions performed by control code.
+  - `prediction_logs.parquet`: predictions logged during the run.
+- These files are loaded by the visualization tool to replay the simulation. Use them (plus `init_state.parquet`) to reconstruct a state at any time step.
 
 ## Status Logs
 Also within the run folder you will find the status log file title `status_log.json`. This file is a human-readable log file with the following information:
@@ -175,7 +179,6 @@ Finally, there is a results portion of the file that provides data on whether th
 }
 ```
 
-## Agent Log File  
-- If your imported user code registered any agents with the sim ([see Custom Control Classes: Agents](user_code:agents)) you will also see the `agents.msgpack` file inside the run folder.
-- This captures the location of all agents during the simulation.
-- This file will be loaded by the visualization tool to display agent locations during the simulation.
+## Agent Logs  
+- If your imported user code registered any agents with the sim ([see Custom Control Classes: Agents](user_code:agents)) you will see `agent_logs.parquet` inside each run folder.
+- This captures the location of all agents during the simulation and is used by the visualization tool to display agent positions.

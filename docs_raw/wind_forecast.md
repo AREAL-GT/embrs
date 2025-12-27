@@ -53,22 +53,7 @@ The duration of your sim will be limited by the length of the wind forecast, so 
 ```
 
 ## Wind Forecast Generation Tool
-A wind forecast generation tool has been created to assist users in creating wind forecasts through a GUI. The tool generates a .json file in the format above. Using this tool is completely optional for generating wind forecasts.
-
-### Opening the Wind Forecast Generation Tool
-
-- Run the following command in your terminal:
-
-```
-python wind_forecast_generation_tool.py
-```
-
-- You should now see a window like this:
-```{figure} /images/wf_opening_window.png
----
-scale: 40%
-----
-```
+The repository does not currently ship a standalone GUI for building wind forecasts. Create the JSON file manually using the format above (or script your own helper) and point the simulator to it when configuring a run.
 
 ### Specifying Filename and Folder Location
 
