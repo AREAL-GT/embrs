@@ -29,14 +29,14 @@ With the package installed in your environment, launch the GUIs directly via the
 
 ```bash
 # Run a simulation (GUI if no args; --config to load a .cfg)
-python -m embrs.main
-python -m embrs.main --config path/to/config.cfg
+python -m main.py
+python -m main.py --config path/to/config.cfg
 
 # Visualize a finished run
-python -m embrs.visualization_tool
+python -m visualization_tool.py
 
 # Create an EMBRS map
-python -m embrs.map_generator
+python -m map_generator.py
 ```
 
 Each command opens a GUI for that workflow. Read the rest of this site for the inputs each tool expects.
