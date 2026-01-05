@@ -1,6 +1,6 @@
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
-from embrs.utilities.data_classes import PredictorParams, PredictionOutput
+from embrs.utilities.data_classes import PredictorParams, PredictionOutput, StateEstimate
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
@@ -74,9 +74,12 @@ class FirePredictor(BaseFireSim):
             self.orig_grid = copy.deepcopy(self._cell_grid)
             self.orig_dict = copy.deepcopy(self._cell_dict)
 
-    def run(self, visualize = False) -> PredictionOutput:
-        # Catch states of predictor cells up with the fire sim
+    def run(self, fire_estimate: StateEstimate=None, visualize=False) -> PredictionOutput:
+        # Catch up time and weather states with the fire sim
         self._catch_up_with_fire()
+
+        # Set fire state variables
+        self._set_states(fire_estimate)
 
         self.spread = {}
         self.flame_len_m = {}
@@ -106,6 +109,39 @@ class FirePredictor(BaseFireSim):
 
         return output
     
+    def _set_states(self, state_estimate: StateEstimate = None):
+        # Reset all data structures to the original
+        self._cell_grid = copy.deepcopy(self.orig_grid)
+        self._cell_dict = copy.deepcopy(self.orig_dict)
+        self._burnt_cells = []
+        self._burning_cells = []
+        self._updated_cells = {}
+        self._scheduled_spot_fires = {}
+
+
+        if state_estimate is None:
+            # Set the burnt cells based on fire state
+            if self.fire._burnt_cells:
+                burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+                self._set_initial_burnt_region(burnt_region)
+
+            # Set the burning cells based on fire state
+            burning_cells = [cell for cell in self.fire._burning_cells]
+            burning_region = UtilFuncs.get_cell_polygons(burning_cells)
+            self._set_initial_ignition(burning_region)
+
+        else:
+            # Initialize empty set of starting ignitions
+            self.starting_ignitions = set()
+
+            # Set the burnt cells based on provided estimate
+            if state_estimate.burnt_polys:
+                self._set_initial_burnt_region(state_estimate.burnt_polys)
+
+            # Set the burning cells based on provided estimate
+            if state_estimate.burning_polys:
+                self._set_initial_ignition(state_estimate.burning_polys)
+
     def _set_prediction_forecast(self, cell: Cell):
         x_wind = max(cell.x_pos - self.wind_xpad, 0)
         y_wind = max(cell.y_pos - self.wind_ypad, 0)
@@ -328,29 +364,11 @@ class FirePredictor(BaseFireSim):
         return p_i
 
     def _catch_up_with_fire(self):
-        # Reset all data structures to the original
-        self._cell_grid = copy.deepcopy(self.orig_grid)
-        self._cell_dict = copy.deepcopy(self.orig_dict)
-        self._burnt_cells = []
-        self._burning_cells = []
-        self._updated_cells = {}
-        self._scheduled_spot_fires = {}
-
         # Set current time to fire sim time
         self._curr_time_s = self.fire._curr_time_s
         self.start_time_s = self._curr_time_s
         self.last_viz_update = self._curr_time_s
         self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
-
-        # Set the burnt cells based on fire state
-        if self.fire._burnt_cells:
-            burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
-            self._set_initial_burnt_region(burnt_region)
-
-        # Set the burning cells based on fire state
-        burning_cells = [cell for cell in self.fire._burning_cells]
-        burning_region = UtilFuncs.get_cell_polygons(burning_cells)
-        self._set_initial_ignition(burning_region)
 
         # Create a erroneous wind forecast 
         self._predict_wind()

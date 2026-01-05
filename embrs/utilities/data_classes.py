@@ -5,6 +5,8 @@ from rasterio.coords import BoundingBox
 from datetime import datetime, timedelta
 from pyproj import Transformer
 from timezonefinder import TimezoneFinder
+from shapely.geometry import Polygon
+
 
 from embrs.models.fuel_models import Fuel
 
@@ -252,3 +254,8 @@ class PredictionOutput:
     crown_fire: dict # keys: (x,y), values: active or passive
     hold_probs: dict # keys: (x,y), values: float
     breaches: dict # keys: (x,y), values: bool
+
+@dataclass
+class StateEstimate:
+    burnt_polys: List[Polygon] = None
+    burning_polys: List[Polygon] = None
