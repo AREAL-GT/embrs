@@ -706,6 +706,16 @@ class Cell:
 
         return entry
 
+    def iter_neighbor_cells(self):
+        parent = self._parent()
+
+        if parent is None:
+            return
+        
+        cell_dict = parent.cell_dict
+        for nid in self._neighbors.keys():
+            yield cell_dict[nid]
+
     # ------ Compare operators overloads ------ #
     def __lt__(self, other) -> bool:
         """Compares two cells based on their unique ID.
