@@ -59,7 +59,7 @@ temp_file_path = os.getenv("WINDNINJA_TEMP_PATH", fallback_temp_file_path)
 
 def run_windninja_single(task: WindNinjaTask):
     """Runs WindNinja for a single time step in parallel."""
-    output_path = os.path.join(temp_file_path, f"{task.index}")
+    output_path = os.path.join(task.temp_file_path, f"{task.index}")
     os.makedirs(output_path, exist_ok=True)
 
     curr_datetime = task.start_datetime + timedelta(minutes=task.index * task.time_step)
@@ -272,25 +272,36 @@ def create_forecast_array(num_files: int, work_temp_path: str = None) -> np.ndar
     if work_temp_path is None:
         work_temp_path = temp_file_path
 
+    forecast = None  # Initialize before loop
+
     for i in range(num_files):
         output_path = os.path.join(work_temp_path, f"{i}")
 
         speed_file = os.path.join(output_path, f"wind_speed_{i}.asc")
         direction_file = os.path.join(output_path, f"wind_direction_{i}.asc")
 
-        if os.path.exists(speed_file) and os.path.exists(direction_file):            
+        if os.path.exists(speed_file) and os.path.exists(direction_file):
             with open(speed_file, 'r') as file:
                 speed_data = np.loadtxt(file, skiprows=6)
 
-                if i == 0:
+                # Initialize forecast array on first valid file
+                if forecast is None:
                     forecast = np.zeros((num_files, *speed_data.shape, 2))
 
                 forecast[i, :, :, 0] = speed_data
-            
+
             with open(direction_file, 'r') as file:
                 direction_data = np.loadtxt(file, skiprows=6)
                 direction_data = convert_to_cartesian(direction_data)
                 forecast[i, :, :, 1] = direction_data
+
+    # Ensure we found at least some files
+    if forecast is None:
+        raise FileNotFoundError(
+            f"No WindNinja output files found in {work_temp_path}. "
+            f"Expected files like wind_speed_0.asc and wind_direction_0.asc. "
+            f"WindNinja may have failed to generate outputs."
+        )
 
     # Cleanup worker-specific temp directory after loading data
     # Only delete if this is a worker temp dir (contains "worker_" in path)
