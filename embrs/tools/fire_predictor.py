@@ -4,10 +4,13 @@ from embrs.utilities.data_classes import PredictorParams, PredictionOutput, Stat
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
-from embrs.models.wind_forecast import run_windninja
+from embrs.models.wind_forecast import run_windninja, temp_file_path
 
 import copy
 import numpy as np
+import os
+import tempfile
+import uuid
 from typing import List, Optional
 
 class FirePredictor(BaseFireSim):
@@ -449,7 +452,12 @@ class FirePredictor(BaseFireSim):
         # Get map params from fire or from serialized sim_params
         map_params = self.fire._sim_params.map_params if self.fire is not None else self._sim_params.map_params
 
-        self.wind_forecast = run_windninja(new_weather_stream, map_params)
+        # Generate unique temp directory for this worker to avoid race conditions
+        # when multiple ensemble members run in parallel
+        worker_id = uuid.uuid4().hex[:8]
+        custom_temp = os.path.join(temp_file_path, f"worker_{worker_id}")
+
+        self.wind_forecast = run_windninja(new_weather_stream, map_params, custom_temp)
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
         for layer in range(self.wind_forecast.shape[0]):
