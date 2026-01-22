@@ -16,6 +16,10 @@ class FirePredictor(BaseFireSim):
         self.fire = fire
         self.c_size = -1
 
+        # Store original params for serialization
+        self._params = params
+        self._serialization_data = None  # Will hold snapshot for pickling
+
         self.set_params(params)
 
     def set_params(self, params: PredictorParams):
@@ -418,3 +422,272 @@ class FirePredictor(BaseFireSim):
         self._weather_stream = new_weather_stream
 
         self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
+
+    def prepare_for_serialization(self):
+        """
+        Prepare predictor for parallel execution by extracting serializable data.
+
+        Must be called once before pickling the predictor. Captures the current
+        state of the parent FireSim and stores it in a serializable format.
+
+        This method should be called in the main process before spawning workers.
+
+        Raises:
+            RuntimeError: If called without a fire reference
+        """
+        if self.fire is None:
+            raise RuntimeError("Cannot prepare predictor without fire reference")
+
+        # Extract fire state at prediction start
+        fire_state = {
+            'curr_time_s': self.fire._curr_time_s,
+            'curr_weather_idx': self.fire._curr_weather_idx,
+            'last_weather_update': self.fire._last_weather_update,
+            'burning_cell_polygons': UtilFuncs.get_cell_polygons(self.fire._burning_cells),
+            'burnt_cell_polygons': (UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+                                   if self.fire._burnt_cells else None),
+        }
+
+        # Deep copy simulation parameters
+        sim_params_copy = copy.deepcopy(self.fire._sim_params)
+        weather_stream_copy = copy.deepcopy(self.fire._weather_stream)
+
+        # Store all serializable data
+        self._serialization_data = {
+            'sim_params': sim_params_copy,
+            'predictor_params': copy.deepcopy(self._params),
+            'fire_state': fire_state,
+            'weather_stream': weather_stream_copy,
+
+            # Predictor-specific attributes
+            'time_horizon_hr': self.time_horizon_hr,
+            'wind_uncertainty_factor': self.wind_uncertainty_factor,
+            'wind_speed_bias': self.wind_speed_bias,
+            'wind_dir_bias': self.wind_dir_bias,
+            'ros_bias_factor': self.ros_bias_factor,
+            'beta': self.beta,
+            'wnd_spd_std': self.wnd_spd_std,
+            'wnd_dir_std': self.wnd_dir_std,
+            'dead_mf': self.dead_mf,
+            'live_mf': self.live_mf,
+            'nom_ign_prob': self.nom_ign_prob,
+
+            # Wind and elevation data
+            'wind_forecast': self.wind_forecast,
+            'flipud_forecast': self.flipud_forecast,
+            'wind_xpad': self.wind_xpad,
+            'wind_ypad': self.wind_ypad,
+            'coarse_elevation': self.coarse_elevation,
+        }
+
+    def __getstate__(self):
+        """
+        Serialize predictor for parallel execution.
+
+        Returns only the essential data needed to reconstruct the predictor
+        in a worker process. Excludes non-serializable components like the
+        parent FireSim reference, visualizer, and logger.
+
+        Returns:
+            dict: Minimal state dictionary for serialization
+
+        Raises:
+            RuntimeError: If prepare_for_serialization() was not called first
+        """
+        if self._serialization_data is None:
+            raise RuntimeError(
+                "Must call prepare_for_serialization() before pickling. "
+                "This ensures all necessary state is captured from the parent FireSim."
+            )
+
+        # Return minimal state
+        state = {
+            'serialization_data': self._serialization_data,
+            'orig_grid': self.orig_grid,  # Template cells (pre-built)
+            'orig_dict': self.orig_dict,  # Template cells (pre-built)
+            'c_size': self.c_size,
+        }
+
+        return state
+
+    def __setstate__(self, state):
+        """
+        Reconstruct predictor in worker process WITHOUT calling BaseFireSim.__init__.
+
+        This method manually restores all attributes that BaseFireSim.__init__()
+        would have set, but WITHOUT the expensive cell creation loop.
+
+        The key optimization: use pre-built cell templates (orig_grid, orig_dict)
+        instead of reconstructing cells from map data.
+
+        Args:
+            state (dict): State dictionary from __getstate__
+        """
+        import numpy as np
+        from embrs.models.perryman_spot import PerrymanSpotting
+        from embrs.models.fuel_models import Anderson13, ScottBurgan40
+
+        # Extract serialization data
+        data = state['serialization_data']
+        sim_params = data['sim_params']
+
+        # =====================================================================
+        # Phase 1: Restore FirePredictor-specific attributes
+        # =====================================================================
+        self.fire = None  # No parent fire in worker
+        self.c_size = state['c_size']
+        self._params = data['predictor_params']
+        self._serialization_data = data
+
+        self.time_horizon_hr = data['time_horizon_hr']
+        self.wind_uncertainty_factor = data['wind_uncertainty_factor']
+        self.wind_speed_bias = data['wind_speed_bias']
+        self.wind_dir_bias = data['wind_dir_bias']
+        self.ros_bias_factor = data['ros_bias_factor']
+        self.beta = data['beta']
+        self.wnd_spd_std = data['wnd_spd_std']
+        self.wnd_dir_std = data['wnd_dir_std']
+        self.dead_mf = data['dead_mf']
+        self.live_mf = data['live_mf']
+        self.nom_ign_prob = data['nom_ign_prob']
+
+        # =====================================================================
+        # Phase 2: Restore BaseFireSim attributes (manually, without __init__)
+        # =====================================================================
+
+        # From BaseFireSim.__init__ lines 45-88
+        self.display_frequency = 300
+        self._sim_params = sim_params
+        self.burnout_thresh = 0.01
+        self.sim_start_w_idx = 0
+        self._curr_weather_idx = data['fire_state']['curr_weather_idx']
+        self._last_weather_update = data['fire_state']['last_weather_update']
+        self.weather_changed = True
+        self._curr_time_s = data['fire_state']['curr_time_s']
+        self._iters = 0
+        self.logger = None  # No logger in worker
+        self._visualizer = None  # No visualizer in worker
+        self._finished = False
+
+        # Empty containers (will be populated by _set_states)
+        self._updated_cells = {}
+        self._cell_dict = {}
+        self._long_term_retardants = set()
+        self._active_water_drops = []
+        self._burning_cells = []
+        self._new_ignitions = []
+        self._burnt_cells = set()
+        self._frontier = set()
+        self._fire_break_cells = []
+        self._active_firelines = {}
+        self._new_fire_break_cache = []
+        self.starting_ignitions = set()
+        self._urban_cells = []
+        self._scheduled_spot_fires = {}
+
+        # From _parse_sim_params (lines 252-353)
+        map_params = sim_params.map_params
+        self._cell_size = sim_params.cell_size
+        self._sim_duration = sim_params.duration_s
+        self._time_step = sim_params.t_step_s
+        self._init_mf = sim_params.init_mf
+        self._fuel_moisture_map = getattr(sim_params, 'fuel_moisture_map', {})
+        self._fms_has_live = getattr(sim_params, 'fms_has_live', False)
+        self._init_live_h_mf = getattr(sim_params, 'live_h_mf', 0.0)
+        self._init_live_w_mf = getattr(sim_params, 'live_w_mf', 0.0)
+        self._size = map_params.size()
+        self._shape = map_params.shape(self._cell_size)
+        self._roads = map_params.roads
+        self.coarse_elevation = data['coarse_elevation']
+
+        # Fuel class selection
+        fbfm_type = map_params.fbfm_type
+        if fbfm_type == "Anderson":
+            self.FuelClass = Anderson13
+        elif fbfm_type == "ScottBurgan":
+            self.FuelClass = ScottBurgan40
+        else:
+            raise ValueError(f"FBFM Type {fbfm_type} not supported")
+
+        # Map data (from lcp_data, but already in sim_params)
+        lcp_data = map_params.lcp_data
+        self._elevation_map = np.flipud(lcp_data.elevation_map)
+        self._slope_map = np.flipud(lcp_data.slope_map)
+        self._aspect_map = np.flipud(lcp_data.aspect_map)
+        self._fuel_map = np.flipud(lcp_data.fuel_map)
+        self._cc_map = np.flipud(lcp_data.canopy_cover_map)
+        self._ch_map = np.flipud(lcp_data.canopy_height_map)
+        self._cbh_map = np.flipud(lcp_data.canopy_base_height_map)
+        self._cbd_map = np.flipud(lcp_data.canopy_bulk_density_map)
+        self._data_res = lcp_data.resolution
+
+        # Scenario data
+        scenario = map_params.scenario_data
+        self._fire_breaks = list(zip(scenario.fire_breaks, scenario.break_widths, scenario.break_ids))
+        self.fire_break_dict = {
+            id: (fire_break, break_width)
+            for fire_break, break_width, id in self._fire_breaks
+        }
+        self._initial_ignition = scenario.initial_ign
+
+        # Datetime and orientation
+        self._start_datetime = sim_params.weather_input.start_datetime
+        self._north_dir_deg = map_params.geo_info.north_angle_deg
+
+        # Wind forecast (already computed, just restore)
+        self.wind_forecast = data['wind_forecast']
+        self.flipud_forecast = data['flipud_forecast']
+        self._wind_res = sim_params.weather_input.mesh_resolution
+        self.wind_xpad = data['wind_xpad']
+        self.wind_ypad = data['wind_ypad']
+
+        # Weather stream
+        self._weather_stream = data['weather_stream']
+        self.weather_t_step = self._weather_stream.time_step * 60
+
+        # Spotting parameters
+        self.model_spotting = sim_params.model_spotting
+        self._spot_ign_prob = 0.0
+        if self.model_spotting:
+            self._canopy_species = sim_params.canopy_species
+            self._dbh_cm = sim_params.dbh_cm
+            self._spot_ign_prob = sim_params.spot_ign_prob
+            self._min_spot_distance = sim_params.min_spot_dist
+            self._spot_delay_s = sim_params.spot_delay_s
+
+        # Moisture (prediction model specific)
+        self.fmc = 100  # Prediction model default
+
+        # =====================================================================
+        # Phase 3: Restore cell templates (CRITICAL - uses pre-built cells)
+        # =====================================================================
+
+        # Use the serialized templates instead of reconstructing
+        self.orig_grid = state['orig_grid']
+        self.orig_dict = state['orig_dict']
+
+        # Initialize cell_grid to the template shape
+        self._cell_grid = np.empty(self._shape, dtype=object)
+        self._grid_width = self._cell_grid.shape[1] - 1
+        self._grid_height = self._cell_grid.shape[0] - 1
+
+        # Fix weak references in cells (point to self instead of original fire)
+        for cell in self.orig_dict.values():
+            cell.set_parent(self)
+
+        # =====================================================================
+        # Phase 4: Rebuild lightweight components
+        # =====================================================================
+
+        # Rebuild spotting model (PerrymanSpotting for prediction)
+        if self.model_spotting:
+            limits = (map_params.geo_info.x_max - map_params.geo_info.x_min,
+                     map_params.geo_info.y_max - map_params.geo_info.y_min)
+            self.embers = PerrymanSpotting(self._spot_delay_s, limits)
+
+        # Calculate x_lim and y_lim if needed
+        self.x_lim = map_params.geo_info.x_max - map_params.geo_info.x_min
+        self.y_lim = map_params.geo_info.y_max - map_params.geo_info.y_min
+
+        # Note: _set_states() will be called by run() to deep copy the cells
+        # and set up the initial burning/burnt regions
