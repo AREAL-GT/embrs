@@ -753,6 +753,34 @@ class Cell:
             raise TypeError("Comparison must be between two Cell instances.")
         return self.id > other.id
 
+    def __getstate__(self):
+        """
+        Custom pickle to handle weak reference to parent.
+
+        The _parent weak reference cannot be pickled, so we exclude it.
+        It will be restored by FirePredictor.__setstate__ calling set_parent().
+
+        Returns:
+            dict: Cell state dictionary with _parent excluded
+        """
+        state = self.__dict__.copy()
+        # Remove weak reference - will be restored later
+        state['_parent'] = None
+        return state
+
+    def __setstate__(self, state):
+        """
+        Restore cell state after unpickling.
+
+        Parent reference is set to None and will be fixed by
+        FirePredictor.__setstate__().
+
+        Args:
+            state (dict): Cell state dictionary from __getstate__
+        """
+        self.__dict__.update(state)
+        # Parent will be set later via cell.set_parent(predictor)
+
     @property
     def col(self) -> int:
         """Column index of the cell within the :py:attr:`~fire_simulator.fire.FireSim.cell_grid`
