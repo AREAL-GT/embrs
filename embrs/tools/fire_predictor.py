@@ -81,6 +81,7 @@ class FirePredictor(BaseFireSim):
 
     def run(self, fire_estimate: StateEstimate=None, visualize=False) -> PredictionOutput:
         # Catch up time and weather states with the fire sim
+        # (works in both main process and worker process)
         self._catch_up_with_fire()
 
         # Set fire state variables
@@ -98,7 +99,7 @@ class FirePredictor(BaseFireSim):
         # Perform the prediction
         self._prediction_loop()
 
-        if visualize:
+        if visualize and self.fire is not None:
             self.fire.visualize_prediction(self.spread)
 
         output = PredictionOutput(
@@ -126,14 +127,24 @@ class FirePredictor(BaseFireSim):
 
         if state_estimate is None:
             # Set the burnt cells based on fire state
-            if self.fire._burnt_cells:
-                burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
-                self._set_initial_burnt_region(burnt_region)
+            # If we're in a worker (self.fire is None), use serialized fire state
+            if self.fire is not None:
+                if self.fire._burnt_cells:
+                    burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
+                    self._set_initial_burnt_region(burnt_region)
 
-            # Set the burning cells based on fire state
-            burning_cells = [cell for cell in self.fire._burning_cells]
-            burning_region = UtilFuncs.get_cell_polygons(burning_cells)
-            self._set_initial_ignition(burning_region)
+                # Set the burning cells based on fire state
+                burning_cells = [cell for cell in self.fire._burning_cells]
+                burning_region = UtilFuncs.get_cell_polygons(burning_cells)
+                self._set_initial_ignition(burning_region)
+            else:
+                # In worker process, use serialized fire state
+                if self._serialization_data and 'fire_state' in self._serialization_data:
+                    fire_state = self._serialization_data['fire_state']
+                    if fire_state['burnt_cell_polygons']:
+                        self._set_initial_burnt_region(fire_state['burnt_cell_polygons'])
+                    if fire_state['burning_cell_polygons']:
+                        self._set_initial_ignition(fire_state['burning_cell_polygons'])
 
         else:
             # Initialize empty set of starting ignitions
@@ -369,24 +380,48 @@ class FirePredictor(BaseFireSim):
         return p_i
 
     def _catch_up_with_fire(self):
-        # Set current time to fire sim time
-        self._curr_time_s = self.fire._curr_time_s
-        self.start_time_s = self._curr_time_s
-        self.last_viz_update = self._curr_time_s
-        self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+        """
+        Synchronize predictor time state with parent fire simulation.
 
-        # Create a erroneous wind forecast 
+        In worker processes (self.fire is None), uses serialized state instead.
+        """
+        if self.fire is not None:
+            # In main process: get current state from fire
+            self._curr_time_s = self.fire._curr_time_s
+            self.start_time_s = self._curr_time_s
+            self.last_viz_update = self._curr_time_s
+            self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+        else:
+            # In worker process: use serialized state
+            self.start_time_s = self._curr_time_s  # Already set in __setstate__
+            self.last_viz_update = self._curr_time_s
+            self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+
+        # Create a perturbed wind forecast (works in both main and worker)
         self._predict_wind()
 
     def _predict_wind(self):
-        new_weather_stream = copy.deepcopy(self.fire._weather_stream)
+        """
+        Generate perturbed wind forecast for prediction.
+
+        In worker processes (self.fire is None), uses serialized weather stream.
+        """
+        if self.fire is not None:
+            new_weather_stream = copy.deepcopy(self.fire._weather_stream)
+            curr_idx = self.fire._curr_weather_idx
+        else:
+            # In worker: use serialized weather stream
+            new_weather_stream = copy.deepcopy(self._weather_stream)
+            curr_idx = self._curr_weather_idx
+
         self.weather_t_step = new_weather_stream.time_step * 60
 
         num_indices = int(np.ceil((self.time_horizon_hr * 3600) / self.weather_t_step))
-        curr_idx = self.fire._curr_weather_idx
 
         self._curr_weather_idx = 0
-        self._last_weather_update = self.fire._last_weather_update
+        if self.fire is not None:
+            self._last_weather_update = self.fire._last_weather_update
+        # else: _last_weather_update already set in __setstate__
 
         end_idx = num_indices + curr_idx
 
@@ -411,15 +446,20 @@ class FirePredictor(BaseFireSim):
 
         new_weather_stream.stream = new_stream
 
-        self.wind_forecast = run_windninja(new_weather_stream, self.fire._sim_params.map_params)
+        # Get map params from fire or from serialized sim_params
+        map_params = self.fire._sim_params.map_params if self.fire is not None else self._sim_params.map_params
+
+        self.wind_forecast = run_windninja(new_weather_stream, map_params)
         self.flipud_forecast = np.empty(self.wind_forecast.shape)
 
         for layer in range(self.wind_forecast.shape[0]):
             self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
-            
+
         self.wind_forecast = self.flipud_forecast
 
-        self._wind_res = self.fire._sim_params.weather_input.mesh_resolution
+        # Get mesh resolution from fire or from serialized sim_params
+        sim_params = self.fire._sim_params if self.fire is not None else self._sim_params
+        self._wind_res = sim_params.weather_input.mesh_resolution
         self._weather_stream = new_weather_stream
 
         self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
@@ -659,7 +699,7 @@ class FirePredictor(BaseFireSim):
         # Moisture (prediction model specific)
         self.fmc = 100  # Prediction model default
 
-        # =====================================================================
+        # =================================================================ƒ===
         # Phase 3: Restore cell templates (CRITICAL - uses pre-built cells)
         # =====================================================================
 
@@ -680,15 +720,11 @@ class FirePredictor(BaseFireSim):
         # Phase 4: Rebuild lightweight components
         # =====================================================================
 
+        size = map_params.size()
+
         # Rebuild spotting model (PerrymanSpotting for prediction)
         if self.model_spotting:
-            limits = (map_params.geo_info.x_max - map_params.geo_info.x_min,
-                     map_params.geo_info.y_max - map_params.geo_info.y_min)
-            self.embers = PerrymanSpotting(self._spot_delay_s, limits)
-
-        # Calculate x_lim and y_lim if needed
-        self.x_lim = map_params.geo_info.x_max - map_params.geo_info.x_min
-        self.y_lim = map_params.geo_info.y_max - map_params.geo_info.y_min
+            self.embers = PerrymanSpotting(self._spot_delay_s, size)
 
         # Note: _set_states() will be called by run() to deep copy the cells
         # and set up the initial burning/burnt regions
