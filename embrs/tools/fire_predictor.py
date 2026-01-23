@@ -79,8 +79,8 @@ class FirePredictor(BaseFireSim):
 
         if generate_cell_grid:
             super().__init__(sim_params, burnt_region=burnt_region)
-            self.orig_grid = copy.deepcopy(self._cell_grid)
-            self.orig_dict = copy.deepcopy(self._cell_dict)
+            # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
+            self.orig_grid, self.orig_dict = copy.deepcopy((self._cell_grid, self._cell_dict))
 
     def run(self, fire_estimate: StateEstimate=None, visualize=False) -> PredictionOutput:
         # Catch up time and weather states with the fire sim
@@ -120,12 +120,18 @@ class FirePredictor(BaseFireSim):
     
     def _set_states(self, state_estimate: StateEstimate = None):
         # Reset all data structures to the original
-        self._cell_grid = copy.deepcopy(self.orig_grid)
-        self._cell_dict = copy.deepcopy(self.orig_dict)
+        # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
+        # If we deepcopy them separately, we get two different sets of Cell objects!
+        self._cell_grid, self._cell_dict = copy.deepcopy((self.orig_grid, self.orig_dict))
         self._burnt_cells = []
         self._burning_cells = []
         self._updated_cells = {}
         self._scheduled_spot_fires = {}
+
+        # CRITICAL: Fix weak references after deepcopy
+        # deepcopy creates new Cell objects but doesn't update weak references
+        for cell in self._cell_dict.values():
+            cell.set_parent(self)
 
 
         if state_estimate is None:
