@@ -173,7 +173,7 @@ class EnsemblePredictionTest(ControlClass):
         state_estimates = []
 
         # Get current fire polygons
-        base_burnt = UtilFuncs.get_cell_polygons(fire.burnt_cells) if fire.burnt_cells else []
+        base_burnt = UtilFuncs.get_cell_polygons(fire._burnt_cells) if fire._burnt_cells else []
         base_burning = UtilFuncs.get_cell_polygons(fire.burning_cells)
 
         # Member 0: Exact current state (baseline)
