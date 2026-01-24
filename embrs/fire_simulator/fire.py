@@ -326,6 +326,12 @@ class FireSim(BaseFireSim):
 
         self.curr_prediction = prediction_grid
 
+    def visualize_ensemble_prediction(self, prediction_grid):
+        if self._visualizer is not None:
+            self._visualizer.visualize_ensemble_prediction(prediction_grid)
+
+        self.curr_prediction = prediction_grid
+
     @property
     def agent_list(self) -> list:
         """List of :class:`~base_classes.agent_base.AgentBase` objects representing agents

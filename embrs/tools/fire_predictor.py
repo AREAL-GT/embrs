@@ -1,6 +1,7 @@
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.data_classes import PredictorParams, PredictionOutput, StateEstimate
+from embrs.utilities.data_classes import EnsemblePredictionOutput, CellStatistics
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
@@ -132,7 +133,6 @@ class FirePredictor(BaseFireSim):
         # deepcopy creates new Cell objects but doesn't update weak references
         for cell in self._cell_dict.values():
             cell.set_parent(self)
-
 
         if state_estimate is None:
             # Set the burnt cells based on fire state
@@ -295,7 +295,7 @@ class FirePredictor(BaseFireSim):
                 self.propagate_fire(cell)
                 self.remove_neighbors(cell)
 
-                if cell.fully_burning:
+                if cell.fully_burning or len(cell.burnable_neighbors) == 0:
                     self.set_state_at_cell(cell, CellStates.BURNT)
                 else:
                     fires_still_burning.append(cell)
@@ -400,14 +400,15 @@ class FirePredictor(BaseFireSim):
             self.start_time_s = self._curr_time_s
             self.last_viz_update = self._curr_time_s
             self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+            # Create a perturbed wind forecast (works in both main and worker)
+            self._predict_wind()
+        
         else:
             # In worker process: use serialized state
             self.start_time_s = self._curr_time_s  # Already set in __setstate__
             self.last_viz_update = self._curr_time_s
             self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
 
-        # Create a perturbed wind forecast (works in both main and worker)
-        self._predict_wind()
 
     def _predict_wind(self):
         """
@@ -622,7 +623,7 @@ class FirePredictor(BaseFireSim):
         self.display_frequency = 300
         self._sim_params = sim_params
         self.burnout_thresh = 0.01
-        self.sim_start_w_idx = 0
+        self.sim_start_w_idx = data['fire_state']['curr_weather_idx']
         self._curr_weather_idx = data['fire_state']['curr_weather_idx']
         self._last_weather_update = data['fire_state']['last_weather_update']
         self.weather_changed = True
@@ -650,10 +651,10 @@ class FirePredictor(BaseFireSim):
 
         # From _parse_sim_params (lines 252-353)
         map_params = sim_params.map_params
-        self._cell_size = sim_params.cell_size
+        self._cell_size = self._params.cell_size_m
         self._sim_duration = sim_params.duration_s
-        self._time_step = sim_params.t_step_s
-        self._init_mf = sim_params.init_mf
+        self._time_step = self._params.time_step_s
+        self._init_mf = self._params.dead_mf
         self._fuel_moisture_map = getattr(sim_params, 'fuel_moisture_map', {})
         self._fms_has_live = getattr(sim_params, 'fms_has_live', False)
         self._init_live_h_mf = getattr(sim_params, 'live_h_mf', 0.0)
@@ -709,14 +710,14 @@ class FirePredictor(BaseFireSim):
         self.weather_t_step = self._weather_stream.time_step * 60
 
         # Spotting parameters
-        self.model_spotting = sim_params.model_spotting
+        self.model_spotting = self._params.model_spotting
         self._spot_ign_prob = 0.0
         if self.model_spotting:
             self._canopy_species = sim_params.canopy_species
             self._dbh_cm = sim_params.dbh_cm
             self._spot_ign_prob = sim_params.spot_ign_prob
             self._min_spot_distance = sim_params.min_spot_dist
-            self._spot_delay_s = sim_params.spot_delay_s
+            self._spot_delay_s = self._params.spot_delay_s
 
         # Moisture (prediction model specific)
         self.fmc = 100  # Prediction model default
@@ -768,7 +769,7 @@ class FirePredictor(BaseFireSim):
         StateEstimate. Results are aggregated into probabilistic predictions.
 
         This method uses custom serialization to avoid reconstructing FireSim
-        for each ensemble member, providing ~25% speedup over naive approaches.
+        for each ensemble member.
 
         Args:
             state_estimates: List of StateEstimate objects representing
@@ -788,7 +789,6 @@ class FirePredictor(BaseFireSim):
         import multiprocessing as mp
         from concurrent.futures import ProcessPoolExecutor, as_completed
         from tqdm import tqdm
-        from typing import List, Optional
 
         # Validation
         if not state_estimates:
@@ -809,6 +809,11 @@ class FirePredictor(BaseFireSim):
 
         # CRITICAL: Prepare for serialization
         print("Preparing predictor for serialization...")
+        
+        # Get a single wind forecast for whole ensemble # TODO: Implement an option to make each predictor have its own perturbed forecast
+        self._predict_wind()
+
+        # Prepare workers for serialization
         self.prepare_for_serialization()
 
         # Run predictions in parallel
@@ -868,11 +873,12 @@ class FirePredictor(BaseFireSim):
 
         # Optionally visualize
         if visualize:
-            print("Visualization not yet implemented")
-            # self._visualize_ensemble(ensemble_output)
+            self._visualize_ensemble(ensemble_output)
 
         return ensemble_output
 
+    def _visualize_ensemble(self, ensemble_output: EnsemblePredictionOutput):
+        self.fire.visualize_ensemble_prediction(ensemble_output.burn_probability)
 
 # ============================================================================
 # Module-level functions for parallel execution
@@ -934,23 +940,32 @@ def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
     Returns:
         EnsemblePredictionOutput with probabilistic predictions
     """
-    from embrs.utilities.data_classes import EnsemblePredictionOutput, CellStatistics
 
     n_ensemble = len(predictions)
 
-    # 1. Build burn probability map
-    burn_counts = {}  # {time_s: {(x,y): count}}
-    for pred in predictions:
-        for time_s, locations in pred.spread.items():
-            if time_s not in burn_counts:
-                burn_counts[time_s] = {}
-            for loc in locations:
-                burn_counts[time_s][loc] = burn_counts[time_s].get(loc, 0) + 1
-
-    burn_probability = {
-        time_s: {loc: count / n_ensemble for loc, count in counts.items()}
-        for time_s, counts in burn_counts.items()
-    }
+    # 1. Build CUMULATIVE burn probability map
+    # For each time step, track which ensemble members have burned each location by that time
+    all_time_steps = sorted(set(time_s for pred in predictions for time_s in pred.spread.keys()))
+    
+    burn_probability = {}
+    for time_s in all_time_steps:
+        # Track which ensemble members have burned each location by this time
+        burned_by_time = {}  # {(x,y): set of ensemble indices}
+        
+        for ensemble_idx, pred in enumerate(predictions):
+            # Check all time steps up to and including current time_s
+            for t in pred.spread.keys():
+                if t <= time_s:
+                    for loc in pred.spread[t]:
+                        if loc not in burned_by_time:
+                            burned_by_time[loc] = set()
+                        burned_by_time[loc].add(ensemble_idx)
+        
+        # Convert to probabilities
+        burn_probability[time_s] = {
+            loc: len(ensemble_set) / n_ensemble 
+            for loc, ensemble_set in burned_by_time.items()
+        }
 
     # 2. Collect all unique cell locations that burned in any prediction
     all_burned_cells = set()

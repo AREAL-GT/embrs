@@ -402,3 +402,59 @@ class BaseVisualizer:
             self.prediction_scatter = self.h_ax.scatter(x, y, c=all_times, cmap=cmap, norm=norm, 
                                                         s=1, zorder=1)
             self.fig.canvas.draw()
+
+
+    def visualize_ensemble_prediction(self, burn_probability):
+        """Visualizes the final burn probability for each cell.
+        
+        Args:
+            burn_probability (dict): Dictionary mapping timestamps to dictionaries of 
+                                    {(x,y): probability} representing cumulative burn 
+                                    probability at each time step
+        """
+        # Clear any existing prediction visualization
+        if hasattr(self, 'prediction_scatter'):
+            self.prediction_scatter.remove()
+            delattr(self, 'prediction_scatter')
+        
+        # Get the final time step (latest prediction)
+        time_steps = sorted(burn_probability.keys())
+        if not time_steps:
+            return
+        
+        final_time = time_steps[-1]
+        final_probs = burn_probability[final_time]
+        
+        if not final_probs:
+            return
+        
+        # Extract points and their probabilities
+        points = list(final_probs.keys())
+        probs = [final_probs[point] for point in points]
+        
+        # Create colormap for probabilities (0 to 1)
+        cmap = mpl.cm.get_cmap("hot")  # 'hot' colormap: dark to bright
+        norm = plt.Normalize(0, 1)
+        
+        x, y = zip(*points)
+        self.prediction_scatter = self.h_ax.scatter(
+            x, y, 
+            c=probs, 
+            cmap=cmap, 
+            norm=norm, 
+            s=1, 
+            zorder=1,
+            alpha=0.8
+        )
+        
+        # Add colorbar if not already present
+        if not hasattr(self, 'prediction_colorbar'):
+            self.prediction_colorbar = self.fig.colorbar(
+                self.prediction_scatter, 
+                ax=self.h_ax, 
+                label='Burn Probability'
+            )
+        else:
+            self.prediction_colorbar.update_normal(self.prediction_scatter)
+        
+        self.fig.canvas.draw()

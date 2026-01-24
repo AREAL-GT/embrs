@@ -14,6 +14,8 @@ To use this example:
 import numpy as np
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
+import multiprocessing as mp
+
 
 from embrs.base_classes.control_base import ControlClass
 from embrs.fire_simulator.fire import FireSim
@@ -43,11 +45,11 @@ class EnsemblePredictionTest(ControlClass):
         self.fire = fire
         self.predictor = None
         self.ensemble_run = False
-        self.trigger_time_hr = 0.5  # Run ensemble after 30 minutes
+        self.trigger_time_hr = 2
 
         # Configuration for ensemble
-        self.n_ensemble = 5  # Number of ensemble members
-        self.prediction_horizon_hr = 2.0  # How far ahead to predict
+        self.n_ensemble = 20  # Number of ensemble members
+        self.prediction_horizon_hr = 12.0  # How far ahead to predict
         self.use_seeds = True  # For reproducibility
 
         print("\n" + "="*70)
@@ -107,9 +109,9 @@ class EnsemblePredictionTest(ControlClass):
             print("Running ensemble prediction in parallel...")
             result = self.predictor.run_ensemble(
                 state_estimates=state_estimates,
-                num_workers=min(4, self.n_ensemble),  # Use up to 4 workers
+                num_workers=min(mp.cpu_count(), self.n_ensemble),  # Use up to 4 workers
                 random_seeds=seeds,
-                visualize=False,
+                visualize=True,
                 return_individual=True  # Include individual predictions for analysis
             )
             print("✓ Ensemble prediction complete!\n")
@@ -131,11 +133,11 @@ class EnsemblePredictionTest(ControlClass):
         """
         params = PredictorParams(
             time_horizon_hr=self.prediction_horizon_hr,
-            cell_size_m=30.0,  # Same as fire sim
-            time_step_s=5.0,   # Same as fire sim
+            cell_size_m=45.0,  # Same as fire sim
+            time_step_s=20.0,   # Same as fire sim
 
             # Fuel moisture (can be constant or from fire state)
-            dead_mf=0.08,
+            dead_mf=0.10,
             live_mf=0.3,
 
             # Wind uncertainty (creates variation in ensemble members)
@@ -143,13 +145,13 @@ class EnsemblePredictionTest(ControlClass):
             wind_dir_bias=0.0,        # No systematic bias
             max_wind_speed_bias=2.0,  # Max random bias in m/s
             max_wind_dir_bias=15.0,   # Max random bias in degrees
-            wind_uncertainty_factor=0.5,  # Medium uncertainty
+            wind_uncertainty_factor=0.0,  # Medium uncertainty
 
             # ROS uncertainty
             ros_bias=0.0,  # No systematic bias
 
             # Spotting (if enabled in main sim)
-            model_spotting=True,
+            model_spotting=False,
             spot_delay_s=300.0,  # 5 minute delay
         )
 
@@ -233,6 +235,8 @@ class EnsemblePredictionTest(ControlClass):
             print(f"Warning: Buffer operation failed: {e}")
             return polygons  # Return original on error
 
+
+    # TODO: Update this function with more useful statistics
     def _analyze_results(self, result, fire: FireSim):
         """
         Analyze and display ensemble prediction results.
