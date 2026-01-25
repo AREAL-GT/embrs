@@ -259,3 +259,43 @@ class PredictionOutput:
 class StateEstimate:
     burnt_polys: List[Polygon] = None
     burning_polys: List[Polygon] = None
+
+@dataclass
+class CellStatistics:
+    """Statistics for a single metric across ensemble members."""
+    mean: float
+    std: float
+    min: float
+    max: float
+    count: int  # Number of ensemble members with data for this cell
+
+@dataclass
+class EnsemblePredictionOutput:
+    """Output from ensemble prediction runs."""
+
+    # Number of ensemble members
+    n_ensemble: int
+
+    # Burn probability: {time_s: {(x,y): probability [0-1]}}
+    burn_probability: dict
+
+    # Cell-level statistics: {(x,y): CellStatistics}
+    flame_len_m_stats: dict
+    fli_kw_m_stats: dict
+    ros_ms_stats: dict
+
+    # Spread direction: {(x,y): {'mean_x': float, 'mean_y': float}}
+    # Note: direction is circular, uses circular statistics
+    spread_dir_stats: dict
+
+    # Crown fire frequency: {(x,y): probability [0-1]}
+    crown_fire_frequency: dict
+
+    # Fireline statistics: {(x,y): CellStatistics}
+    hold_prob_stats: dict
+
+    # Breach frequency: {(x,y): probability [0-1]}
+    breach_frequency: dict
+
+    # Optional: Individual predictions for inspection
+    individual_predictions: Optional[List[PredictionOutput]] = None

@@ -37,6 +37,7 @@ Usage:
 
 import subprocess
 import os
+import shutil
 import numpy as np
 from typing import Tuple
 from multiprocessing import cpu_count, Pool
@@ -58,7 +59,7 @@ temp_file_path = os.getenv("WINDNINJA_TEMP_PATH", fallback_temp_file_path)
 
 def run_windninja_single(task: WindNinjaTask):
     """Runs WindNinja for a single time step in parallel."""
-    output_path = os.path.join(temp_file_path, f"{task.index}")
+    output_path = os.path.join(task.temp_file_path, f"{task.index}")
     os.makedirs(output_path, exist_ok=True)
 
     curr_datetime = task.start_datetime + timedelta(minutes=task.index * task.time_step)
@@ -107,9 +108,24 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, float]:
-    """Runs WindNinja with domain-average initialization in parallel."""
-    
+def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str = None) -> Tuple[np.ndarray, float]:
+    """Runs WindNinja with domain-average initialization in parallel.
+
+    Args:
+        weather: Weather stream with wind data
+        map: Map parameters
+        custom_temp_dir: Optional custom temporary directory for this run.
+                        If provided, uses this instead of the global temp_file_path.
+                        This is essential for parallel ensemble predictions to avoid
+                        race conditions between workers.
+
+    Returns:
+        Tuple of (forecast array, time_step)
+    """
+
+    # Use custom temp dir if provided (for ensemble workers), otherwise use global
+    work_temp_path = custom_temp_dir if custom_temp_dir is not None else temp_file_path
+
     # Extract data from forecast seed
     time_step = weather.time_step
     wind_height = weather.input_wind_ht
@@ -130,9 +146,9 @@ def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, f
         start_datetime = tz.localize(dt_local)
 
     # Clear temp folder
-    if os.path.exists(temp_file_path):
-        for file_name in os.listdir(temp_file_path):
-            file_path = os.path.join(temp_file_path, file_name)
+    if os.path.exists(work_temp_path):
+        for file_name in os.listdir(work_temp_path):
+            file_path = os.path.join(work_temp_path, file_name)
             if os.path.isfile(file_path):
                 os.remove(file_path)
             elif os.path.isdir(file_path):
@@ -152,7 +168,7 @@ def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, f
             timezone=timezone,
             north_angle=north_angle,
             mesh_resolution=mesh_resolution,
-            temp_file_path=temp_file_path,
+            temp_file_path=work_temp_path,  # Use work_temp_path instead of global
             cli_path=cli_path,
             start_datetime=start_datetime,
             wind_height=wind_height,
@@ -172,7 +188,7 @@ def run_windninja(weather: WeatherStream, map: MapParams) -> Tuple[np.ndarray, f
         pass
     
     # Merge data into a forecast
-    forecast = create_forecast_array(num_tasks)
+    forecast = create_forecast_array(num_tasks, work_temp_path)
 
     return forecast
 
@@ -219,16 +235,17 @@ def rename_windninja_outputs(output_path: str, time_step_index: int):
             new_path = os.path.join(output_path, new_file_name)
             os.rename(old_path, new_path)
 
-def create_forecast_array(num_files: int) -> np.ndarray:
+def create_forecast_array(num_files: int, work_temp_path: str = None) -> np.ndarray:
     """Loads WindNinja wind forecast outputs into a structured NumPy array.
 
 
-    This function reads ASCII files produced by WindNinja, extracts wind speed 
-    and direction data, and compiles them into a multi-dimensional NumPy array 
+    This function reads ASCII files produced by WindNinja, extracts wind speed
+    and direction data, and compiles them into a multi-dimensional NumPy array
     for use in fire simulations.
 
     Args:
         num_files (int): The number of time steps (i.e., number of WindNinja-generated files).
+        work_temp_path (str): Optional custom temp directory. If None, uses global temp_file_path.
 
     Returns:
         np.ndarray: A structured array with shape `(num_files, height, width, 2)`, 
@@ -251,26 +268,46 @@ def create_forecast_array(num_files: int) -> np.ndarray:
         - Assumes WindNinja output files contain ASCII grid data with a 6-line header.
         - Uses `np.loadtxt()` to efficiently load numerical wind data.
     """
+    # Use work_temp_path if provided, otherwise use global
+    if work_temp_path is None:
+        work_temp_path = temp_file_path
+
+    forecast = None  # Initialize before loop
 
     for i in range(num_files):
-        output_path = os.path.join(temp_file_path, f"{i}")
+        output_path = os.path.join(work_temp_path, f"{i}")
 
         speed_file = os.path.join(output_path, f"wind_speed_{i}.asc")
         direction_file = os.path.join(output_path, f"wind_direction_{i}.asc")
 
-        if os.path.exists(speed_file) and os.path.exists(direction_file):            
+        if os.path.exists(speed_file) and os.path.exists(direction_file):
             with open(speed_file, 'r') as file:
                 speed_data = np.loadtxt(file, skiprows=6)
 
-                if i == 0:
+                # Initialize forecast array on first valid file
+                if forecast is None:
                     forecast = np.zeros((num_files, *speed_data.shape, 2))
 
                 forecast[i, :, :, 0] = speed_data
-            
+
             with open(direction_file, 'r') as file:
                 direction_data = np.loadtxt(file, skiprows=6)
                 direction_data = convert_to_cartesian(direction_data)
                 forecast[i, :, :, 1] = direction_data
+
+    # Ensure we found at least some files
+    if forecast is None:
+        raise FileNotFoundError(
+            f"No WindNinja output files found in {work_temp_path}. "
+            f"Expected files like wind_speed_0.asc and wind_direction_0.asc. "
+            f"WindNinja may have failed to generate outputs."
+        )
+
+    # Cleanup worker-specific temp directory after loading data
+    # Only delete if this is a worker temp dir (contains "worker_" in path)
+    if work_temp_path is not None and "worker_" in work_temp_path:
+        if os.path.exists(work_temp_path):
+            shutil.rmtree(work_temp_path)
 
     return forecast
 
