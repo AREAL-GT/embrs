@@ -20,6 +20,7 @@ import multiprocessing as mp
 from embrs.base_classes.control_base import ControlClass
 from embrs.fire_simulator.fire import FireSim
 from embrs.tools.fire_predictor import FirePredictor
+from embrs.utilities.ensemble_video import create_ensemble_video_from_predictor
 from embrs.utilities.data_classes import PredictorParams, StateEstimate
 from embrs.utilities.fire_util import UtilFuncs
 
@@ -118,6 +119,9 @@ class EnsemblePredictionTest(ControlClass):
 
             # Step 5: Analyze and display results
             self._analyze_results(result, fire)
+
+            # Step 6: Create video visualization
+            self._create_ensemble_video(result)
 
         except Exception as e:
             print(f"\n✗ Ensemble prediction failed: {e}")
@@ -352,6 +356,48 @@ class EnsemblePredictionTest(ControlClass):
 
         # Save summary to file
         self._save_results_summary(result, fire)
+
+    def _create_ensemble_video(self, result):
+        """
+        Create a video visualization of the ensemble prediction.
+
+        Args:
+            result: EnsemblePredictionOutput
+        """
+        try:
+            from datetime import datetime
+
+            print("\n" + "="*70)
+            print("CREATING ENSEMBLE PREDICTION VIDEO")
+            print("="*70 + "\n")
+
+            # Create output filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_path = f"ensemble_prediction_{timestamp}.mp4"
+
+            # Get cell size from predictor params
+            cell_size = self._create_predictor_params().cell_size_m
+
+            # Create the video
+            output_path = create_ensemble_video_from_predictor(
+                predictor=self.predictor,
+                ensemble_output=result,
+                output_path=video_path,
+                title=f"Ensemble Fire Spread Prediction ({result.n_ensemble} members)",
+                fps=8,  # Slightly slower for better viewing
+                dpi=150,
+                colormap="YlOrRd",  # Yellow-Orange-Red gradient
+                show_progress=True
+            )
+
+            print("\n" + "="*70)
+            print(f"Video saved to: {output_path}")
+            print("="*70 + "\n")
+
+        except Exception as e:
+            print(f"\nWarning: Could not create video: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _save_results_summary(self, result, fire: FireSim):
         """

@@ -1,22 +1,45 @@
+"""
+Fire prediction module for EMBRS.
+
+Provides the FirePredictor class for running forward fire spread predictions
+with uncertainty modeling. Supports both single predictions and ensemble
+predictions with parallel execution.
+"""
+
+import copy
+import numpy as np
+import os
+import uuid
+from typing import List, Optional
+
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
-from embrs.utilities.data_classes import PredictorParams, PredictionOutput, StateEstimate
-from embrs.utilities.data_classes import EnsemblePredictionOutput, CellStatistics
+from embrs.utilities.data_classes import (
+    PredictorParams,
+    PredictionOutput,
+    StateEstimate,
+    EnsemblePredictionOutput,
+    CellStatistics
+)
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
 from embrs.models.wind_forecast import run_windninja, temp_file_path
 
-import copy
-import numpy as np
-import os
-import tempfile
-import uuid
-from typing import List, Optional
 
 class FirePredictor(BaseFireSim):
-    def __init__(self, params: PredictorParams, fire: FireSim):
+    """
+    Fire spread predictor with uncertainty modeling.
 
+    Extends BaseFireSim to run forward predictions from the current fire state.
+    Supports wind uncertainty, rate of spread bias, and ensemble predictions.
+    """
+
+    # =========================================================================
+    # Initialization & Configuration
+    # =========================================================================
+
+    def __init__(self, params: PredictorParams, fire: FireSim):
         # Live reference to the fire sim
         self.fire = fire
         self.c_size = -1
@@ -28,18 +51,18 @@ class FirePredictor(BaseFireSim):
         self.set_params(params)
 
     def set_params(self, params: PredictorParams):
-
+        """Configure predictor parameters and optionally regenerate cell grid."""
         generate_cell_grid = False
 
         # How long the prediction will run for
         self.time_horizon_hr = params.time_horizon_hr
 
         # Uncertainty parameters
-        self.wind_uncertainty_factor = params.wind_uncertainty_factor # [0, 1], autoregression noise
+        self.wind_uncertainty_factor = params.wind_uncertainty_factor  # [0, 1], autoregression noise
 
         # Compute constant bias terms
         self.wind_speed_bias = params.wind_speed_bias * params.max_wind_speed_bias
-        self.wind_dir_bias   = params.wind_dir_bias * params.max_wind_dir_bias
+        self.wind_dir_bias = params.wind_dir_bias * params.max_wind_dir_bias
         self.ros_bias_factor = max(min(1 + params.ros_bias, 1.5), 0.5)
 
         # Compute auto-regressive parameters
@@ -74,7 +97,7 @@ class FirePredictor(BaseFireSim):
         # Get the merged polygon representing burning cells
         sim_params.map_params.scenario_data.initial_ign = UtilFuncs.get_cell_polygons(burning_cells)
         burnt_region = UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
-        
+
         # Nominal ignition probability for spotting
         self.nom_ign_prob = self._calc_nominal_prob()
 
@@ -83,7 +106,22 @@ class FirePredictor(BaseFireSim):
             # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
             self.orig_grid, self.orig_dict = copy.deepcopy((self._cell_grid, self._cell_dict))
 
-    def run(self, fire_estimate: StateEstimate=None, visualize=False) -> PredictionOutput:
+    # =========================================================================
+    # Main Public Interface
+    # =========================================================================
+
+    def run(self, fire_estimate: StateEstimate = None, visualize=False) -> PredictionOutput:
+        """
+        Run a single fire spread prediction.
+
+        Args:
+            fire_estimate: Optional state estimate to initialize from.
+                          If None, uses current fire simulation state.
+            visualize: If True, display prediction on fire visualizer.
+
+        Returns:
+            PredictionOutput containing spread timeline and fire behavior data.
+        """
         # Catch up time and weather states with the fire sim
         # (works in both main process and worker process)
         self._catch_up_with_fire()
@@ -91,6 +129,7 @@ class FirePredictor(BaseFireSim):
         # Set fire state variables
         self._set_states(fire_estimate)
 
+        # Initialize output containers
         self.spread = {}
         self.flame_len_m = {}
         self.fli_kw_m = {}
@@ -118,8 +157,272 @@ class FirePredictor(BaseFireSim):
         )
 
         return output
-    
+
+    def run_ensemble(
+        self,
+        state_estimates: List[StateEstimate],
+        visualize: bool = False,
+        num_workers: Optional[int] = None,
+        random_seeds: Optional[List[int]] = None,
+        return_individual: bool = False
+    ) -> EnsemblePredictionOutput:
+        """
+        Run ensemble predictions using multiple initial state estimates.
+
+        Executes predictions in parallel, each starting from a different
+        StateEstimate. Results are aggregated into probabilistic predictions.
+
+        This method uses custom serialization to avoid reconstructing FireSim
+        for each ensemble member.
+
+        Args:
+            state_estimates: List of StateEstimate objects representing
+                            different possible initial fire states.
+            visualize: If True, visualize aggregated burn probability.
+            num_workers: Number of parallel workers (default: cpu_count).
+            random_seeds: Optional list of random seeds for reproducibility.
+            return_individual: If True, include individual predictions in output.
+
+        Returns:
+            EnsemblePredictionOutput with aggregated predictions.
+
+        Raises:
+            ValueError: If state_estimates is empty or seeds length mismatch.
+            RuntimeError: If more than 50% of members fail.
+        """
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from tqdm import tqdm
+
+        # Validation
+        if not state_estimates:
+            raise ValueError("state_estimates cannot be empty")
+
+        if random_seeds is not None and len(random_seeds) != len(state_estimates):
+            raise ValueError(
+                f"random_seeds length ({len(random_seeds)}) must match "
+                f"state_estimates length ({len(state_estimates)})"
+            )
+
+        n_ensemble = len(state_estimates)
+        num_workers = num_workers or mp.cpu_count()
+
+        print(f"Running ensemble prediction:")
+        print(f"  - {n_ensemble} ensemble members")
+        print(f"  - {num_workers} parallel workers")
+
+        # CRITICAL: Prepare for serialization
+        print("Preparing predictor for serialization...")
+
+        # Get a single wind forecast for whole ensemble
+        # TODO: Implement an option to make each predictor have its own perturbed forecast
+        self._predict_wind()
+
+        # Prepare workers for serialization
+        self.prepare_for_serialization()
+
+        # Run predictions in parallel
+        predictions = []
+        failed_count = 0
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all jobs
+            futures = {}
+            for i, state_est in enumerate(state_estimates):
+                seed = random_seeds[i] if random_seeds else None
+
+                # Submit (predictor will be pickled via __getstate__)
+                future = executor.submit(
+                    _run_ensemble_member_worker,
+                    self,
+                    state_est,
+                    seed
+                )
+                futures[future] = i  # Track member index
+
+            # Collect results with progress bar
+            for future in tqdm(as_completed(futures),
+                              total=n_ensemble,
+                              desc="Ensemble predictions",
+                              unit="member"):
+                member_idx = futures[future]
+                try:
+                    result = future.result()
+                    predictions.append(result)
+                except Exception as e:
+                    failed_count += 1
+                    print(f"Warning: Member {member_idx} failed: {e}")
+
+        # Check failure rate
+        if len(predictions) == 0:
+            raise RuntimeError("All ensemble members failed")
+
+        if failed_count > n_ensemble * 0.5:
+            raise RuntimeError(
+                f"More than 50% of ensemble members failed "
+                f"({failed_count}/{n_ensemble})"
+            )
+
+        if failed_count > 0:
+            print(f"Completed with {failed_count} failures, "
+                  f"{len(predictions)} successful members")
+
+        # Aggregate results
+        print("Aggregating ensemble predictions...")
+        ensemble_output = _aggregate_ensemble_predictions(predictions)
+        ensemble_output.n_ensemble = len(predictions)
+
+        # Optionally include individual predictions
+        if return_individual:
+            ensemble_output.individual_predictions = predictions
+
+        # Optionally visualize
+        if visualize:
+            self._visualize_ensemble(ensemble_output)
+
+        return ensemble_output
+
+    # =========================================================================
+    # Core Prediction Logic
+    # =========================================================================
+
+    def _prediction_loop(self):
+        """Main prediction iteration loop."""
+        self._iters = 0
+
+        while self._init_iteration():
+            fires_still_burning = []
+
+            for cell in self._burning_cells:
+                if self.weather_changed or not cell.has_steady_state:
+                    # Update the steady state
+                    self.update_steady_state(cell)
+                    cell.r_t = cell.r_ss * self.ros_bias_factor
+                    cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                    cell.I_t = cell.I_ss * self.ros_bias_factor
+
+                self.propagate_fire(cell)
+                self.remove_neighbors(cell)
+
+                if cell.fully_burning or len(cell.burnable_neighbors) == 0:
+                    self.set_state_at_cell(cell, CellStates.BURNT)
+                else:
+                    fires_still_burning.append(cell)
+
+                self._updated_cells[cell.id] = cell
+
+            if self.model_spotting and self.nom_ign_prob > 0:
+                self._ignite_spots()
+
+            self.update_control_interface_elements()
+
+            self._burning_cells = list(fires_still_burning)
+
+            self._iters += 1
+
+        self._finished = True
+
+    def _init_iteration(self):
+        """
+        Initialize each prediction iteration.
+
+        Handles first iteration setup and subsequent iterations differently.
+        Returns False when prediction should end.
+        """
+        self._curr_time_s = (self._iters * self._time_step) + self.start_time_s
+
+        if self._iters == 0:
+            self.weather_changed = True
+            self._new_ignitions = []
+
+            for cell, loc in self.starting_ignitions:
+                if not cell.fuel.burnable:
+                    continue
+
+                cell.get_ign_params(loc)
+                cell._set_state(CellStates.FIRE)
+                surface_fire(cell)
+                crown_fire(cell, self.fmc)
+                cell.has_steady_state = True
+
+                # Don't model fire acceleration in prediction model
+                cell.r_t = cell.r_ss * self.ros_bias_factor
+                cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                cell.I_t = cell.I_ss * self.ros_bias_factor
+
+                self._updated_cells[cell.id] = cell
+                self._new_ignitions.append(cell)
+
+                if self.spread.get(self._curr_time_s) is None:
+                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
+                else:
+                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
+
+        else:
+            for cell in self._new_ignitions:
+                surface_fire(cell)
+                crown_fire(cell, self.fmc)
+
+                flame_len_ft = calc_flame_len(cell)
+                flame_len_m = ft_to_m(flame_len_ft)
+
+                self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
+
+                if cell._break_width > 0:
+                    # Determine if fire will breach fireline contained within cell
+                    hold_prob = cell.calc_hold_prob(flame_len_m)
+                    rand = np.random.random()
+                    cell.breached = rand > hold_prob
+
+                    self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
+                    self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
+                else:
+                    cell.breached = True
+
+                cell.has_steady_state = True
+
+                if self.model_spotting:
+                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self.nom_ign_prob > 0:
+                        self.embers.loft(cell)
+
+                # Don't model fire acceleration in prediction model
+                cell.r_t = cell.r_ss * self.ros_bias_factor
+                cell.avg_ros = cell.r_ss * self.ros_bias_factor
+                cell.I_t = cell.I_ss * self.ros_bias_factor
+
+                if self.spread.get(self._curr_time_s) is None:
+                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
+                else:
+                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
+
+                if cell._crown_status != CrownStatus.NONE:
+                    self.crown_fire[(cell.x_pos, cell.y_pos)] = cell._crown_status
+
+                self.fli_kw_m[(cell.x_pos, cell.y_pos)] = BTU_ft_min_to_kW_m(np.max(cell.I_ss))
+                self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
+                self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
+
+        if self._curr_time_s >= self._end_time:
+            return False
+
+        # Check if weather has changed
+        self.weather_changed = self._update_weather()
+
+        # Add any new ignitions to the current set of burning cells
+        self._burning_cells.extend(self._new_ignitions)
+        # Reset new ignitions
+        self._new_ignitions = []
+
+        return True
+
     def _set_states(self, state_estimate: StateEstimate = None):
+        """
+        Initialize prediction state from fire simulation or state estimate.
+
+        Args:
+            state_estimate: Optional state estimate. If None, uses current
+                           fire simulation state (or serialized state in workers).
+        """
         # Reset all data structures to the original
         # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
         # If we deepcopy them separately, we get two different sets of Cell objects!
@@ -167,226 +470,9 @@ class FirePredictor(BaseFireSim):
             if state_estimate.burning_polys:
                 self._set_initial_ignition(state_estimate.burning_polys)
 
-    def _set_prediction_forecast(self, cell: Cell):
-        x_wind = max(cell.x_pos - self.wind_xpad, 0)
-        y_wind = max(cell.y_pos - self.wind_ypad, 0)
-
-        wind_col = int(np.floor(x_wind/self._wind_res))
-        wind_row = int(np.floor(y_wind/self._wind_res))
-
-        if wind_row > self.wind_forecast.shape[1] - 1:
-            wind_row = self.wind_forecast.shape[1] - 1
-
-        if wind_col > self.wind_forecast.shape[2] - 1:
-            wind_col = self.wind_forecast.shape[2] - 1
-
-        wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
-        wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
-        cell._set_wind_forecast(wind_speed, wind_dir)
-
-    def _init_iteration(self):
-
-        self._curr_time_s = (self._iters * self._time_step) + self.start_time_s
-
-        if self._iters == 0:
-
-            self.weather_changed = True
-            self._new_ignitions = []
-
-            for cell, loc in self.starting_ignitions:
-                if not cell.fuel.burnable:
-                    continue
-                
-                cell.get_ign_params(loc)
-                cell._set_state(CellStates.FIRE)
-                surface_fire(cell)
-                crown_fire(cell, self.fmc)
-                cell.has_steady_state = True
-
-                # Don't model fire acceleration in prediction model
-                cell.r_t = cell.r_ss * self.ros_bias_factor
-                cell.avg_ros = cell.r_ss * self.ros_bias_factor
-                cell.I_t = cell.I_ss * self.ros_bias_factor
-
-                self._updated_cells[cell.id] = cell
-                self._new_ignitions.append(cell)
-
-
-                if self.spread.get(self._curr_time_s) is None:
-                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
-
-                else:
-                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
-
-        else:
-            for cell in self._new_ignitions:
-                surface_fire(cell)
-                crown_fire(cell, self.fmc)
-                
-                flame_len_ft = calc_flame_len(cell)
-                flame_len_m = ft_to_m(flame_len_ft)
-
-                self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
-
-                if cell._break_width > 0:
-                    # Determine if fire will breach fireline contained within cell
-                    hold_prob = cell.calc_hold_prob(flame_len_m)
-                    rand = np.random.random()
-                    cell.breached = rand > hold_prob
-
-                    self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
-                    self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
-
-                else:
-                    cell.breached = True
-
-                cell.has_steady_state = True
-
-                if self.model_spotting:
-                    if not cell.lofted and cell._crown_status != CrownStatus.NONE and self.nom_ign_prob > 0:
-                        self.embers.loft(cell)
-
-                # Don't model fire acceleration in prediction model
-                cell.r_t = cell.r_ss * self.ros_bias_factor
-                cell.avg_ros = cell.r_ss * self.ros_bias_factor
-                cell.I_t = cell.I_ss * self.ros_bias_factor
-
-                if self.spread.get(self._curr_time_s) is None:
-                    self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
-
-                else:
-                    self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
-
-                if cell._crown_status != CrownStatus.NONE:
-                    self.crown_fire[(cell.x_pos, cell.y_pos)] = cell._crown_status
-                
-                self.fli_kw_m[(cell.x_pos, cell.y_pos)] = BTU_ft_min_to_kW_m(np.max(cell.I_ss))
-                self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
-                self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
-
-        if self._curr_time_s >= self._end_time:
-            return False
-
-        # Check if weather has changed
-        self.weather_changed = self._update_weather()
-
-        # Add any new ignitions to the current set of burning cells
-        self._burning_cells.extend(self._new_ignitions)
-        # Reset new ignitions
-        self._new_ignitions = []
-
-        return True
-
-    def _prediction_loop(self):
-
-        self._iters = 0
-
-        while self._init_iteration():
-            fires_still_burning = []
-            
-            for cell in self._burning_cells:
-                if self.weather_changed or not cell.has_steady_state:
-                    # Update the steady state
-                    self.update_steady_state(cell)
-                    cell.r_t = cell.r_ss * self.ros_bias_factor
-                    cell.avg_ros = cell.r_ss * self.ros_bias_factor
-                    cell.I_t = cell.I_ss * self.ros_bias_factor
-
-                self.propagate_fire(cell)
-                self.remove_neighbors(cell)
-
-                if cell.fully_burning or len(cell.burnable_neighbors) == 0:
-                    self.set_state_at_cell(cell, CellStates.BURNT)
-                else:
-                    fires_still_burning.append(cell)
-
-                self._updated_cells[cell.id] = cell
-
-            if self.model_spotting and self.nom_ign_prob > 0:
-                self._ignite_spots()
-
-            self.update_control_interface_elements()
-
-            self._burning_cells = list(fires_still_burning)
-
-            self._iters += 1
-
-        self._finished = True
-
-    def _ignite_spots(self):
-        # Decay constant for ignition probability
-        lambda_s = 0.005
-
-        # Get all the lofted embers by the Perryman model
-        spot_fires = self.embers.embers
-
-        landings = {}
-        if spot_fires:
-            for spot in spot_fires:
-                x = spot['x']
-                y = spot['y']
-                d = spot['d']
-
-                # Get the cell the ember lands in
-                landing_cell = self.get_cell_from_xy(x, y, oob_ok=True)
-
-                if landing_cell is not None and landing_cell.fuel.burnable:
-                    # Compute the probability based on how far the ember travelled
-                    p_i = self.nom_ign_prob * np.exp(-lambda_s * d)
-
-                    # Add landing probability to dict or update its probability
-                    if landings.get(landing_cell.id) is None:
-                        landings[landing_cell.id] = 1 - p_i
-                    else:
-                        landings[landing_cell.id] *= (1 - p_i)
-
-            for cell_id in list(landings.keys()):
-                # Determine if the cell will ignite
-                rand = np.random.random()
-                if rand < (1 - landings[cell_id]):
-                    # Schedule ignition
-                    ign_time = self._curr_time_s + self._spot_delay_s
-                    
-                    if self._scheduled_spot_fires.get(ign_time) is None:
-                        self._scheduled_spot_fires[ign_time] = [self._cell_dict[cell_id]]
-                    else:
-                        self._scheduled_spot_fires[ign_time].append(self._cell_dict[cell_id])
-
-        # Clear the embers from the Perryman model
-        self.embers.embers = []
-        
-        # Ignite any scheduled spot fires
-        if self._scheduled_spot_fires:
-            pending_times = list(self._scheduled_spot_fires.keys())
-
-            # Check if there are any ignitions which take place this time step
-            for time in pending_times:
-                if time <= self.curr_time_s:
-                    # Ignite the fires scheduled for this time step
-                    new_spots = self._scheduled_spot_fires[time]
-                    for spot in new_spots:
-                        if spot.state == CellStates.FUEL and spot.fuel.burnable:
-                            self._new_ignitions.append(spot)
-                            spot.get_ign_params(0)
-                            spot._set_state(CellStates.FIRE)
-                            self._updated_cells[spot.id] = spot
-
-                    # Delete entry from schedule if ignited
-                    del self._scheduled_spot_fires[time]
-
-                if time > self.curr_time_s:
-                    break
-    
-    def _calc_nominal_prob(self):
-        # Calculate P(I) in Perryman paper
-        # Method from "Ignition Probability" (Schroeder 1969)
-        Q_ig = 250 + 1116 * self.dead_mf
-        Q_ig_cal = BTU_lb_to_cal_g(Q_ig)
-
-        x = (400 - Q_ig_cal) / 10
-        p_i = (0.000048 * x ** 4.3)/50
-
-        return p_i
+    # =========================================================================
+    # Weather & Wind
+    # =========================================================================
 
     def _catch_up_with_fire(self):
         """
@@ -402,18 +488,17 @@ class FirePredictor(BaseFireSim):
             self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
             # Create a perturbed wind forecast (works in both main and worker)
             self._predict_wind()
-        
         else:
             # In worker process: use serialized state
             self.start_time_s = self._curr_time_s  # Already set in __setstate__
             self.last_viz_update = self._curr_time_s
             self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
 
-
     def _predict_wind(self):
         """
         Generate perturbed wind forecast for prediction.
 
+        Applies bias and autoregressive noise to create uncertain wind forecasts.
         In worker processes (self.fire is None), uses serialized weather stream.
         """
         if self.fire is not None:
@@ -441,7 +526,6 @@ class FirePredictor(BaseFireSim):
         new_stream = []
 
         for entry in new_weather_stream.stream[curr_idx:end_idx + 1]:
-            
             new_entry = copy.deepcopy(entry)
 
             new_entry.wind_speed += speed_error + self.wind_speed_bias
@@ -479,6 +563,112 @@ class FirePredictor(BaseFireSim):
 
         self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
 
+    def _set_prediction_forecast(self, cell: Cell):
+        """Set wind forecast for a specific cell based on its position."""
+        x_wind = max(cell.x_pos - self.wind_xpad, 0)
+        y_wind = max(cell.y_pos - self.wind_ypad, 0)
+
+        wind_col = int(np.floor(x_wind / self._wind_res))
+        wind_row = int(np.floor(y_wind / self._wind_res))
+
+        if wind_row > self.wind_forecast.shape[1] - 1:
+            wind_row = self.wind_forecast.shape[1] - 1
+
+        if wind_col > self.wind_forecast.shape[2] - 1:
+            wind_col = self.wind_forecast.shape[2] - 1
+
+        wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
+        wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
+        cell._set_wind_forecast(wind_speed, wind_dir)
+
+    # =========================================================================
+    # Spotting Model
+    # =========================================================================
+
+    def _ignite_spots(self):
+        """Process ember landings and schedule/ignite spot fires."""
+        # Decay constant for ignition probability
+        lambda_s = 0.005
+
+        # Get all the lofted embers by the Perryman model
+        spot_fires = self.embers.embers
+
+        landings = {}
+        if spot_fires:
+            for spot in spot_fires:
+                x = spot['x']
+                y = spot['y']
+                d = spot['d']
+
+                # Get the cell the ember lands in
+                landing_cell = self.get_cell_from_xy(x, y, oob_ok=True)
+
+                if landing_cell is not None and landing_cell.fuel.burnable:
+                    # Compute the probability based on how far the ember travelled
+                    p_i = self.nom_ign_prob * np.exp(-lambda_s * d)
+
+                    # Add landing probability to dict or update its probability
+                    if landings.get(landing_cell.id) is None:
+                        landings[landing_cell.id] = 1 - p_i
+                    else:
+                        landings[landing_cell.id] *= (1 - p_i)
+
+            for cell_id in list(landings.keys()):
+                # Determine if the cell will ignite
+                rand = np.random.random()
+                if rand < (1 - landings[cell_id]):
+                    # Schedule ignition
+                    ign_time = self._curr_time_s + self._spot_delay_s
+
+                    if self._scheduled_spot_fires.get(ign_time) is None:
+                        self._scheduled_spot_fires[ign_time] = [self._cell_dict[cell_id]]
+                    else:
+                        self._scheduled_spot_fires[ign_time].append(self._cell_dict[cell_id])
+
+        # Clear the embers from the Perryman model
+        self.embers.embers = []
+
+        # Ignite any scheduled spot fires
+        if self._scheduled_spot_fires:
+            pending_times = list(self._scheduled_spot_fires.keys())
+
+            # Check if there are any ignitions which take place this time step
+            for time in pending_times:
+                if time <= self.curr_time_s:
+                    # Ignite the fires scheduled for this time step
+                    new_spots = self._scheduled_spot_fires[time]
+                    for spot in new_spots:
+                        if spot.state == CellStates.FUEL and spot.fuel.burnable:
+                            self._new_ignitions.append(spot)
+                            spot.get_ign_params(0)
+                            spot._set_state(CellStates.FIRE)
+                            self._updated_cells[spot.id] = spot
+
+                    # Delete entry from schedule if ignited
+                    del self._scheduled_spot_fires[time]
+
+                if time > self.curr_time_s:
+                    break
+
+    def _calc_nominal_prob(self):
+        """
+        Calculate nominal ignition probability for spotting.
+
+        Uses method from "Ignition Probability" (Schroeder 1969) as
+        described in the Perryman paper.
+        """
+        Q_ig = 250 + 1116 * self.dead_mf
+        Q_ig_cal = BTU_lb_to_cal_g(Q_ig)
+
+        x = (400 - Q_ig_cal) / 10
+        p_i = (0.000048 * x ** 4.3) / 50
+
+        return p_i
+
+    # =========================================================================
+    # Serialization (for parallel execution)
+    # =========================================================================
+
     def prepare_for_serialization(self):
         """
         Prepare predictor for parallel execution by extracting serializable data.
@@ -489,7 +679,7 @@ class FirePredictor(BaseFireSim):
         This method should be called in the main process before spawning workers.
 
         Raises:
-            RuntimeError: If called without a fire reference
+            RuntimeError: If called without a fire reference.
         """
         if self.fire is None:
             raise RuntimeError("Cannot prepare predictor without fire reference")
@@ -545,10 +735,10 @@ class FirePredictor(BaseFireSim):
         parent FireSim reference, visualizer, and logger.
 
         Returns:
-            dict: Minimal state dictionary for serialization
+            dict: Minimal state dictionary for serialization.
 
         Raises:
-            RuntimeError: If prepare_for_serialization() was not called first
+            RuntimeError: If prepare_for_serialization() was not called first.
         """
         print("DEBUG: FirePredictor.__getstate__() called - preparing to pickle")
 
@@ -580,7 +770,7 @@ class FirePredictor(BaseFireSim):
         instead of reconstructing cells from map data.
 
         Args:
-            state (dict): State dictionary from __getstate__
+            state (dict): State dictionary from __getstate__.
         """
         import os
         print(f"DEBUG: FirePredictor.__setstate__() called in PID {os.getpid()}")
@@ -722,7 +912,7 @@ class FirePredictor(BaseFireSim):
         # Moisture (prediction model specific)
         self.fmc = 100  # Prediction model default
 
-        # =================================================================ƒ===
+        # =====================================================================
         # Phase 3: Restore cell templates (CRITICAL - uses pre-built cells)
         # =====================================================================
 
@@ -754,135 +944,18 @@ class FirePredictor(BaseFireSim):
 
         print(f"DEBUG: __setstate__() completed successfully! Predictor ready for worker.")
 
-    def run_ensemble(
-        self,
-        state_estimates: List[StateEstimate],
-        visualize: bool = False,
-        num_workers: Optional[int] = None,
-        random_seeds: Optional[List[int]] = None,
-        return_individual: bool = False
-    ):
-        """
-        Run ensemble predictions using multiple initial state estimates.
-
-        Executes predictions in parallel, each starting from a different
-        StateEstimate. Results are aggregated into probabilistic predictions.
-
-        This method uses custom serialization to avoid reconstructing FireSim
-        for each ensemble member.
-
-        Args:
-            state_estimates: List of StateEstimate objects representing
-                            different possible initial fire states
-            visualize: If True, visualize aggregated burn probability
-            num_workers: Number of parallel workers (default: cpu_count)
-            random_seeds: Optional list of random seeds for reproducibility
-            return_individual: If True, include individual predictions in output
-
-        Returns:
-            EnsemblePredictionOutput with aggregated predictions
-
-        Raises:
-            ValueError: If state_estimates is empty or seeds length mismatch
-            RuntimeError: If more than 50% of members fail
-        """
-        import multiprocessing as mp
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        from tqdm import tqdm
-
-        # Validation
-        if not state_estimates:
-            raise ValueError("state_estimates cannot be empty")
-
-        if random_seeds is not None and len(random_seeds) != len(state_estimates):
-            raise ValueError(
-                f"random_seeds length ({len(random_seeds)}) must match "
-                f"state_estimates length ({len(state_estimates)})"
-            )
-
-        n_ensemble = len(state_estimates)
-        num_workers = num_workers or mp.cpu_count()
-
-        print(f"Running ensemble prediction:")
-        print(f"  - {n_ensemble} ensemble members")
-        print(f"  - {num_workers} parallel workers")
-
-        # CRITICAL: Prepare for serialization
-        print("Preparing predictor for serialization...")
-        
-        # Get a single wind forecast for whole ensemble # TODO: Implement an option to make each predictor have its own perturbed forecast
-        self._predict_wind()
-
-        # Prepare workers for serialization
-        self.prepare_for_serialization()
-
-        # Run predictions in parallel
-        predictions = []
-        failed_count = 0
-
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all jobs
-            futures = {}
-            for i, state_est in enumerate(state_estimates):
-                seed = random_seeds[i] if random_seeds else None
-
-                # Submit (predictor will be pickled via __getstate__)
-                future = executor.submit(
-                    _run_ensemble_member_worker,
-                    self,
-                    state_est,
-                    seed
-                )
-                futures[future] = i  # Track member index
-
-            # Collect results with progress bar
-            for future in tqdm(as_completed(futures),
-                              total=n_ensemble,
-                              desc="Ensemble predictions",
-                              unit="member"):
-                member_idx = futures[future]
-                try:
-                    result = future.result()
-                    predictions.append(result)
-                except Exception as e:
-                    failed_count += 1
-                    print(f"Warning: Member {member_idx} failed: {e}")
-
-        # Check failure rate
-        if len(predictions) == 0:
-            raise RuntimeError("All ensemble members failed")
-
-        if failed_count > n_ensemble * 0.5:
-            raise RuntimeError(
-                f"More than 50% of ensemble members failed "
-                f"({failed_count}/{n_ensemble})"
-            )
-
-        if failed_count > 0:
-            print(f"Completed with {failed_count} failures, "
-                  f"{len(predictions)} successful members")
-
-        # Aggregate results
-        print("Aggregating ensemble predictions...")
-        ensemble_output = _aggregate_ensemble_predictions(predictions)
-        ensemble_output.n_ensemble = len(predictions)
-
-        # Optionally include individual predictions
-        if return_individual:
-            ensemble_output.individual_predictions = predictions
-
-        # Optionally visualize
-        if visualize:
-            self._visualize_ensemble(ensemble_output)
-
-        return ensemble_output
+    # =========================================================================
+    # Visualization
+    # =========================================================================
 
     def _visualize_ensemble(self, ensemble_output: EnsemblePredictionOutput):
+        """Visualize ensemble prediction results on the fire visualizer."""
         self.fire.visualize_ensemble_prediction(ensemble_output.burn_probability)
 
-# ============================================================================
+
+# =============================================================================
 # Module-level functions for parallel execution
-# ============================================================================
+# =============================================================================
 
 def _run_ensemble_member_worker(
     predictor: 'FirePredictor',
@@ -897,15 +970,15 @@ def _run_ensemble_member_worker(
     worker process without the original FireSim reference.
 
     Args:
-        predictor: Deserialized FirePredictor instance
-        state_estimate: Initial fire state for this ensemble member
-        seed: Random seed for reproducibility
+        predictor: Deserialized FirePredictor instance.
+        state_estimate: Initial fire state for this ensemble member.
+        seed: Random seed for reproducibility.
 
     Returns:
-        PredictionOutput for this ensemble member
+        PredictionOutput for this ensemble member.
 
     Raises:
-        Exception: Any errors during prediction (will be caught by executor)
+        Exception: Any errors during prediction (will be caught by executor).
     """
     import numpy as np
     import os
@@ -930,28 +1003,33 @@ def _run_ensemble_member_worker(
         raise
 
 
-def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
+def _aggregate_ensemble_predictions(
+    predictions: List[PredictionOutput]
+) -> EnsemblePredictionOutput:
     """
     Aggregate multiple prediction outputs into ensemble statistics.
 
     Args:
-        predictions: List of PredictionOutput from ensemble members
+        predictions: List of PredictionOutput from ensemble members.
 
     Returns:
-        EnsemblePredictionOutput with probabilistic predictions
+        EnsemblePredictionOutput with probabilistic predictions.
     """
-
     n_ensemble = len(predictions)
 
+    # -------------------------------------------------------------------------
     # 1. Build CUMULATIVE burn probability map
-    # For each time step, track which ensemble members have burned each location by that time
-    all_time_steps = sorted(set(time_s for pred in predictions for time_s in pred.spread.keys()))
-    
+    # -------------------------------------------------------------------------
+    # For each time step, track which ensemble members have burned each location
+    all_time_steps = sorted(set(
+        time_s for pred in predictions for time_s in pred.spread.keys()
+    ))
+
     burn_probability = {}
     for time_s in all_time_steps:
         # Track which ensemble members have burned each location by this time
         burned_by_time = {}  # {(x,y): set of ensemble indices}
-        
+
         for ensemble_idx, pred in enumerate(predictions):
             # Check all time steps up to and including current time_s
             for t in pred.spread.keys():
@@ -960,31 +1038,41 @@ def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
                         if loc not in burned_by_time:
                             burned_by_time[loc] = set()
                         burned_by_time[loc].add(ensemble_idx)
-        
+
         # Convert to probabilities
         burn_probability[time_s] = {
-            loc: len(ensemble_set) / n_ensemble 
+            loc: len(ensemble_set) / n_ensemble
             for loc, ensemble_set in burned_by_time.items()
         }
 
+    # -------------------------------------------------------------------------
     # 2. Collect all unique cell locations that burned in any prediction
+    # -------------------------------------------------------------------------
     all_burned_cells = set()
     for pred in predictions:
         all_burned_cells.update(pred.flame_len_m.keys())
 
+    # -------------------------------------------------------------------------
     # 3. Aggregate statistics for each cell
+    # -------------------------------------------------------------------------
     flame_stats = {}
     ros_stats = {}
     fli_stats = {}
 
     for cell_loc in all_burned_cells:
         # Collect values from all predictions where this cell burned
-        flame_values = [p.flame_len_m.get(cell_loc) for p in predictions
-                       if cell_loc in p.flame_len_m]
-        ros_values = [p.ros_ms.get(cell_loc) for p in predictions
-                     if cell_loc in p.ros_ms]
-        fli_values = [p.fli_kw_m.get(cell_loc) for p in predictions
-                     if cell_loc in p.fli_kw_m]
+        flame_values = [
+            p.flame_len_m.get(cell_loc) for p in predictions
+            if cell_loc in p.flame_len_m
+        ]
+        ros_values = [
+            p.ros_ms.get(cell_loc) for p in predictions
+            if cell_loc in p.ros_ms
+        ]
+        fli_values = [
+            p.fli_kw_m.get(cell_loc) for p in predictions
+            if cell_loc in p.fli_kw_m
+        ]
 
         if flame_values:
             flame_stats[cell_loc] = CellStatistics(
@@ -1013,17 +1101,23 @@ def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
                 count=len(fli_values)
             )
 
+    # -------------------------------------------------------------------------
     # 4. Crown fire frequency
+    # -------------------------------------------------------------------------
     crown_frequency = {}
     for cell_loc in all_burned_cells:
         crown_count = sum(1 for p in predictions if cell_loc in p.crown_fire)
         crown_frequency[cell_loc] = crown_count / n_ensemble
 
+    # -------------------------------------------------------------------------
     # 5. Spread direction (using circular statistics)
+    # -------------------------------------------------------------------------
     spread_dir_stats = {}
     for cell_loc in all_burned_cells:
-        dirs = [p.spread_dir.get(cell_loc) for p in predictions
-                if cell_loc in p.spread_dir]
+        dirs = [
+            p.spread_dir.get(cell_loc) for p in predictions
+            if cell_loc in p.spread_dir
+        ]
         if dirs:
             # Convert to unit vectors
             x_components = [np.cos(d) for d in dirs]
@@ -1045,7 +1139,9 @@ def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
                 'mean_y': float(mean_y)
             }
 
+    # -------------------------------------------------------------------------
     # 6. Fireline statistics
+    # -------------------------------------------------------------------------
     all_fireline_cells = set()
     for pred in predictions:
         all_fireline_cells.update(pred.hold_probs.keys())
@@ -1054,10 +1150,14 @@ def _aggregate_ensemble_predictions(predictions: List[PredictionOutput]):
     breach_frequency = {}
 
     for cell_loc in all_fireline_cells:
-        hold_probs = [p.hold_probs.get(cell_loc) for p in predictions
-                     if cell_loc in p.hold_probs]
-        breaches = [p.breaches.get(cell_loc) for p in predictions
-                   if cell_loc in p.breaches]
+        hold_probs = [
+            p.hold_probs.get(cell_loc) for p in predictions
+            if cell_loc in p.hold_probs
+        ]
+        breaches = [
+            p.breaches.get(cell_loc) for p in predictions
+            if cell_loc in p.breaches
+        ]
 
         if hold_probs:
             hold_prob_stats[cell_loc] = CellStatistics(
