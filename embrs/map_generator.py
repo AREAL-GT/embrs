@@ -256,7 +256,7 @@ def crop_map_data(map_params: MapParams) -> float:
 
         bounds = crop_tool.get_coords()
         angle = find_warping_angle(crop_tool.fuel_data)
-        crop_done = crop_and_save_tiff(lcp_output_path, lcp_output_path, bounds)
+        crop_done = crop_and_save_tiff(lcp_path, lcp_output_path, bounds)
 
     map_params.cropped_lcp_path = lcp_output_path
     map_params.geo_info = GeoInfo()

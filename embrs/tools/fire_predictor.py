@@ -740,8 +740,6 @@ class FirePredictor(BaseFireSim):
         Raises:
             RuntimeError: If prepare_for_serialization() was not called first.
         """
-        print("DEBUG: FirePredictor.__getstate__() called - preparing to pickle")
-
         if self._serialization_data is None:
             raise RuntimeError(
                 "Must call prepare_for_serialization() before pickling. "
@@ -756,7 +754,6 @@ class FirePredictor(BaseFireSim):
             'c_size': self.c_size,
         }
 
-        print(f"DEBUG: __getstate__() returning state with {len(self.orig_dict)} template cells")
         return state
 
     def __setstate__(self, state):
@@ -772,18 +769,13 @@ class FirePredictor(BaseFireSim):
         Args:
             state (dict): State dictionary from __getstate__.
         """
-        import os
-        print(f"DEBUG: FirePredictor.__setstate__() called in PID {os.getpid()}")
-
-        import numpy as np
+        
         from embrs.models.perryman_spot import PerrymanSpotting
         from embrs.models.fuel_models import Anderson13, ScottBurgan40
 
         # Extract serialization data
         data = state['serialization_data']
         sim_params = data['sim_params']
-
-        print(f"DEBUG: __setstate__() reconstructing predictor with {len(state['orig_dict'])} cells")
 
         # =====================================================================
         # Phase 1: Restore FirePredictor-specific attributes
@@ -939,11 +931,6 @@ class FirePredictor(BaseFireSim):
         if self.model_spotting:
             self.embers = PerrymanSpotting(self._spot_delay_s, size)
 
-        # Note: _set_states() will be called by run() to deep copy the cells
-        # and set up the initial burning/burnt regions
-
-        print(f"DEBUG: __setstate__() completed successfully! Predictor ready for worker.")
-
     # =========================================================================
     # Visualization
     # =========================================================================
@@ -980,13 +967,6 @@ def _run_ensemble_member_worker(
     Raises:
         Exception: Any errors during prediction (will be caught by executor).
     """
-    import numpy as np
-    import os
-
-    print(f"DEBUG: Worker {os.getpid()} received predictor: {type(predictor).__name__}")
-    print(f"DEBUG: Worker predictor.fire = {predictor.fire}")
-    print(f"DEBUG: Worker has {len(predictor.orig_dict)} cells")
-
     # Set random seed if provided
     if seed is not None:
         np.random.seed(seed)
