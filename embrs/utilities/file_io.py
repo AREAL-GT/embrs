@@ -1,4 +1,33 @@
-"""Module used to create GUIs and handle backend processing for user file input and output.
+"""GUI interfaces for file selection and configuration input.
+
+This module provides tkinter-based GUI components for selecting files, folders,
+and configuring simulation parameters. Used by the main EMBRS entry points
+to collect user input before running simulations or visualizations.
+
+Classes:
+    - FileSelectBase: Base class for file/folder selector interfaces.
+    - MapGenFileSelector: Interface for map generation input files.
+    - SimFolderSelector: Interface for simulation configuration.
+    - VizFolderSelector: Interface for visualization log file selection.
+    - LoaderWindow: Progress bar window for long-running operations.
+
+Functions:
+    - read_fms_file: Parse FlamMap fuel moisture (.fms) files.
+
+.. autoclass:: FileSelectBase
+    :members:
+
+.. autoclass:: MapGenFileSelector
+    :members:
+
+.. autoclass:: SimFolderSelector
+    :members:
+
+.. autoclass:: VizFolderSelector
+    :members:
+
+.. autoclass:: LoaderWindow
+    :members:
 """
 
 from tkinter import BOTH, filedialog
@@ -24,20 +53,17 @@ from embrs.base_classes.control_base import ControlClass
 
 
 def read_fms_file(filepath: str) -> Tuple[Dict[int, List[float]], bool]:
-    """Read a FlamMap .fms file.
+    """Read a FlamMap fuel moisture (.fms) file.
 
-    Parameters
-    ----------
-    filepath : str
-        Path to the .fms file.
+    Args:
+        filepath (str): Path to the .fms file.
 
-    Returns
-    -------
-    Tuple[Dict[int, List[float]], bool]
-        Mapping of fuel model id to moisture values (fractions) and a flag
-        indicating if live fuel moistures were provided.
+    Returns:
+        Tuple[Dict[int, List[float]], bool]: A tuple containing:
+            - dict mapping fuel model ID to moisture values as fractions
+              (1hr, 10hr, 100hr, and optionally live_herb, live_woody).
+            - bool indicating if live fuel moistures were provided.
     """
-
     moisture = {}
     has_live = False
 
@@ -70,48 +96,53 @@ def read_fms_file(filepath: str) -> Tuple[Dict[int, List[float]], bool]:
     return moisture, has_live
 
 class FileSelectBase:
-    """Base class for creating tkinter file and folder selector interfaces
+    """Base class for tkinter file and folder selector interfaces.
 
-    :param title: tile to be displayed at the top of the window
-    :type title: str
+    Provides common methods for creating file/folder selection widgets
+    and handling user input validation.
+
+    Attributes:
+        root (tk.Tk): The root tkinter window.
+        result (any): Stores the result data after submission.
     """
+
     def __init__(self, title: str):
-        """Constructor method that creates a tk root and sets the title
+        """Initialize the file selector window.
+
+        Args:
+            title (str): Title to display at the top of the window.
         """
         self.root = tk.Tk()
         self.root.title(title)
         self.result = None
 
     def create_frame(self, tar: tk.Frame) -> tk.Frame:
-        """Create a new tkinter frame within 'tar'
+        """Create a new tkinter frame within a target frame.
 
-        :param tar: target tk.Frame that the new frame will be created within
-        :type tar: tk.Frame
-        :return: tk.Frame within 'tar' that can be used to add tkinter elements to
-        :rtype: tk.Frame
+        Args:
+            tar (tk.Frame): Parent frame to contain the new frame.
+
+        Returns:
+            tk.Frame: The newly created frame.
         """
         frame = tk.Frame(tar)
         frame.grid(sticky='nsew', padx=5, pady=5)
         return frame
 
     def create_entry_with_label_and_button(self, frame: tk.Frame, text: str, text_var: any,
-                                           button_text: str,button_command: Callable
-                                           ) -> Tuple[tk.Label,tk.Entry, tk.Button, tk.Frame]:
-        """Creates a tk.Frame with a label, entry, and button.
+                                           button_text: str, button_command: Callable
+                                           ) -> Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]:
+        """Create a frame with a label, entry field, and button.
 
-        :param frame: Root frame where the new frame should be located
-        :type frame: tk.Frame
-        :param text: Text that will displayed on the label
-        :type text: str
-        :param text_var: Variable where the data entered in the entry will be stored
-        :type text_var: any
-        :param button_text: Button text to let user know what the button does
-        :type button_text: str
-        :param button_command: Callable function that should be triggered when the button is
-                               pressed
-        :type button_command: Callable
-        :return: The resulting tk.Label, tk.Entry, tk.Button, and tk.Frame objects
-        :rtype: Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]
+        Args:
+            frame (tk.Frame): Parent frame for the new widgets.
+            text (str): Label text.
+            text_var (any): tkinter variable to store entry value.
+            button_text (str): Text to display on the button.
+            button_command (Callable): Function to call when button is pressed.
+
+        Returns:
+            Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]: The created widgets.
         """
         new_frame = self.create_frame(frame)
 
@@ -126,42 +157,37 @@ class FileSelectBase:
 
         return label, entry, button, new_frame
 
-    def create_file_selector(self, frame: tk.Frame, text: str, text_var: any, file_type:list=None
+    def create_file_selector(self, frame: tk.Frame, text: str, text_var: any, file_type: list = None
                             ) -> Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]:
-        """Creates an entry, label, and button that operate as a way to select a specific file
-        path from user's device
+        """Create a file selection widget with browse button.
 
-        :param frame: Root frame where the new frame should be located
-        :type frame: tk.Frame
-        :param text: Text that will displayed on the label
-        :type text: str
-        :param text_var: Variable where the path entered in the entry will be stored
-        :type text_var: any
-        :param file_type: List of acceptable file types to be selected in the form
-                          [(description, file extension)], if None all files will be selectable,
-                          defaults to None
-        :type file_type: list, optional
-        :return: The resulting tk.Label, tk.Entry, tk.Button, and tk.Frame objects
-        :rtype: Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]
+        Args:
+            frame (tk.Frame): Parent frame for the widgets.
+            text (str): Label text.
+            text_var (any): tkinter variable to store selected path.
+            file_type (list): Acceptable file types as [(description, extension)].
+                If None, all files are selectable. Defaults to None.
+
+        Returns:
+            Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]: The created widgets.
         """
         label, entry, button, frame = self.create_entry_with_label_and_button(frame, text,
                                                 text_var, "Browse",
                                                 lambda: self.select_file(text_var, file_type))
 
         return label, entry, button, frame
+
     def create_folder_selector(self, frame: tk.Frame, text: str, text_var: any
                               ) -> Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]:
-        """Creates an entry, label, and button that operate as a way to select a specific folder
-        path from user's device
+        """Create a folder selection widget with browse button.
 
-        :param frame: Root frame where the new frame should be located
-        :type frame: tk.Frame
-        :param text: Text that will displayed on the label
-        :type text: str
-        :param text_var: Variable where the path entered in the entry will be stored
-        :type text_var: any
-        :return: The resulting tk.Label, tk.Entry, tk.Button, and tk.Frame objects
-        :rtype: Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]
+        Args:
+            frame (tk.Frame): Parent frame for the widgets.
+            text (str): Label text.
+            text_var (any): tkinter variable to store selected path.
+
+        Returns:
+            Tuple[tk.Label, tk.Entry, tk.Button, tk.Frame]: The created widgets.
         """
         label, entry, button, frame = self.create_entry_with_label_and_button(frame, text,
                                                     text_var, "Browse",
@@ -191,15 +217,12 @@ class FileSelectBase:
 
         return spinbox
 
-    def select_file(self, text_var: any, file_type: list):
-        """Function that opens a filedialog window and prompts user to select a file from their
-        device
+    def select_file(self, text_var: any, file_type: list) -> None:
+        """Open a file dialog and store the selected file path.
 
-        :param text_var: Variable where the path selected will be stored
-        :type text_var: any
-        :param file_type: List of acceptable file types to be selected in the form
-                          [(description, file extension)], if None all files will be selectable
-        :type file_type: list
+        Args:
+            text_var (any): tkinter variable to store the selected path.
+            file_type (list): Acceptable file types as [(description, extension)].
         """
         filepath = filedialog.askopenfilename(filetypes=file_type)
 
@@ -207,12 +230,11 @@ class FileSelectBase:
             text_var.set(filepath)
             self.validate_fields()
 
-    def select_folder(self, text_var: any):
-        """Function that opens a filedialog window and prompts user to select a folder from their
-        device
+    def select_folder(self, text_var: any) -> None:
+        """Open a folder dialog and store the selected folder path.
 
-        :param text_var: Variable where the path selected will be stored
-        :type text_var: any
+        Args:
+            text_var (any): tkinter variable to store the selected path.
         """
         folderpath = filedialog.askdirectory()
 
@@ -220,38 +242,40 @@ class FileSelectBase:
             text_var.set(folderpath)
             self.validate_fields()
 
-    def run(self):
-        """Runs the FileSelectBase instance and returns the result variable
+    def run(self) -> any:
+        """Run the file selector GUI and return the result.
 
-        :return: Results of the run, typically a dictionary containing input data from user
-        :rtype: any
+        Returns:
+            any: Result data from user input, typically a dataclass.
         """
         self.root.mainloop()
         return self.result
 
-    def validate_fields(self):
-        """Function to validate inputs that all instances should implement
+    def validate_fields(self) -> None:
+        """Validate input fields. Must be implemented by subclasses.
 
-        :raises NotImplementedError: not implemented here
+        Raises:
+            NotImplementedError: If not overridden by subclass.
         """
         raise NotImplementedError
 
-    def submit(self):
-        """Function to link to submit button to signal the end of the input process that all
-        instances should implement
+    def submit(self) -> None:
+        """Handle submit button press. Must be implemented by subclasses.
 
-        :raises NotImplementedError: not implemented here
+        Raises:
+            NotImplementedError: If not overridden by subclass.
         """
         raise NotImplementedError
 
 class MapGenFileSelector(FileSelectBase):
-    """Class used to prompt user for map generation files
-    """
-    def __init__(self):
-        """Constructor method, populates tk window with all necessary elements and initializes
-        necessary variables
-        """
+    """GUI for selecting map generation input files.
 
+    Prompts user to select a landscape file (.tif) and output folder for
+    generating EMBRS map data.
+    """
+
+    def __init__(self):
+        """Initialize the map generation file selector GUI."""
         super().__init__("Select Input Data Files and Map Destination Folder")
 
         # Define variables
@@ -315,7 +339,23 @@ class MapGenFileSelector(FileSelectBase):
 
 
 class SimFolderSelector(FileSelectBase):
+    """GUI for configuring simulation parameters.
+
+    Provides a tabbed interface for selecting map folder, weather inputs,
+    model settings, and user control module. Collects all parameters
+    needed to run a fire simulation.
+
+    Attributes:
+        submit_callback (Callable): Function to call with SimParams on submit.
+    """
+
     def __init__(self, submit_callback: Callable):
+        """Initialize the simulation folder selector GUI.
+
+        Args:
+            submit_callback (Callable): Function to call with SimParams when
+                the user clicks submit.
+        """
         super().__init__("EMBRS")
         self.submit_callback = submit_callback
 
@@ -899,14 +939,22 @@ class SimFolderSelector(FileSelectBase):
             self.submit_callback(sim_params)
 
 class VizFolderSelector(FileSelectBase):
-    """Class used to prompt user for log files to be visualized
+    """GUI for selecting log files for visualization playback.
 
-    :param submit_callback: Function that should be called when the submit button is pressed
-    :type submit_callback: Callable
+    Prompts user to select a log folder and configure visualization options
+    including video recording, display settings, and playback frequency.
+
+    Attributes:
+        normal_callback (Callable): Callback for normal visualization.
+        arrival_callback (Callable): Callback for arrival time visualization.
     """
+
     def __init__(self, normal_callback: Callable, arrival_callback: Callable):
-        """Constructor method, populates tk window with all necessary elements and initializes
-        necessary variables
+        """Initialize the visualization folder selector GUI.
+
+        Args:
+            normal_callback (Callable): Function to call for normal visualization.
+            arrival_callback (Callable): Function to call for arrival time visualization.
         """
         super().__init__("Visualization Tool")
 
@@ -1235,17 +1283,23 @@ class VizFolderSelector(FileSelectBase):
             self.submit_button.config(state='disabled')
 
 class LoaderWindow:
-    """Class used to created loading bars for progress updates to user while programs are running
-    in backend
+    """Progress bar window for long-running operations.
 
-    :param title: title to be displayed at the top of the window
-    :type title: str
-    :param max_value: number of increments to complete the task
-    :type max_value: int
+    Displays a progress bar and status text to provide feedback during
+    lengthy operations like weather data download or file processing.
+
+    Attributes:
+        root (tk.Toplevel): The tkinter window.
+        progressbar (ttk.Progressbar): The progress bar widget.
+        text_var (tk.StringVar): Variable for status text.
     """
+
     def __init__(self, title: str, max_value: int):
-        """Constructor method, populates tk window with all necessary elements and initializes
-        necessary variables
+        """Initialize the loader window.
+
+        Args:
+            title (str): Title to display at the top of the window.
+            max_value (int): Maximum value for the progress bar.
         """
         self.root = tk.Toplevel()
         self.root.geometry('300x100')
@@ -1259,27 +1313,25 @@ class LoaderWindow:
         self.progressbar.pack(fill='x')
         sleep(0.5)
 
-    def set_text(self, text:str):
-        """Sets the text of the window
+    def set_text(self, text: str) -> None:
+        """Set the status text displayed above the progress bar.
 
-        :param text: text to be displayed along the progress bar to inform user what task is being
-                     completed
-        :type text: str
+        Args:
+            text (str): Status message to display.
         """
         sleep(0.5)
         self.text_var.set(text)
-        self.root.update_idletasks()  # Ensure the window updates
+        self.root.update_idletasks()
 
-    def increment_progress(self, increment_value:int=1):
-        """Increments the progress forward by 'increment_value'
+    def increment_progress(self, increment_value: int = 1) -> None:
+        """Increment the progress bar.
 
-        :param increment_value: amount to increment forward, defaults to 1
-        :type increment_value: int, optional
+        Args:
+            increment_value (int): Amount to increment. Defaults to 1.
         """
         self.progressbar.step(increment_value)
-        self.root.update_idletasks()  # Ensure the window updates
+        self.root.update_idletasks()
 
-    def close(self):
-        """Close the loader window
-        """
+    def close(self) -> None:
+        """Close and destroy the loader window."""
         self.root.destroy()

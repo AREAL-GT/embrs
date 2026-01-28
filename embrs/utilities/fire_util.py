@@ -1,12 +1,25 @@
-"""Various sets of constants and helper functions useful throughout the codebase
+"""Core constants and utility functions for fire simulation.
 
-.. autoclass:: UtilFuncs
-    :members:
+This module provides essential data structures, constants, and helper functions
+used throughout the EMBRS codebase, including cell states, hexagonal grid math,
+road constants, and various utility functions.
+
+Classes:
+    - CellStates: Enumeration of cell states (BURNT, FUEL, FIRE).
+    - CrownStatus: Crown fire status constants.
+    - CanopySpecies: Canopy species definitions and properties.
+    - RoadConstants: Road type definitions and standard dimensions.
+    - HexGridMath: Hexagonal grid neighbor calculations.
+    - SpreadDecomp: Fire spread direction decomposition mappings.
+    - UtilFuncs: General utility functions.
 
 .. autoclass:: CellStates
     :members:
 
-.. autoclass:: FuelConstants
+.. autoclass:: CrownStatus
+    :members:
+
+.. autoclass:: CanopySpecies
     :members:
 
 .. autoclass:: RoadConstants
@@ -15,34 +28,33 @@
 .. autoclass:: HexGridMath
     :members:
 
+.. autoclass:: SpreadDecomp
+    :members:
+
+.. autoclass:: UtilFuncs
+    :members:
 """
 
-from typing import Tuple
+from typing import Tuple, List, Optional, TYPE_CHECKING
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
 from functools import lru_cache
 
-cell_type = np.dtype([
-    ('id', np.int32),
-    ('state', np.int32),
-    ('fuelType', np.int32),
-    ('fuelContent', np.float32),
-    ('moisture', np.float32),
-    ('position', [('x', np.float32), ('y', np.float32), ('z', np.float32)]),
-    ('indices', [('i', np.int32), ('j', np.int32)]),
-    ('changed', np.bool_)
-])
-
-action_type = np.dtype([
-    ('type', np.int32),
-    ('pos', [('x', np.float32), ('y', np.float32)]),
-    ('time', np.float32),
-    ('value', np.float32)
-])
+if TYPE_CHECKING:
+    from embrs.fire_simulator.cell import Cell
 
 class SpreadDecomp:
-    """_summary_ TODO: need to carefully think about how to best document this
+    """Mapping for fire spread direction decomposition across cell boundaries.
+
+    Maps spread endpoint locations on a cell's boundary to corresponding
+    entry points on neighboring cells. Used for tracking fire propagation
+    between adjacent hexagonal cells.
+
+    Attributes:
+        self_loc_to_neighbor_loc_mapping (dict): Maps edge location indices (1-12)
+            to list of tuples (neighbor_edge_loc, neighbor_letter) indicating
+            where fire enters the adjacent cell.
     """
 
     self_loc_to_neighbor_loc_mapping = {
@@ -60,11 +72,32 @@ class SpreadDecomp:
         12: [(4, 'F'), (8, 'A')]
     }
 
+
 class CrownStatus:
-    # Crown statuses
+    """Enumeration of crown fire status values.
+
+    Attributes:
+        NONE (int): No crown fire activity (value: 0).
+        PASSIVE (int): Passive crown fire (value: 1).
+        ACTIVE (int): Active crown fire (value: 2).
+    """
     NONE, PASSIVE, ACTIVE = 0, 1, 2
 
+
 class CanopySpecies:
+    """Canopy species definitions and properties for spotting calculations.
+
+    Contains species identification mappings and physical properties used
+    in firebrand lofting and spotting distance calculations.
+
+    Attributes:
+        species_names (dict): Maps species ID (int) to species name (str).
+        species_ids (dict): Maps species name (str) to species ID (int).
+        properties (np.ndarray): Physical properties matrix where each row
+            corresponds to a species ID. Columns are species-specific parameters
+            for spotting calculations. TODO:verify column definitions and units.
+    """
+
     species_names = {
         0: "Engelmann spruce",
         1: "Douglas fir",
@@ -89,7 +122,6 @@ class CanopySpecies:
         "Loblolly pine": 8
     }
 
-    # Row of matrix corresponds to the species id
     properties = np.array([
         [15.7, 0.451, 12.6, 0.256],
         [15.7, 0.451, 10.7, 0.278],
@@ -103,22 +135,34 @@ class CanopySpecies:
     ])
 
 class CellStates:
-    """Enumeration of the possible cell states.
+    """Enumeration of possible cell states.
 
     Attributes:
-        - **BURNT** (int): Represents a cell that has been burnt and has no fuel remaining.
-        - **FUEL** (int): Represents a cell that still contains fuel and is not on fire.
-        - **FIRE** (int): Represents a cell that is currently on fire.
+        BURNT (int): Cell has been burnt, no fuel remaining (value: 0).
+        FUEL (int): Cell contains fuel and is not on fire (value: 1).
+        FIRE (int): Cell is currently burning (value: 2).
     """
-    # Cell States:
+
     BURNT, FUEL, FIRE = 0, 1, 2
 
 class RoadConstants:
-    # Road types
-    major_road_types = ['motorway', 'trunk' , 'primary', 'secondary',
+    """Constants for road types imported from OpenStreetMap.
+
+    Defines standard road classifications, lane widths, shoulder widths,
+    and visualization colors for roads used as fuel breaks in simulation.
+
+    Attributes:
+        major_road_types (list): List of supported OSM road type strings.
+        lane_widths_m (dict): Lane width in meters for each road type.
+        shoulder_widths_m (dict): Total shoulder width in meters for each road type.
+        default_lanes (int): Default number of lanes (2).
+        road_color_mapping (dict): Hex color codes for visualization by road type.
+        TODO:verify the source for the lane widths
+    """
+
+    major_road_types = ['motorway', 'trunk', 'primary', 'secondary',
                         'tertiary', 'residential']
 
-    # Standard lane widths for each road type
     lane_widths_m = {
         'motorway': 3.66,
         'big_motorway': 3.66,
@@ -129,10 +173,9 @@ class RoadConstants:
         'residential': 3.05
     }
 
-    # Standard shoulder width for each road type (total shoulder width)
     shoulder_widths_m = {
         'motorway': 4.27,
-        'big_motorway': 6.10, # For motorways with more than 2 lanes
+        'big_motorway': 6.10,
         'trunk': 4.27,
         'primary': 4.27,
         'secondary': 1.83,
@@ -140,52 +183,66 @@ class RoadConstants:
         'residential': 1.83
     }
 
-    # Standard number of lanes for each road type
     default_lanes = 2
-    
+
     road_color_mapping = {
-        'motorway': '#4B0082',  # Indigo
+        'motorway': '#4B0082',
         'big_motorway': '#4B0082',
-        'trunk': '#800080',    # Purple
-        'primary': '#9400D3',  # DarkViolet
-        'secondary': '#9932CC',  # DarkOrchid
-        'tertiary': '#BA55D3',  # MediumOrchid
-        'residential': '#EE82EE',  # Violet
+        'trunk': '#800080',
+        'primary': '#9400D3',
+        'secondary': '#9932CC',
+        'tertiary': '#BA55D3',
+        'residential': '#EE82EE',
     }
 
 class HexGridMath:
-    """Data structures to help with handling cell neighbors in a hexagonal grid.
+    """Data structures for hexagonal grid neighbor calculations.
+
+    Provides mappings for finding neighbors of cells in a point-up hexagonal
+    grid. Even and odd rows have different neighbor offsets due to the
+    staggered grid layout.
+
+    Neighbor letters (A-F) identify the six directions around a hexagon,
+    starting from the upper-right and proceeding clockwise.
 
     Attributes:
-        - **even_neighborhood** (list): list of relative indices of a cell's neighbors, for even rows.
-        - **even_neighbor_letters** (dict):
-        - **odd_neighborhood** (list): list of relative indices of a cell's neighbors, for odd rows.
-        - **even_neighbor_letters** (dict):
-
+        even_neighborhood (list): Relative (row, col) offsets for neighbors
+            of cells in even-numbered rows.
+        even_neighbor_letters (dict): Maps letter (A-F) to (row, col) offset
+            for even rows.
+        even_neighbor_rev_letters (dict): Maps (row, col) offset to letter
+            for even rows.
+        odd_neighborhood (list): Relative (row, col) offsets for neighbors
+            of cells in odd-numbered rows.
+        odd_neighbor_letters (dict): Maps letter (A-F) to (row, col) offset
+            for odd rows.
+        odd_neighbor_rev_letters (dict): Maps (row, col) offset to letter
+            for odd rows.
     """
-    even_neighborhood = [(-1,1), (0, 1), (1,0), (0, -1), (-1, -1), (-1,0)]
+
+    even_neighborhood = [(-1, 1), (0, 1), (1, 0), (0, -1), (-1, -1), (-1, 0)]
     even_neighbor_letters = {'F': (-1, 1),
-                             'A':(0, 1),
-                             'B':(1, 0),
+                             'A': (0, 1),
+                             'B': (1, 0),
                              'C': (0, -1),
                              'D': (-1, -1),
                              'E': (-1, 0)}
-    
-    even_neighor_rev_letters = {(-1, 1): 'F',
+
+    even_neighbor_rev_letters = {(-1, 1): 'F',
                                 (0, 1): 'A',
                                 (1, 0): 'B',
                                 (0, -1): 'C',
                                 (-1, -1): 'D',
                                 (-1, 0): 'E'}
 
-    odd_neighborhood = [(1,0), (1,1), (0,1), (-1,0), (0,-1), (1, -1)]
+    odd_neighborhood = [(1, 0), (1, 1), (0, 1), (-1, 0), (0, -1), (1, -1)]
     odd_neighbor_letters = {'B': (1, 0),
                             'A': (1, 1),
                             'F': (0, 1),
                             'E': (-1, 0),
                             'D': (0, -1),
                             'C': (1, -1)}
-    
+
     odd_neighbor_rev_letters = {(1, 0): 'B',
                                 (1, 1): 'A',
                                 (0, 1): 'F',
@@ -194,31 +251,27 @@ class HexGridMath:
                                 (1, -1): 'C'}
 
 class UtilFuncs:
-    """Various utility functions that are useful across numerous files.
-    """
+    """Collection of utility functions used across the codebase."""
+
     def get_indices_from_xy(x_m: float, y_m: float, cell_size: float, grid_width: int,
                             grid_height: int) -> Tuple[int, int]:
-        """Get the row and column indices in a backing array of a cell containing the point
-        (x_m, y_m). 
-        
-        Does not require a :class:`~fire_simulator.fire.FireSim` object, uses 'cell_size' and the size of the array
-        to calculate indices.
+        """Get grid indices for a point in spatial coordinates.
 
-        :param x_m: x position in meters where indices should be found
-        :type x_m: float
-        :param y_m: y position in meters where indices should be found
-        :type y_m: float
-        :param cell_size: cell size in meters, measured as the distance across two parallel sides
-                          of a regular hexagon
-        :type cell_size: float
-        :param grid_width: number of columns in the backing array of interest
-        :type grid_width: int
-        :param grid_height: number of rows in the backing array of interest
-        :type grid_height: int
-        :raises ValueError: if x or y inputs are out of bounds for the array constructed by
-                            'cell_size', 'grid_width', and 'grid_height'
-        :return: tuple containing [row, col] indices at the point (x_m, y_m)
-        :rtype: Tuple[int, int]
+        Calculates the (row, col) indices in the cell_grid array for the cell
+        containing the point (x_m, y_m). Does not require a FireSim object.
+
+        Args:
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
+            cell_size (float): Cell size in meters (hexagon side length).
+            grid_width (int): Number of columns in the grid.
+            grid_height (int): Number of rows in the grid.
+
+        Returns:
+            Tuple[int, int]: (row, col) indices of the cell containing the point.
+
+        Raises:
+            ValueError: If the point is outside the grid bounds.
         """
         row = int(y_m // (cell_size * 1.5))
 
@@ -235,17 +288,15 @@ class UtilFuncs:
 
         return row, col
 
-    def get_time_str(time_s: int, show_sec = False) -> str:
-        """Returns a formatted time string in m-h-s format from the time in seconds.
-        
-        Useful for generating readable display of the time.
+    def get_time_str(time_s: int, show_sec: bool = False) -> str:
+        """Format a time value in seconds as a human-readable string.
 
-        :param time_s: time value in seconds
-        :type time_s: int
-        :param show_sec: set to `True` if seconds should be displayed, `False` if not, defaults to `False`
-        :type show_sec: bool, optional
-        :return: formatted time string in h-m-s format
-        :rtype: str
+        Args:
+            time_s (int): Time value in seconds.
+            show_sec (bool): If True, include seconds in output. Defaults to False.
+
+        Returns:
+            str: Formatted time string (e.g., "2 h 30 min" or "2 h 30 min 15 s").
         """
         hours = int(time_s // 3600)
         minutes = int((time_s % 3600) // 60)
@@ -268,28 +319,28 @@ class UtilFuncs:
         return result
 
     def get_dominant_fuel_type(fuel_map: np.ndarray) -> int:
-        """Finds the most commonly occurring fuel type within a fuel map.
+        """Find the most common fuel type in a fuel map.
 
-        :param fuel_map: Fuel map for a region
-        :type fuel_map: np.ndarray
-        :return: Integer representation of the dominant fuel type. 
-            See :py:attr:`~utilities.fire_util.FuelConstants.fuel_names`
-        :rtype: int
+        Args:
+            fuel_map (np.ndarray): 2D array of fuel type IDs.
+
+        Returns:
+            int: Fuel type ID that occurs most frequently.
         """
         counts = np.bincount(fuel_map.ravel())
 
         return np.argmax(counts)
 
-    def get_cell_polygons(cells: list) -> list:
-        """Converts a list of cell objects into the minimum number of :py:attr:`shapely.Polygon`
-        required to describe all of them
+    def get_cell_polygons(cells: List["Cell"]) -> Optional[List[Polygon]]:
+        """Merge cell polygons into minimal covering polygons.
 
-        :param cells: list of :class:`~fire_simulator.cell.Cell` objects to be converted
-        :type cells: list
-        :return: list of :py:attr:`shapely.Polygon` representing the cells
-        :rtype: list
+        Args:
+            cells (List[Cell]): List of Cell objects to convert.
+
+        Returns:
+            Optional[List[Polygon]]: List of shapely Polygon objects representing
+                the merged cells, or None if cells is empty.
         """
-
         if not cells:
             return None
 
@@ -303,18 +354,17 @@ class UtilFuncs:
         return [merged_polygon]
 
     @staticmethod
-    def hexagon_vertices(x: float, y: float, s: float) -> list:
-        """Calculates the locations of each of a hexagons vertices with center (x,y) and side
-        length s.
+    def hexagon_vertices(x: float, y: float, s: float) -> List[Tuple[float, float]]:
+        """Calculate vertex positions for a point-up hexagon.
 
-        :param x: x location of hexagon center
-        :type x: float
-        :param y: y location of hexagon center
-        :type y: float
-        :param s: length of hexagon sides
-        :type s: float
-        :return: list of (x,y) points representing the hexagon's vertices
-        :rtype: list
+        Args:
+            x (float): X coordinate of hexagon center in meters.
+            y (float): Y coordinate of hexagon center in meters.
+            s (float): Side length of hexagon in meters.
+
+        Returns:
+            List[Tuple[float, float]]: Six (x, y) vertex coordinates, starting
+                from the top vertex and proceeding clockwise.
         """
         vertices = [
             (x, y + s),
@@ -328,18 +378,21 @@ class UtilFuncs:
     
 
     def get_dist(edge_loc: int, idx_diff: int, cell_size: float) -> float:
-        """_summary_ # TODO: need to carefully think about how to document this
+        """Calculate distance from an edge location to an endpoint on the cell boundary.
+
+        Used internally for fire spread calculations to determine the distance
+        fire must travel from its current position to reach a cell boundary point.
 
         Args:
-            edge_loc (int): _description_
-            idx_diff (int): _description_
-            cell_size (float): _description_
+            edge_loc (int): Starting edge location index (0 for center, 1-12 for
+                boundary positions where odd=edge midpoints, even=corners).
+            idx_diff (int): Absolute difference between edge_loc and target endpoint
+                index (range 1-6 due to hexagon symmetry).
+            cell_size (float): Hexagon side length in meters.
 
         Returns:
-            float: _description_
+            float: Distance in meters from edge_loc to the target endpoint.
         """
-
-        # Keys equal to difference between indices
         odd_loc_distance_dict = {
             1: cell_size / 2,
             2: (np.sqrt(3)/2) * cell_size, # Law of sines
@@ -371,17 +424,26 @@ class UtilFuncs:
             return odd_loc_distance_dict[idx_diff]
 
     @lru_cache
-    def get_ign_parameters(edge_loc: int, cell_size: float) -> Tuple[np.ndarray, np.ndarray, list]:
-        """_summary_# TODO: need to think carefully about how to document this
+    def get_ign_parameters(edge_loc: int, cell_size: float) -> Tuple[np.ndarray, np.ndarray, tuple]:
+        """Compute fire spread parameters from an ignition point within a cell.
+
+        Calculates the spread directions, distances to cell boundary endpoints,
+        and neighbor cell entry points for fire propagating from a given ignition
+        location. Results are cached for performance.
 
         Args:
-            edge_loc (int): _description_
-            cell_size (float): _description_
+            edge_loc (int): Ignition location index. 0 for cell center, 1-12 for
+                boundary positions (odd indices are edge midpoints, even indices
+                are corner vertices).
+            cell_size (float): Hexagon side length in meters.
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, list]: _description_
+            Tuple containing:
+                - np.ndarray: Spread direction angles in degrees (0-360).
+                - np.ndarray: Distances to each boundary endpoint in meters.
+                - tuple: Nested tuples of (neighbor_edge_loc, neighbor_letter)
+                    pairs indicating where fire enters adjacent cells.
         """
-
         if edge_loc == 0:
             # Ignition is at the center of cell
             start_angle = 30

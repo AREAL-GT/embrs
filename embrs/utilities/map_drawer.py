@@ -1,4 +1,17 @@
-"""Module that handles user drawing on top of sim map when specifying map parameters.
+"""Interactive map drawing tools for ignitions and fire-breaks.
+
+This module provides matplotlib-based interactive tools for drawing initial
+ignition points/lines/polygons and fire-break lines on top of simulation maps.
+
+Classes:
+    - CropTiffTool: Tool for cropping TIFF files using a bounding box.
+    - PolygonDrawer: Interactive drawing tool for ignitions and fire-breaks.
+
+.. autoclass:: CropTiffTool
+    :members:
+
+.. autoclass:: PolygonDrawer
+    :members:
 """
 
 from embrs.models.fuel_models import FuelConstants as fc
@@ -21,11 +34,25 @@ import matplotlib
 matplotlib.use('TkAgg')
 
 class CropTiffTool:
+    """Tool for cropping a TIFF file using an interactive bounding box.
+
+    Uses matplotlib's RectangleSelector widget to allow users to draw
+    a crop region on the displayed TIFF data.
+
+    Attributes:
+        fig (plt.Figure): Matplotlib figure for the tool.
+        ax (plt.Axes): Axes for displaying the TIFF data.
+        tiff_path (str): Path to the TIFF file.
+        coords (list): Selected bounding box coordinates as [(x1,y1), (x2,y2)].
     """
-    Class for cropping a TIFF file using a bounding box drawn by the user.
-    Uses the RectangleSelector widget for selecting the area to crop.
-    """
+
     def __init__(self, fig: plt.Figure, tiff_path: str):
+        """Initialize the crop tool.
+
+        Args:
+            fig (plt.Figure): Matplotlib figure to use.
+            tiff_path (str): Path to the TIFF file to display and crop.
+        """
         self.fig = fig
         self.ax = fig.add_subplot(111)
         self.tiff_path = tiff_path
@@ -52,8 +79,8 @@ class CropTiffTool:
         
         self.fig.canvas.draw()
     
-    def load_tiff(self):
-        """Loads and plots the TIFF data."""
+    def load_tiff(self) -> None:
+        """Load and display the TIFF fuel data with colored fuel types."""
         with rasterio.open(self.tiff_path) as dataset:
             self.extent = [dataset.bounds.left, dataset.bounds.right, dataset.bounds.bottom, dataset.bounds.top]
             self.fuel_data = dataset.read(4) # Read fuel data from raster
@@ -103,14 +130,34 @@ class CropTiffTool:
 
 
 class PolygonDrawer:
-    """Class used for drawing polygons on top of sim map for specifying locations of initial
-    ignitions and fire-breaks.
+    """Interactive drawing tool for ignitions and fire-breaks.
 
-    :param fig: matplotlib figure object used to draw on top of
-    :type fig: matplotlib.figure.Figure
+    Allows users to draw point, line, and polygon ignitions as well as
+    fire-break lines on top of the simulation map using mouse interaction.
+
+    Supports zooming (scroll wheel), panning (right-click drag), and
+    loading geometries from shapefiles.
+
+    Attributes:
+        fig (matplotlib.figure.Figure): Matplotlib figure for drawing.
+        ax (matplotlib.axes.Axes): Axes for the drawing canvas.
+        mode (str): Current mode ('ignition' or 'fire-breaks').
+        ignition_mode (str): Current ignition type ('point', 'line', or 'polygon').
+        polygons (list): List of accepted ignition polygons.
+        ignition_points (list): List of accepted ignition points.
+        ignition_lines (list): List of accepted ignition lines.
+        line_segments (list): List of accepted fire-break line segments.
+        fire_break_widths (list): Widths in meters for each fire break.
+        break_ids (list): Identifiers for each fire break.
+        valid (bool): Whether the drawing session completed successfully.
     """
+
     def __init__(self, lcp_data: LandscapeData, fig: matplotlib.figure.Figure):
-        """Constructor method that initializes all variables and sets up the GUI
+        """Initialize the polygon drawer.
+
+        Args:
+            lcp_data (LandscapeData): Landscape data for coordinate transforms.
+            fig (matplotlib.figure.Figure): Matplotlib figure to draw on.
         """
         self.raster_tranform = lcp_data.transform
         self.raster_height_px = lcp_data.rows
@@ -220,11 +267,12 @@ class PolygonDrawer:
         self.valid = False
 
     def on_press(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback for handling button presses in the figure, left click places either initial
-        ignitions or fire-breaks, right click can be used to pan the view.
+        """Handle mouse button presses.
 
-        :param event: MouseEvent triggered from the click
-        :type event: matplotlib.backend_bases.MouseEvent
+        Left click places ignitions or fire-breaks. Right click initiates panning.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Mouse event from click.
         """
         if event.inaxes in [self.accept_button.ax,
                             self.decline_button.ax,
@@ -346,20 +394,19 @@ class PolygonDrawer:
             self.ax._pan_start = [event.xdata, event.ydata]
 
     def on_release(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling mouse release, only used when panning the view
+        """Handle mouse button release for panning.
 
-        :param event: MouseEvent triggered by releasing the mouse
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Mouse release event.
         """
         if event.button == 3:
             self.ax._pan_start = None
 
     def on_motion(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling mouse motion. Pans the view when right-click active,
-        previews lines to be drawn otherwise
+        """Handle mouse motion for panning and line preview.
 
-        :param event: MouseEvent triggered by moving mouse
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Mouse motion event.
         """
         if event.inaxes in [self.accept_button.ax,
                             self.decline_button.ax,
@@ -429,11 +476,12 @@ class PolygonDrawer:
             self.fig.canvas.draw()
 
     def on_scroll(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling scrolling in the figure. Zooms the view in and out
-        focused wherever the mouse pointer is.
+        """Handle scroll events for zooming.
 
-        :param event: MouseEvent triggered by scrolling
-        :type event: matplotlib.backend_bases.MouseEvent
+        Zooms in/out centered on the mouse cursor position.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Scroll event.
         """
         cur_xlim = self.ax.get_xlim()
         cur_ylim = self.ax.get_ylim()
@@ -588,12 +636,11 @@ class PolygonDrawer:
 
                 
     def set_button_status(self, apply_active: bool, clear_active: bool):
-        """Set the status of the 'apply' and 'clear' buttons to set whether they are active or not
+        """Set the enabled state of the apply and clear buttons.
 
-        :param apply_active: boolean to set 'apply' button status, True = active, False = inactive
-        :type apply_active: bool
-        :param clear_active: boolean to set 'clear' button status, True = active, False = inactive
-        :type clear_active: bool
+        Args:
+            apply_active (bool): Whether the apply button should be active.
+            clear_active (bool): Whether the clear button should be active.
         """
         self.apply_button.set_active(apply_active)
         self.apply_button.color = '0.75' if apply_active else '0.85'
@@ -626,11 +673,10 @@ class PolygonDrawer:
         self.preview_line.set_data([],[])
 
     def decline(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling the decline button being pressed. Clears the most recent
-        polygon or line drawn
+        """Handle decline button press to discard the current drawing.
 
-        :param event: MouseEvent triggered from clicking 'decline'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         if self.mode == 'ignition':
             self.xs = []
@@ -705,11 +751,10 @@ class PolygonDrawer:
             self.fig.canvas.draw()
 
     def clear(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling the clear button being pressed. Clears all polygons or
-        all lines depending on the current mode
+        """Handle clear button press to remove all current drawings.
 
-        :param event: MouseEvent triggered from clicking 'clear'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         if self.mode == 'ignition':
             # Clear all ignition data
@@ -756,11 +801,10 @@ class PolygonDrawer:
         self.fig.canvas.draw()
 
     def accept(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling the accept button being pressed. Confirms the most recent
-        polygon or line.
+        """Handle accept button press to confirm the current drawing.
 
-        :param event: MouseEvent triggered from clicking 'accept'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         if self.mode == 'ignition':
             if self.ignition_mode == 'point':
@@ -831,10 +875,10 @@ class PolygonDrawer:
         self.fig.canvas.draw()
 
     def reset_view(self, event: matplotlib.backend_bases.MouseEvent):
-        """Resets the view to the original display
+        """Reset the view to the original display bounds.
 
-        :param event: MouseEvent triggered from pressing 'reset_view'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         self.ax.set_xlim(self.xlims)
         self.ax.set_ylim(self.ylims)
@@ -842,11 +886,11 @@ class PolygonDrawer:
 
         self.fig.canvas.draw()
 
-    def get_break_width(self) -> float:
-        """Prompts user for the width of a just drawn fire-break
+    def get_break_width(self) -> Tuple[float, str]:
+        """Prompt user for fire-break width and identifier.
 
-        :return: float fuel value entered by the user
-        :rtype: float
+        Returns:
+            Tuple[float, str]: (width in meters, break identifier string).
         """
         break_ctr = len(self.break_ids)
         app = QApplication([])
@@ -860,11 +904,13 @@ class PolygonDrawer:
         return None
 
     def apply(self, event: matplotlib.backend_bases.MouseEvent):
-        """Callback function for handling the apply button being pressed. Saves the polygons or
-        lines drawn in permanent data structures, closes the figure if process is complete
+        """Handle apply button press to save drawings and proceed.
 
-        :param event: MouseEvent triggered from clicking 'apply'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Transitions from ignition mode to fire-breaks mode, or closes the
+        figure when fire-breaks are complete.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         if self.mode == 'ignition':
             self.mode = 'fire-breaks'
@@ -884,10 +930,10 @@ class PolygonDrawer:
             plt.close(self.fig)
 
     def skip_fire_breaks(self, event: matplotlib.backend_bases.MouseEvent):
-        """Skips the drawing of the fire-breaks and closes the figure
+        """Skip fire-break drawing and close the figure.
 
-        :param event: MouseEvent triggered from clicking 'skip fire breaks'
-        :type event: matplotlib.backend_bases.MouseEvent
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): Button click event.
         """
         self.line_segments = []
         self.fire_break_widths = []
@@ -917,14 +963,13 @@ class PolygonDrawer:
         return geometries
 
 
-    def get_fire_breaks(self) -> Tuple[list, list]:
-        """Get the fire breaks drawn and finalized along with their fuel values
+    def get_fire_breaks(self) -> Tuple[list, list, list]:
+        """Get the fire breaks as LineStrings with widths and IDs.
 
-        :return: Returns a list with the coordinates of the fire-break line segments, and a list
-                 corresponding to each of their fuel values
-        :rtype: Tuple[list, list]
+        Returns:
+            Tuple[list, list, list]: (list of LineString geometries,
+                list of widths in meters, list of break IDs).
         """
-
         fire_breaks = []
 
         for ln in self.line_segments:

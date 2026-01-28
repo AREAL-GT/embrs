@@ -1,4 +1,22 @@
+"""Simulation logging with Parquet output.
+
+This module provides logging functionality for fire simulations, writing
+cell state updates, agent positions, actions, and predictions to Parquet
+files for post-simulation analysis and visualization replay.
+
+Classes:
+    - Logger: Main logging class for simulation data.
+
+Functions:
+    - serialize_array: Compress and encode numpy arrays.
+    - make_json_serializable: Convert objects to JSON-serializable format.
+
+.. autoclass:: Logger
+    :members:
+"""
+
 import os
+from typing import List, Any
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry, PredictionEntry
 from embrs.utilities.parquet_writer import ParquetWriter
 import pyarrow as pa
@@ -17,14 +35,30 @@ import io
 import zlib
 import base64
 
+
 class Logger:
-    def __init__(self, log_folder: str):
-        
+    """Logger for simulation data with Parquet output.
+
+    Manages logging of cell states, agent positions, suppression actions,
+    and fire predictions during simulation. Data is cached in memory and
+    periodically flushed to Parquet files for efficient storage and retrieval.
+
+    Attributes:
+        log_folder (str): Base folder for log output.
+        log_ctr (int): Counter for multiple runs within a session.
+    """
+
+    def __init__(self, log_folder: str) -> None:
+        """Initialize the logger.
+
+        Args:
+            log_folder (str): Base folder path for log output.
+        """
         self.log_ctr = 0
 
         self.log_folder = log_folder
         os.makedirs(self.log_folder, exist_ok=True)
-        
+
         self._session_folder = self.generate_session_folder()
 
         self.cell_writer = ParquetWriter(
@@ -43,11 +77,11 @@ class Logger:
             os.path.join(self._session_folder, "prediction_logs"), schema=PredictionEntry
         )
 
-        self._cell_cache = []
-        self._agent_cache = []
-        self._action_cache = []
-        self._prediction_cache = []
-        
+        self._cell_cache: List[CellLogEntry] = []
+        self._agent_cache: List[AgentLogEntry] = []
+        self._action_cache: List[ActionsEntry] = []
+        self._prediction_cache: List[PredictionEntry] = []
+
         self._status_log = {
             "sim_start": datetime.datetime.now().isoformat(),
             "messages": [],
@@ -55,21 +89,42 @@ class Logger:
             "results": None
         }
 
-    def cache_cell_updates(self, entries):
+    def cache_cell_updates(self, entries: List[CellLogEntry]) -> None:
+        """Add cell log entries to the cache.
+
+        Args:
+            entries (List[CellLogEntry]): List of cell log entries to cache.
+        """
         self._cell_cache.extend(entries)
 
-    def cache_agent_updates(self, entries):
+    def cache_agent_updates(self, entries: List[AgentLogEntry]) -> None:
+        """Add agent log entries to the cache.
+
+        Args:
+            entries (List[AgentLogEntry]): List of agent log entries to cache.
+        """
         self._agent_cache.extend(entries)
 
-    def cache_action_updates(self, entries):
+    def cache_action_updates(self, entries: List[ActionsEntry]) -> None:
+        """Add action log entries to the cache.
+
+        Args:
+            entries (List[ActionsEntry]): List of action log entries to cache.
+        """
         self._action_cache.extend(entries)
 
-    def cache_prediction(self, entry):
+    def cache_prediction(self, entry: PredictionEntry) -> None:
+        """Add a prediction entry to the cache.
+
+        Args:
+            entry (PredictionEntry): Prediction entry to cache.
+        """
         self._prediction_cache.append(entry)
 
-    def flush(self):
+    def flush(self) -> None:
+        """Write all cached data to Parquet files and clear caches."""
         self.cell_writer.write_batch(self._cell_cache)
-        self._cell_cache.clear() 
+        self._cell_cache.clear()
 
         self.agent_writer.write_batch(self._agent_cache)
         self._agent_cache.clear()
@@ -83,9 +138,15 @@ class Logger:
         self._status_log["latest_flush"] = datetime.datetime.now().isoformat()
         self._write_status_log()
 
-    def write_results(self, fire: FireSim, on_interrupt: bool = False):
+    def write_results(self, fire: FireSim, on_interrupt: bool = False) -> None:
+        """Record final simulation results to the status log.
+
+        Args:
+            fire (FireSim): Fire simulation instance to extract results from.
+            on_interrupt (bool): Whether the simulation was interrupted by user.
+                Defaults to False.
+        """
         if fire is not None:
-            # Log results
             burnt_cells = len(fire._burnt_cells)
             fire_extinguised = len(fire._burning_cells) == 0
 
@@ -100,8 +161,16 @@ class Logger:
                 self._status_log["results"]["burning cells remaining"] = len(fire._burning_cells)
                 self._status_log["results"]["burning area remaining (m^2)"] = len(fire._burning_cells) * fire.cell_dict[0]._cell_area
 
+    def finish(self, fire: FireSim, on_interrupt: bool = False) -> None:
+        """Finalize logging: flush caches, merge files, and clean up.
 
-    def finish(self, fire: FireSim, on_interrupt: bool = False):  
+        Args:
+            fire (FireSim): Fire simulation instance.
+            on_interrupt (bool): Whether simulation was interrupted. Defaults to False.
+
+        Side Effects:
+            Exits the program if on_interrupt is True.
+        """
         self.write_results(fire)
         self.flush()
 
@@ -146,7 +215,13 @@ class Logger:
         if on_interrupt:
             sys.exit(0)
 
-    def _merge_parquet_files(self, folder_path: str, output_file: str):
+    def _merge_parquet_files(self, folder_path: str, output_file: str) -> None:
+        """Merge multiple Parquet part files into a single file.
+
+        Args:
+            folder_path (str): Folder containing part-*.parquet files.
+            output_file (str): Path for the merged output file.
+        """
         parquet_files = sorted(glob.glob(os.path.join(folder_path, "part-*.parquet")))
         writer = None
 
@@ -154,7 +229,6 @@ class Logger:
             print(f"Processing {i+1}/{len(parquet_files)}: {file}")
             df = pd.read_parquet(file)
 
-            # Force arrival_time and other numerical fields to float64
             float_cols = [
                 "x", "y", "w_n_dead", "w_n_dead_start", "w_n_live",
                 "dfm_1hr", "dfm_10hr", "dfm_100hr",
@@ -165,7 +239,6 @@ class Logger:
                 if col in df.columns:
                     df[col] = df[col].astype("float64")
 
-            # Create arrow table
             table = pa.Table.from_pandas(df)
 
             if writer is None:
@@ -177,22 +250,31 @@ class Logger:
             print(f"Merged {len(parquet_files)} files to {output_file}")
 
     def generate_session_folder(self) -> str:
-        """Generates the path for the current sim's log files based on current datetime
+        """Generate the session folder path based on current datetime.
 
-        :return: Session folder path string
-        :rtype: str
+        Returns:
+            str: Session folder path string.
         """
         date_time_str = datetime.datetime.now().strftime('%d-%b-%Y-%H-%M-%S')
         return os.path.join(self.log_folder, f"log_{date_time_str}")
-    
-    def start_new_run(self):
+
+    def start_new_run(self) -> None:
+        """Start a new run within the current session.
+
+        Creates a new run folder and increments the run counter.
+        """
         self._run_folder = f"{self._session_folder}/run_{self.log_ctr}"
         os.makedirs(self._run_folder, exist_ok=True)
 
         self.log_ctr += 1
 
-    def log_metadata(self, sim_params: SimParams, fire: FireSim):
-        # inputs
+    def log_metadata(self, sim_params: SimParams, fire: FireSim) -> None:
+        """Write simulation metadata to a JSON file.
+
+        Args:
+            sim_params (SimParams): Simulation parameters.
+            fire (FireSim): Fire simulation instance.
+        """
         cell_size = sim_params.cell_size
         time_step = sim_params.t_step_s
         duration = sim_params.duration_s
@@ -284,8 +366,15 @@ class Logger:
         with open(metadata_path, 'w') as f:
             json.dump(safe_dict, f, indent=2)
 
-    def save_initial_state(self, fire_obj: FireSim):
+    def save_initial_state(self, fire_obj: FireSim) -> None:
+        """Save the initial simulation state to a Parquet file.
 
+        Writes cell data and simulation metadata (wind forecast, elevation, etc.)
+        to init_state.parquet in the session folder.
+
+        Args:
+            fire_obj (FireSim): Fire simulation instance at initial state.
+        """
         init_cells = [cell.to_log_entry(0) for cell in fire_obj.cell_dict.values()]
 
         df = pd.DataFrame(init_cells)
@@ -321,24 +410,51 @@ class Logger:
         pq.write_table(table, os.path.join(self._session_folder, "init_state.parquet"), compression='brotli')
 
 
-    def log_message(self, message: str):
+    def log_message(self, message: str) -> None:
+        """Add a timestamped message to the status log.
+
+        Args:
+            message (str): Message text to log.
+        """
         timestamp = datetime.datetime.now().isoformat()
         entry = f"[{timestamp}]: {message}"
         self._status_log["messages"].append(entry)
 
-    def _write_status_log(self):
+    def _write_status_log(self) -> None:
+        """Write the status log to a JSON file in the run folder."""
         status_path = os.path.join(self._run_folder, "status_log.json")
         with open(status_path, 'w') as f:
-            json.dump(self._status_log, f, indent = 2)
+            json.dump(self._status_log, f, indent=2)
+
 
 def serialize_array(array: np.ndarray) -> str:
+    """Compress and base64-encode a numpy array for storage.
+
+    Args:
+        array (np.ndarray): Array to serialize.
+
+    Returns:
+        str: Base64-encoded compressed array data.
+    """
     buffer = io.BytesIO()
     np.save(buffer, array, allow_pickle=False)
     compressed = zlib.compress(buffer.getvalue())
     encoded = base64.b64encode(compressed).decode('utf-8')
     return encoded
-    
-def make_json_serializable(obj):
+
+
+def make_json_serializable(obj: Any) -> Any:
+    """Recursively convert objects to JSON-serializable types.
+
+    Handles dicts, lists, tuples, numpy arrays and scalars, datetime objects,
+    and shapely LineStrings.
+
+    Args:
+        obj (Any): Object to convert.
+
+    Returns:
+        Any: JSON-serializable representation of the object.
+    """
     if isinstance(obj, dict):
         return {k: make_json_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, list):
