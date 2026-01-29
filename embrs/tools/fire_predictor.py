@@ -107,6 +107,55 @@ class FirePredictor(BaseFireSim):
             # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
             self.orig_grid, self.orig_dict = copy.deepcopy((self._cell_grid, self._cell_dict))
 
+    def _apply_member_params(self, params: PredictorParams):
+        """
+        Apply member-specific parameters without regenerating cell grid.
+
+        This is a lightweight version of set_params() that only updates
+        uncertainty/bias parameters, not grid structure. Used for per-member
+        parameter customization in ensemble predictions.
+
+        Note: cell_size_m is ignored - all members use the predictor's
+        original cell size to avoid expensive grid regeneration.
+
+        Args:
+            params: PredictorParams with member-specific values.
+        """
+        import warnings
+
+        # Warn if cell_size_m differs from predictor's cell size
+        if params.cell_size_m != self.c_size:
+            warnings.warn(
+                f"cell_size_m ({params.cell_size_m}) differs from predictor's "
+                f"cell size ({self.c_size}). cell_size_m is ignored in per-member "
+                f"params to avoid grid regeneration. Using predictor's cell size."
+            )
+
+        # Update time horizon (per-member time horizons supported)
+        self.time_horizon_hr = params.time_horizon_hr
+
+        # Update bias terms
+        self.wind_speed_bias = params.wind_speed_bias * params.max_wind_speed_bias
+        self.wind_dir_bias = params.wind_dir_bias * params.max_wind_dir_bias
+        self.ros_bias_factor = max(min(1 + params.ros_bias, 1.5), 0.5)
+
+        # Update auto-regressive parameters
+        self.wind_uncertainty_factor = params.wind_uncertainty_factor
+        self.beta = self.wind_uncertainty_factor * params.max_beta
+        self.wnd_spd_std = params.base_wind_spd_std * self.wind_uncertainty_factor
+        self.wnd_dir_std = params.base_wind_dir_std * self.wind_uncertainty_factor
+
+        # Update fuel moisture
+        self.dead_mf = params.dead_mf
+        self.live_mf = params.live_mf
+
+        # Update spotting parameters
+        self.model_spotting = params.model_spotting
+        self._spot_delay_s = params.spot_delay_s
+
+        # Store for reference
+        self._params = params
+
     # =========================================================================
     # Main Public Interface
     # =========================================================================
@@ -176,7 +225,9 @@ class FirePredictor(BaseFireSim):
         visualize: bool = False,
         num_workers: Optional[int] = None,
         random_seeds: Optional[List[int]] = None,
-        return_individual: bool = False
+        return_individual: bool = False,
+        predictor_params_list: Optional[List[PredictorParams]] = None,
+        vary_wind_per_member: bool = False
     ) -> EnsemblePredictionOutput:
         """
         Run ensemble predictions using multiple initial state estimates.
@@ -194,16 +245,27 @@ class FirePredictor(BaseFireSim):
             num_workers: Number of parallel workers (default: cpu_count).
             random_seeds: Optional list of random seeds for reproducibility.
             return_individual: If True, include individual predictions in output.
+            predictor_params_list: Optional list of PredictorParams, one per
+                            state estimate. If provided, each ensemble member
+                            uses its own params. If None, all members use the
+                            predictor's current params. Note: providing this
+                            automatically enables vary_wind_per_member.
+            vary_wind_per_member: If True, each worker runs _predict_wind()
+                            independently (generating unique perturbed forecasts).
+                            If False, all members share the same wind forecast
+                            computed in the main process.
 
         Returns:
             EnsemblePredictionOutput with aggregated predictions.
 
         Raises:
             ValueError: If state_estimates is empty, seeds length mismatch,
+                       predictor_params_list length mismatch,
                        or any start_time_s is invalid.
             RuntimeError: If more than 50% of members fail.
         """
         import multiprocessing as mp
+        import warnings
         from concurrent.futures import ProcessPoolExecutor, as_completed
         from tqdm import tqdm
 
@@ -217,13 +279,35 @@ class FirePredictor(BaseFireSim):
                 f"state_estimates length ({len(state_estimates)})"
             )
 
+        # Validate predictor_params_list length
+        if predictor_params_list is not None:
+            if len(predictor_params_list) != len(state_estimates):
+                raise ValueError(
+                    f"predictor_params_list length ({len(predictor_params_list)}) must match "
+                    f"state_estimates length ({len(state_estimates)})"
+                )
+            # If params are provided, wind MUST vary (per requirements)
+            vary_wind_per_member = True
+
+            # Warn about cell_size_m differences
+            cell_sizes = set(p.cell_size_m for p in predictor_params_list)
+            if len(cell_sizes) > 1 or (len(cell_sizes) == 1 and cell_sizes.pop() != self.c_size):
+                warnings.warn(
+                    f"Some predictor_params have different cell_size_m values. "
+                    f"cell_size_m is ignored in per-member params; all members will use "
+                    f"the predictor's cell size ({self.c_size}m)."
+                )
+
         # Validate all start times before parallel execution
         # Initialize _start_weather_idx for validation calls
         self._start_weather_idx = None
         for i, state_est in enumerate(state_estimates):
             if state_est.start_time_s is not None:
+                # Use per-member time horizon if provided, otherwise use predictor's
+                member_horizon = (predictor_params_list[i].time_horizon_hr
+                                  if predictor_params_list else None)
                 try:
-                    self._validate_start_time(state_est.start_time_s)
+                    self._validate_start_time(state_est.start_time_s, member_horizon)
                 except ValueError as e:
                     raise ValueError(
                         f"Invalid start_time_s for state_estimate[{i}]: {e}"
@@ -239,12 +323,12 @@ class FirePredictor(BaseFireSim):
         # CRITICAL: Prepare for serialization
         print("Preparing predictor for serialization...")
 
-        # Get a single wind forecast for whole ensemble
-        # TODO: Implement an option to make each predictor have its own perturbed forecast
-        self._predict_wind()
+        # Generate shared wind forecast only if not varying per member
+        if not vary_wind_per_member:
+            self._predict_wind()
 
         # Prepare workers for serialization
-        self.prepare_for_serialization()
+        self.prepare_for_serialization(vary_wind=vary_wind_per_member)
 
         # Run predictions in parallel
         predictions = []
@@ -255,13 +339,15 @@ class FirePredictor(BaseFireSim):
             futures = {}
             for i, state_est in enumerate(state_estimates):
                 seed = random_seeds[i] if random_seeds else None
+                member_params = predictor_params_list[i] if predictor_params_list else None
 
                 # Submit (predictor will be pickled via __getstate__)
                 future = executor.submit(
                     _run_ensemble_member_worker,
                     self,
                     state_est,
-                    seed
+                    seed,
+                    member_params
                 )
                 futures[future] = i  # Track member index
 
@@ -537,6 +623,11 @@ class FirePredictor(BaseFireSim):
             self.last_viz_update = self._curr_time_s
             self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
 
+            # Generate perturbed wind forecast in worker if varying per member
+            # or if wind forecast was not pre-computed
+            if getattr(self, '_vary_wind_per_member', False) or self.wind_forecast is None:
+                self._predict_wind()
+
     def _predict_wind(self):
         """
         Generate perturbed wind forecast for prediction.
@@ -715,12 +806,18 @@ class FirePredictor(BaseFireSim):
 
         return p_i
 
-    def _validate_start_time(self, start_time_s: float) -> Tuple[int, float]:
+    def _validate_start_time(
+        self,
+        start_time_s: float,
+        time_horizon_hr: Optional[float] = None
+    ) -> Tuple[int, float]:
         """
         Validate start time and compute corresponding weather index.
 
         Args:
             start_time_s: Desired start time in seconds from simulation start.
+            time_horizon_hr: Optional time horizon to use for validation.
+                If None, uses self.time_horizon_hr.
 
         Returns:
             Tuple of (weather_index, validated_start_time).
@@ -729,6 +826,8 @@ class FirePredictor(BaseFireSim):
             ValueError: If start_time_s is in the past relative to current fire time,
                        or if weather forecast doesn't cover the full prediction horizon.
         """
+        # Use provided time horizon or fall back to instance attribute
+        horizon_hr = time_horizon_hr if time_horizon_hr is not None else self.time_horizon_hr
         # Get current fire state (from fire or serialized data)
         if self.fire is not None:
             curr_time_s = self.fire._curr_time_s
@@ -758,16 +857,16 @@ class FirePredictor(BaseFireSim):
 
         # Constraint 2: weather forecast covers full prediction horizon
         total_weather_entries = len(weather_stream.stream)
-        prediction_end_time_s = start_time_s + (self.time_horizon_hr * 3600)
+        prediction_end_time_s = start_time_s + (horizon_hr * 3600)
         prediction_end_offset = int((prediction_end_time_s - curr_time_s) // weather_t_step)
         required_weather_idx = curr_weather_idx + prediction_end_offset
 
         if required_weather_idx >= total_weather_entries:
             max_end_time_s = curr_time_s + (total_weather_entries - curr_weather_idx - 1) * weather_t_step
-            max_start_time_s = max_end_time_s - (self.time_horizon_hr * 3600)
+            max_start_time_s = max_end_time_s - (horizon_hr * 3600)
             raise ValueError(
                 f"Weather forecast does not cover full prediction horizon. "
-                f"start_time_s ({start_time_s}s) + time_horizon ({self.time_horizon_hr}hr) "
+                f"start_time_s ({start_time_s}s) + time_horizon ({horizon_hr}hr) "
                 f"requires weather data until index {required_weather_idx}, but only "
                 f"{total_weather_entries} entries available. "
                 f"Maximum valid start_time_s is {max_start_time_s}s."
@@ -779,7 +878,7 @@ class FirePredictor(BaseFireSim):
     # Serialization (for parallel execution)
     # =========================================================================
 
-    def prepare_for_serialization(self):
+    def prepare_for_serialization(self, vary_wind: bool = False):
         """
         Prepare predictor for parallel execution by extracting serializable data.
 
@@ -787,6 +886,10 @@ class FirePredictor(BaseFireSim):
         state of the parent FireSim and stores it in a serializable format.
 
         This method should be called in the main process before spawning workers.
+
+        Args:
+            vary_wind: If True, workers will generate their own wind forecasts.
+                       If False, use pre-computed shared wind forecast.
 
         Raises:
             RuntimeError: If called without a fire reference.
@@ -814,6 +917,7 @@ class FirePredictor(BaseFireSim):
             'predictor_params': copy.deepcopy(self._params),
             'fire_state': fire_state,
             'weather_stream': weather_stream_copy,
+            'vary_wind_per_member': vary_wind,
 
             # Predictor-specific attributes
             'time_horizon_hr': self.time_horizon_hr,
@@ -828,13 +932,16 @@ class FirePredictor(BaseFireSim):
             'live_mf': self.live_mf,
             'nom_ign_prob': self.nom_ign_prob,
 
-            # Wind and elevation data
-            'wind_forecast': self.wind_forecast,
-            'flipud_forecast': self.flipud_forecast,
-            'wind_xpad': self.wind_xpad,
-            'wind_ypad': self.wind_ypad,
+            # Elevation data (always needed)
             'coarse_elevation': self.coarse_elevation,
         }
+
+        # Only include pre-computed wind forecast if not varying per member
+        if not vary_wind:
+            self._serialization_data['wind_forecast'] = self.wind_forecast
+            self._serialization_data['flipud_forecast'] = self.flipud_forecast
+            self._serialization_data['wind_xpad'] = self.wind_xpad
+            self._serialization_data['wind_ypad'] = self.wind_ypad
 
     def __getstate__(self):
         """
@@ -991,12 +1098,23 @@ class FirePredictor(BaseFireSim):
         self._start_datetime = sim_params.weather_input.start_datetime
         self._north_dir_deg = map_params.geo_info.north_angle_deg
 
-        # Wind forecast (already computed, just restore)
-        self.wind_forecast = data['wind_forecast']
-        self.flipud_forecast = data['flipud_forecast']
+        # Check if wind should be computed per-member or restored from serialization
+        self._vary_wind_per_member = data.get('vary_wind_per_member', False)
+
+        if not self._vary_wind_per_member:
+            # Use pre-computed wind (shared across all members)
+            self.wind_forecast = data['wind_forecast']
+            self.flipud_forecast = data['flipud_forecast']
+            self.wind_xpad = data['wind_xpad']
+            self.wind_ypad = data['wind_ypad']
+        else:
+            # Wind will be computed later by _predict_wind() in _catch_up_with_fire
+            self.wind_forecast = None
+            self.flipud_forecast = None
+            self.wind_xpad = None
+            self.wind_ypad = None
+
         self._wind_res = sim_params.weather_input.mesh_resolution
-        self.wind_xpad = data['wind_xpad']
-        self.wind_ypad = data['wind_ypad']
 
         # Weather stream
         self._weather_stream = data['weather_stream']
@@ -1058,7 +1176,8 @@ class FirePredictor(BaseFireSim):
 def _run_ensemble_member_worker(
     predictor: 'FirePredictor',
     state_estimate: StateEstimate,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    member_params: Optional[PredictorParams] = None
 ) -> PredictionOutput:
     """
     Worker function for parallel ensemble prediction.
@@ -1077,6 +1196,8 @@ def _run_ensemble_member_worker(
         state_estimate: Initial fire state for this ensemble member.
             May include start_time_s for any-time predictions.
         seed: Random seed for reproducibility.
+        member_params: Optional per-member parameters. If provided,
+            applies these params before running prediction.
 
     Returns:
         PredictionOutput for this ensemble member. Output timestamps are
@@ -1088,6 +1209,10 @@ def _run_ensemble_member_worker(
     # Set random seed if provided
     if seed is not None:
         np.random.seed(seed)
+
+    # Apply member-specific params if provided
+    if member_params is not None:
+        predictor._apply_member_params(member_params)
 
     # Run prediction (visualize=False always in workers)
     # If state_estimate.start_time_s is set, run() will handle the any-time logic:
