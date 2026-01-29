@@ -10,7 +10,7 @@ import copy
 import numpy as np
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
@@ -43,6 +43,7 @@ class FirePredictor(BaseFireSim):
         # Live reference to the fire sim
         self.fire = fire
         self.c_size = -1
+        self.start_time_s = 0
 
         # Store original params for serialization
         self._params = params
@@ -117,14 +118,25 @@ class FirePredictor(BaseFireSim):
         Args:
             fire_estimate: Optional state estimate to initialize from.
                           If None, uses current fire simulation state.
+                          If provided with start_time_s, prediction starts from
+                          that future time instead of current fire time.
             visualize: If True, display prediction on fire visualizer.
 
         Returns:
             PredictionOutput containing spread timeline and fire behavior data.
+
+        Raises:
+            ValueError: If fire_estimate.start_time_s is invalid (in the past
+                       or beyond weather forecast coverage).
         """
+        # Extract custom start time if provided
+        custom_start_time_s = None
+        if fire_estimate is not None and fire_estimate.start_time_s is not None:
+            custom_start_time_s = fire_estimate.start_time_s
+
         # Catch up time and weather states with the fire sim
         # (works in both main process and worker process)
-        self._catch_up_with_fire()
+        self._catch_up_with_fire(custom_start_time_s=custom_start_time_s)
 
         # Set fire state variables
         self._set_states(fire_estimate)
@@ -187,7 +199,8 @@ class FirePredictor(BaseFireSim):
             EnsemblePredictionOutput with aggregated predictions.
 
         Raises:
-            ValueError: If state_estimates is empty or seeds length mismatch.
+            ValueError: If state_estimates is empty, seeds length mismatch,
+                       or any start_time_s is invalid.
             RuntimeError: If more than 50% of members fail.
         """
         import multiprocessing as mp
@@ -203,6 +216,18 @@ class FirePredictor(BaseFireSim):
                 f"random_seeds length ({len(random_seeds)}) must match "
                 f"state_estimates length ({len(state_estimates)})"
             )
+
+        # Validate all start times before parallel execution
+        # Initialize _start_weather_idx for validation calls
+        self._start_weather_idx = None
+        for i, state_est in enumerate(state_estimates):
+            if state_est.start_time_s is not None:
+                try:
+                    self._validate_start_time(state_est.start_time_s)
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid start_time_s for state_estimate[{i}]: {e}"
+                    )
 
         n_ensemble = len(state_estimates)
         num_workers = num_workers or mp.cpu_count()
@@ -474,13 +499,31 @@ class FirePredictor(BaseFireSim):
     # Weather & Wind
     # =========================================================================
 
-    def _catch_up_with_fire(self):
+    def _catch_up_with_fire(self, custom_start_time_s: Optional[float] = None):
         """
         Synchronize predictor time state with parent fire simulation.
 
         In worker processes (self.fire is None), uses serialized state instead.
+
+        Args:
+            custom_start_time_s: Optional start time in seconds from simulation start.
+                If provided, validates and uses this as the prediction start time.
+                If None, uses current fire simulation time (default behavior).
         """
-        if self.fire is not None:
+        # Store the start weather index for any-time predictions
+        self._start_weather_idx = None
+
+        if custom_start_time_s is not None:
+            # Validate and compute weather index for custom start time
+            start_weather_idx, validated_start_time = self._validate_start_time(custom_start_time_s)
+            self._start_weather_idx = start_weather_idx
+            self._curr_time_s = validated_start_time
+            self.start_time_s = validated_start_time
+            self.last_viz_update = validated_start_time
+            self._end_time = (self.time_horizon_hr * 3600) + self.start_time_s
+            # Create a perturbed wind forecast (works in both main and worker)
+            self._predict_wind()
+        elif self.fire is not None:
             # In main process: get current state from fire
             self._curr_time_s = self.fire._curr_time_s
             self.start_time_s = self._curr_time_s
@@ -500,14 +543,21 @@ class FirePredictor(BaseFireSim):
 
         Applies bias and autoregressive noise to create uncertain wind forecasts.
         In worker processes (self.fire is None), uses serialized weather stream.
+
+        Uses _start_weather_idx if set (any-time mode), otherwise uses fire's
+        current weather index.
         """
         if self.fire is not None:
             new_weather_stream = copy.deepcopy(self.fire._weather_stream)
-            curr_idx = self.fire._curr_weather_idx
+            # Use custom start weather index if set (any-time mode)
+            curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
+                       else self.fire._curr_weather_idx)
         else:
             # In worker: use serialized weather stream
             new_weather_stream = copy.deepcopy(self._weather_stream)
-            curr_idx = self._curr_weather_idx
+            # Use custom start weather index if set (any-time mode)
+            curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
+                       else self._curr_weather_idx)
 
         self.weather_t_step = new_weather_stream.time_step * 60
 
@@ -665,6 +715,66 @@ class FirePredictor(BaseFireSim):
 
         return p_i
 
+    def _validate_start_time(self, start_time_s: float) -> Tuple[int, float]:
+        """
+        Validate start time and compute corresponding weather index.
+
+        Args:
+            start_time_s: Desired start time in seconds from simulation start.
+
+        Returns:
+            Tuple of (weather_index, validated_start_time).
+
+        Raises:
+            ValueError: If start_time_s is in the past relative to current fire time,
+                       or if weather forecast doesn't cover the full prediction horizon.
+        """
+        # Get current fire state (from fire or serialized data)
+        if self.fire is not None:
+            curr_time_s = self.fire._curr_time_s
+            curr_weather_idx = self.fire._curr_weather_idx
+            weather_stream = self.fire._weather_stream
+        else:
+            # In worker process: use serialized state
+            fire_state = self._serialization_data['fire_state']
+            curr_time_s = fire_state['curr_time_s']
+            curr_weather_idx = fire_state['curr_weather_idx']
+            weather_stream = self._serialization_data['weather_stream']
+
+        # Constraint 1: start_time >= current fire time
+        if start_time_s < curr_time_s:
+            raise ValueError(
+                f"start_time_s ({start_time_s}s) cannot be earlier than "
+                f"current fire time ({curr_time_s}s). Cannot predict from the past."
+            )
+
+        # Compute weather time step in seconds
+        weather_t_step = weather_stream.time_step * 60
+
+        # Compute weather index for the start time
+        time_delta_s = start_time_s - curr_time_s
+        weather_offset = int(time_delta_s // weather_t_step)
+        start_weather_idx = curr_weather_idx + weather_offset
+
+        # Constraint 2: weather forecast covers full prediction horizon
+        total_weather_entries = len(weather_stream.stream)
+        prediction_end_time_s = start_time_s + (self.time_horizon_hr * 3600)
+        prediction_end_offset = int((prediction_end_time_s - curr_time_s) // weather_t_step)
+        required_weather_idx = curr_weather_idx + prediction_end_offset
+
+        if required_weather_idx >= total_weather_entries:
+            max_end_time_s = curr_time_s + (total_weather_entries - curr_weather_idx - 1) * weather_t_step
+            max_start_time_s = max_end_time_s - (self.time_horizon_hr * 3600)
+            raise ValueError(
+                f"Weather forecast does not cover full prediction horizon. "
+                f"start_time_s ({start_time_s}s) + time_horizon ({self.time_horizon_hr}hr) "
+                f"requires weather data until index {required_weather_idx}, but only "
+                f"{total_weather_entries} entries available. "
+                f"Maximum valid start_time_s is {max_start_time_s}s."
+            )
+
+        return (start_weather_idx, start_time_s)
+
     # =========================================================================
     # Serialization (for parallel execution)
     # =========================================================================
@@ -796,6 +906,7 @@ class FirePredictor(BaseFireSim):
         self.dead_mf = data['dead_mf']
         self.live_mf = data['live_mf']
         self.nom_ign_prob = data['nom_ign_prob']
+        self._start_weather_idx = None  # Will be set by _catch_up_with_fire if needed
 
         # =====================================================================
         # Phase 2: Restore BaseFireSim attributes (manually, without __init__)
@@ -956,13 +1067,20 @@ def _run_ensemble_member_worker(
     a single prediction. The predictor has been reconstructed in this
     worker process without the original FireSim reference.
 
+    Supports any-time predictions: if state_estimate.start_time_s is set,
+    the prediction starts from that future time instead of the fire's
+    current time at serialization. The worker computes the appropriate
+    weather index offset from the serialized base state.
+
     Args:
         predictor: Deserialized FirePredictor instance.
         state_estimate: Initial fire state for this ensemble member.
+            May include start_time_s for any-time predictions.
         seed: Random seed for reproducibility.
 
     Returns:
-        PredictionOutput for this ensemble member.
+        PredictionOutput for this ensemble member. Output timestamps are
+        global (from simulation start), not relative to start_time_s.
 
     Raises:
         Exception: Any errors during prediction (will be caught by executor).
@@ -972,6 +1090,9 @@ def _run_ensemble_member_worker(
         np.random.seed(seed)
 
     # Run prediction (visualize=False always in workers)
+    # If state_estimate.start_time_s is set, run() will handle the any-time logic:
+    # - _catch_up_with_fire validates and computes weather index offset
+    # - _predict_wind uses the offset to slice the weather stream correctly
     try:
         output = predictor.run(fire_estimate=state_estimate, visualize=False)
         return output

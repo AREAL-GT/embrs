@@ -543,10 +543,13 @@ class StateEstimate:
     Attributes:
         burnt_polys (List[Polygon]): Polygons of burnt area.
         burning_polys (List[Polygon]): Polygons of actively burning area.
+        start_time_s (Optional[float]): Start time in seconds from simulation start.
+            If None, uses current fire simulation time.
     """
 
     burnt_polys: List[Polygon] = None
     burning_polys: List[Polygon] = None
+    start_time_s: Optional[float] = None
 
 @dataclass
 class CellStatistics:
