@@ -95,7 +95,7 @@ class CanopySpecies:
         species_ids (dict): Maps species name (str) to species ID (int).
         properties (np.ndarray): Physical properties matrix where each row
             corresponds to a species ID. Columns are species-specific parameters
-            for spotting calculations. TODO:verify column definitions and units.
+            for spotting calculations. TODO:verify column definitions and units. (find the source and cite it here)
     """
 
     species_names = {

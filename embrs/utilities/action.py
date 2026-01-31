@@ -126,8 +126,7 @@ class DropRetardant(Action):
         time (float): Reference time for the action in seconds.
         loc (tuple): Location (x, y) of the drop in meters.
         duration_hr (float): Duration of retardant effectiveness in hours.
-        effectiveness (float): Effectiveness factor of the retardant.
-            TODO:verify range and units for effectiveness parameter.
+        effectiveness (float): Effectiveness factor of the retardant (0,1).
     """
 
     def __init__(self, time, x, y, duration_hr: float, effectiveness: float):
@@ -205,7 +204,6 @@ class DropWaterAsMoistureInc(Action):
         time (float): Reference time for the action in seconds.
         loc (tuple): Location (x, y) of the action in meters.
         moisture_inc (float): Moisture content increase as a fraction.
-            TODO:verify if this is absolute increase or multiplier.
     """
 
     def __init__(self, time, x, y, moisture_inc: float):

@@ -1,6 +1,11 @@
-"""Base class implementation of fire simulation model.
+"""Base class for fire simulation providing shared logic for FireSim and FirePredictor.
 
-TODO: fill in 
+This module contains BaseFireSim, which implements the core fire spread simulation
+mechanics including cell management, fire propagation, weather updates, and
+control interface elements.
+
+Classes:
+    - BaseFireSim: Core fire simulation logic and state management.
 
 .. autoclass:: BaseFireSim
     :members:
@@ -29,9 +34,34 @@ from embrs.models.embers import Embers
 from embrs.models.rothermel import *
 
 class BaseFireSim:
-    """_summary_
+    """Base class for fire simulation providing shared logic for FireSim and FirePredictor.
+
+    Manages the hexagonal cell grid, fire propagation mechanics, weather updates,
+    and control interface elements. Subclassed by FireSim for real-time simulation
+    and FirePredictor for forward prediction.
+
+    Attributes:
+        cell_grid (np.ndarray): 2D array of Cell objects backing the simulation.
+        cell_dict (Dict[int, Cell]): Dictionary mapping cell IDs to Cell objects.
+        burning_cells (List[Cell]): Currently burning cells.
+        frontier (set): Cell IDs adjacent to burning cells that could ignite.
+        curr_time_s (int): Current simulation time in seconds.
+        iters (int): Number of iterations completed.
+        finished (bool): Whether the simulation has completed.
     """
+
     def __init__(self, sim_params: SimParams, burnt_region: list = None):
+        """Initialize the fire simulation.
+
+        Creates the hexagonal cell grid, populates cells with terrain and
+        fuel data, sets up weather and wind forecasts, and applies initial
+        ignitions and fire breaks.
+
+        Args:
+            sim_params (SimParams): Simulation configuration parameters.
+            burnt_region (list, optional): List of Shapely geometries defining
+                pre-burnt regions. Defaults to None.
+        """
         # Check if current instance is a prediction model
         prediction = self.is_prediction()
         
@@ -239,14 +269,17 @@ class BaseFireSim:
         print("Base initialization complete...")
 
     def _parse_sim_params(self, sim_params: SimParams):
-        """_summary_
+        """Parse simulation parameters and initialize internal state.
+
+        Extracts configuration from SimParams including cell size, duration,
+        fuel maps, weather data, and spotting parameters. Initializes the
+        wind forecast and weather stream.
 
         Args:
-            sim_params (SimParams): _description_
+            sim_params (SimParams): Simulation configuration parameters.
 
         Raises:
-            ValueError: _description_
-            ValueError: _description_
+            ValueError: If the FBFM fuel model type is not supported.
         """
         # Load general sim params
         self._cell_size = sim_params.cell_size
@@ -352,7 +385,11 @@ class BaseFireSim:
             self._spot_delay_s = sim_params.spot_delay_s
 
     def _add_cell_neighbors(self):
-        """_summary_
+        """Populate neighbor references for all cells in the grid.
+
+        For each cell, determines its neighbors based on hexagonal grid
+        geometry (even/odd row offset) and stores neighbor IDs with their
+        relative positions.
         """
         for j in range(self._shape[1]):
             for i in range(self._shape[0]):
@@ -376,10 +413,13 @@ class BaseFireSim:
                 cell._burnable_neighbors = dict(neighbors)
 
     def remove_neighbors(self, cell: Cell):
-        """_summary_
+        """Remove non-burnable neighbors from a cell's burnable neighbors list.
+
+        Filters out neighbors that are no longer in the FUEL state from
+        the cell's burnable_neighbors dictionary.
 
         Args:
-            cell (Cell): _description_
+            cell (Cell): Cell whose burnable neighbors should be updated.
         """
         # Remove any neighbors which are no longer burnable
         neighbors_to_rem = []
@@ -394,10 +434,14 @@ class BaseFireSim:
                 del cell.burnable_neighbors[n_id]
 
     def update_steady_state(self, cell: Cell):
-        """_summary_
+        """Update steady-state rate of spread for a burning cell.
+
+        Checks for crown fire conditions and calculates surface or crown
+        fire spread rates. Also triggers ember lofting for spotting if
+        crown fire is active.
 
         Args:
-            cell (Cell): _description_
+            cell (Cell): Burning cell to update.
         """
         # Checks if fire in cell meets threshold for crown fire, calls calc_propagation_in_cell using the crown ROS if active crown fire
         crown_fire(cell, self.fmc)
@@ -418,10 +462,14 @@ class BaseFireSim:
                     self.embers.loft(cell)
 
     def propagate_fire(self, cell: Cell):
-        """_summary_
+        """Propagate fire spread from a burning cell to its neighbors.
+
+        Updates fire spread extent along each direction, checks for
+        intersections with neighbor boundaries, and triggers ignition
+        of neighboring cells when fire reaches them.
 
         Args:
-            cell (Cell): _description_
+            cell (Cell): Burning cell from which to propagate fire.
         """
         if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
             cell.fully_burning = True
@@ -446,12 +494,18 @@ class BaseFireSim:
             cell.fully_burning = True
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
-        """_summary_
+        """Attempt to ignite neighboring cells reached by fire spread.
+
+        For each endpoint where fire has reached a neighbor boundary,
+        checks if the neighbor is burnable and applies ignition if
+        conditions are met.
 
         Args:
-            cell (Cell): _description_
-            r_gamma (float): _description_
-            end_point (list): _description_
+            cell (Cell): Source cell spreading fire.
+            r_gamma (float): Rate of spread in direction gamma (m/s).
+            gamma (float): Spread direction angle (degrees).
+            end_point (list): List of (location, neighbor_letter) tuples
+                indicating where fire reached neighbor boundaries.
         """
         # Loop through end points
         for pt in end_point:
@@ -495,14 +549,15 @@ class BaseFireSim:
                             self._frontier.add(neighbor.id)
 
     def get_neighbor_from_end_point(self, cell: Cell, end_point: Tuple[int, str]) -> Cell:
-        """_summary_
+        """Get the neighbor cell corresponding to an endpoint location.
 
         Args:
-            cell (Cell): _description_
-            end_point (Tuple[int, str]): _description_
+            cell (Cell): Source cell from which to find neighbor.
+            end_point (Tuple[int, str]): Tuple of (location, neighbor_letter)
+                where neighbor_letter indicates relative position.
 
         Returns:
-            Cell: _description_
+            Cell: The neighboring Cell if it exists and is burnable, None otherwise.
         """
         # Get the letter representing the neighbor location relative to cell
         neighbor_letter = end_point[1]
@@ -531,15 +586,18 @@ class BaseFireSim:
         return None
     
     def calc_ignition_ros(self, cell: Cell, neighbor: Cell, r_gamma: float) -> float:
-        """_summary_
+        """Calculate the ignition rate of spread for a neighbor cell.
+
+        Uses heat source from the spreading cell and heat sink from the
+        receiving neighbor to compute the effective ignition ROS.
 
         Args:
-            cell (Cell): _description_
-            neighbor (Cell): _description_
-            r_gamma (float): _description_
+            cell (Cell): Source cell spreading fire.
+            neighbor (Cell): Neighbor cell being ignited.
+            r_gamma (float): Rate of spread from source cell (m/s).
 
         Returns:
-            float: _description_
+            float: Ignition rate of spread (ft/min).
         """
         # Get the rate of spread in ft/min
         r_ft_min = m_s_to_ft_min(r_gamma)
@@ -556,7 +614,11 @@ class BaseFireSim:
         return r_ign
 
     def propagate_embers(self):
-        """_summary_
+        """Propagate embers from crown fires and ignite spot fires.
+
+        Simulates ember flight from lofted embers, schedules spot fire
+        ignitions with delay, and ignites previously scheduled spots
+        when their ignition time is reached.
         """
         spot_fires = self.embers.flight(self.curr_time_s + (self.time_step/60))
 
@@ -589,7 +651,10 @@ class BaseFireSim:
                     break
 
     def update_control_interface_elements(self):
-        """_summary_
+        """Update all active control interface elements.
+
+        Processes long-term retardants, active fireline construction,
+        and water drops that need updates based on elapsed time.
         """
         if self._long_term_retardants:
             self.update_long_term_retardants()
@@ -601,7 +666,10 @@ class BaseFireSim:
             self._update_active_water_drops()
     
     def _update_active_water_drops(self):
-        """_summary_
+        """Update active water drops and remove those whose effect has diminished.
+
+        Removes cells from active water drops when their moisture content
+        falls below 50% of their fuel's extinction moisture.
         """
         for cell in self._active_water_drops.copy():
             if self.is_firesim():
@@ -612,7 +680,10 @@ class BaseFireSim:
                 self._active_water_drops.remove(cell)
 
     def update_long_term_retardants(self):
-        """_summary_
+        """Update long-term retardant effects and remove expired retardants.
+
+        Checks retardant expiration times and removes retardant effects
+        from cells whose retardant has expired.
         """
         for cell in self._long_term_retardants.copy():
             if cell.retardant_expiration_s <= self._curr_time_s:
@@ -625,13 +696,18 @@ class BaseFireSim:
                 self._long_term_retardants.remove(cell)
 
     def calc_wind_padding(self, forecast: np.ndarray) -> Tuple[float, float]:
-        """_summary_
+        """Calculate padding offsets between wind forecast grid and simulation grid.
+
+        The wind forecast grid may not align exactly with the simulation
+        boundaries. This calculates the x and y offsets needed to center
+        the forecast within the simulation domain.
 
         Args:
-            forecast (np.ndarray): _description_
+            forecast (np.ndarray): Wind forecast array with shape
+                (time_steps, rows, cols, 2) where last dimension is (speed, direction).
 
         Returns:
-            Tuple[float, float]: _description_
+            Tuple[float, float]: (x_padding, y_padding) in meters.
         """
         forecast_rows = forecast[0, :, :, 0].shape[0]
         forecast_cols = forecast[0, :, :, 1].shape[1]
@@ -645,7 +721,11 @@ class BaseFireSim:
         return xpad, ypad
 
     def _set_roads(self):
-        """_summary_
+        """Apply road data to the simulation grid.
+
+        Sets cells along roads to urban fuel type for wide roads, or
+        overwrites urban fuel with neighboring fuel types for narrow roads.
+        Roads contribute to fire break width calculations.
         """
         if self.roads is not None:
             for road, _, road_width in self.roads:
@@ -666,10 +746,13 @@ class BaseFireSim:
                             road_cell._set_state(CellStates.FUEL)
 
     def _overwrite_urban_fuel(self, cell: Cell):
-        """_summary_
+        """Replace urban fuel type with the most common neighboring fuel type.
+
+        Used to ensure urban cells (roads) inherit burnable fuel properties
+        from their surroundings for fire spread calculations.
 
         Args:
-            cell (Cell): _description_
+            cell (Cell): Cell with urban fuel type to overwrite.
         """
         fuel_types = []
         for id in cell.neighbors.keys():
@@ -685,17 +768,24 @@ class BaseFireSim:
             cell._set_fuel_type(self.FuelClass(new_fuel_num))
 
     def _set_firebreaks(self):
-        """_summary_
+        """Apply all configured fire breaks to the simulation grid.
+
+        Iterates through fire break definitions and applies each to
+        the cells along the break geometry.
         """
         for line, break_width, _ in self.fire_breaks:
             self._apply_firebreak(line, break_width)
 
     def _apply_firebreak(self, line: LineString, break_width: float):
-        """_summary_
+        """Apply a fire break along a line geometry.
+
+        Adds cells along the line to the fire break list and increments
+        their break width. Cells with total break width exceeding cell
+        size are converted to urban (non-burnable) fuel type.
 
         Args:
-            line (LineString): _description_
-            break_width (float): _description_
+            line (LineString): Shapely LineString defining the fire break path.
+            break_width (float): Width of the fire break in meters.
         """
 
         cells = self.get_cells_at_geometry(line)
@@ -713,10 +803,14 @@ class BaseFireSim:
 
 
     def _set_initial_ignition(self, geometries: list):
-        """_summary_
+        """Set initial fire ignition locations from geometry definitions.
+
+        Converts geometry objects (Points, LineStrings, Polygons) to cells
+        and adds them to the starting ignitions set.
 
         Args:
-            geometries (list): _description_
+            geometries (list): List of Shapely geometry objects defining
+                initial ignition locations.
         """
 
         all_cells = []
@@ -728,10 +822,13 @@ class BaseFireSim:
             self.starting_ignitions.add((cell, 0))
 
     def _set_initial_burnt_region(self, geometries: list):
-        """_summary_
+        """Set initial burnt regions from geometry definitions.
+
+        Converts geometry objects to cells and sets their state to BURNT.
 
         Args:
-            geometries (list): _description_
+            geometries (list): List of Shapely geometry objects defining
+                pre-burnt regions.
         """
 
         all_cells = []
@@ -744,11 +841,15 @@ class BaseFireSim:
 
 
     @property
-    def frontier(self) -> list:
-        """_summary_
+    def frontier(self) -> set:
+        """Set of cell IDs at the fire frontier.
+
+        The frontier consists of FUEL cells adjacent to burning cells
+        that could potentially ignite. Cells completely surrounded by
+        fire are removed from the frontier.
 
         Returns:
-            list: _description_
+            set: Cell IDs of cells at the fire frontier.
         """
         frontier_copy = set(self._frontier)
 
@@ -767,12 +868,12 @@ class BaseFireSim:
         return self._frontier
 
     def get_avg_fire_coord(self) -> Tuple[float, float]:
-        """Get the average position of all the cells on fire.
+        """Get the average position of all burning cells.
 
-        If there is more than one independent fire this will include the points from both.
+        If there is more than one independent fire, includes cells from all fires.
 
-        :return: average position of all the cells on fire in the form (x_avg, y_avg)
-        :rtype: Tuple[float, float]
+        Returns:
+            Tuple[float, float]: Average position as (x_avg, y_avg) in meters.
         """
 
         x_coords = np.array([cell.x_pos for cell in self._burning_cells])
@@ -966,11 +1067,11 @@ class BaseFireSim:
         cell._set_state(state)
 
     def set_ignition_at_xy(self, x_m: float, y_m: float):
-        """_summary_
+        """Ignite the cell at the specified coordinates.
 
         Args:
-            x_m (float): _description_
-            y_m (float): _description_
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
         """
 
         # Get cell from specified x, y location
@@ -980,11 +1081,11 @@ class BaseFireSim:
             self.set_ignition_at_cell(cell)
 
     def set_ignition_at_indices(self, row: int, col: int):
-        """_summary_
+        """Ignite the cell at the specified grid indices.
 
         Args:
-            row (int): _description_
-            col (int): _description_
+            row (int): Row index in the cell grid.
+            col (int): Column index in the cell grid.
         """
         # Get cell from specified indices
         cell = self.get_cell_from_indices(row, col)
@@ -993,10 +1094,12 @@ class BaseFireSim:
         self.set_ignition_at_cell(cell)
 
     def set_ignition_at_cell(self, cell: Cell):
-        """_summary_
+        """Ignite the specified cell.
+
+        Sets the cell to the FIRE state and adds it to the new ignitions list.
 
         Args:
-            cell (Cell): _description_
+            cell (Cell): Cell to ignite.
         """
 
         # Set ignition at cell
@@ -1005,13 +1108,13 @@ class BaseFireSim:
         self._new_ignitions.append(cell)
 
     def add_retardant_at_xy(self, x_m: float, y_m: float, duration_hr: float, effectiveness: float):
-        """_summary_
+        """Apply long-term fire retardant at the specified coordinates.
 
         Args:
-            x_m (float): _description_
-            y_m (float): _description_
-            duration_hr (float): _description_
-            effectiveness (float): _description_
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
+            duration_hr (float): Duration of retardant effect in hours.
+            effectiveness (float): Retardant effectiveness factor (0.0-1.0).
         """
         # Get cell from specified x, y location
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -1020,13 +1123,13 @@ class BaseFireSim:
             self.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
     def add_retardant_at_indices(self, row: int, col: int, duration_hr: float, effectiveness: float):
-        """_summary_
+        """Apply long-term fire retardant at the specified grid indices.
 
         Args:
-            row (int): _description_
-            col (int): _description_
-            duration_hr (float): _description_
-            effectiveness (float): _description_
+            row (int): Row index in the cell grid.
+            col (int): Column index in the cell grid.
+            duration_hr (float): Duration of retardant effect in hours.
+            effectiveness (float): Retardant effectiveness factor (0.0-1.0).
         """
         # Get cell from specified indices
         cell = self.get_cell_from_indices(row, col)
@@ -1035,12 +1138,15 @@ class BaseFireSim:
         self.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
     def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float):
-        """_summary_
+        """Apply long-term fire retardant to the specified cell.
+
+        Effectiveness is clamped to the range [0.0, 1.0]. Only applies
+        to burnable cells.
 
         Args:
-            cell (Cell): _description_
-            duration_hr (float): _description_
-            effectiveness (float): _description_
+            cell (Cell): Cell to apply retardant to.
+            duration_hr (float): Duration of retardant effect in hours.
+            effectiveness (float): Retardant effectiveness factor (0.0-1.0).
         """
         # Ensure that effectiveness is between 0 and 1
         effectiveness = min(max(effectiveness, 0), 1)
@@ -1052,12 +1158,12 @@ class BaseFireSim:
             self._updated_cells[cell.id] = cell
 
     def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
-        """_summary_
+        """Apply water drop as equivalent rainfall at the specified coordinates.
 
         Args:
-            x_m (float): _description_
-            y_m (float): _description_
-            water_depth_cm (float): _description_
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
+            water_depth_cm (float): Equivalent rainfall depth in centimeters.
         """
         # Get cell from specified x, y location
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -1066,12 +1172,12 @@ class BaseFireSim:
             self.water_drop_at_cell_as_rain(cell, water_depth_cm)
 
     def water_drop_at_indices_as_rain(self, row: int, col: int, water_depth_cm: float):
-        """_summary_
+        """Apply water drop as equivalent rainfall at the specified grid indices.
 
         Args:
-            row (int): _description_
-            col (int): _description_
-            water_depth_cm (float): _description_
+            row (int): Row index in the cell grid.
+            col (int): Column index in the cell grid.
+            water_depth_cm (float): Equivalent rainfall depth in centimeters.
         """
         # Get cell from specified indices
         cell = self.get_cell_from_indices(row, col)
@@ -1080,14 +1186,17 @@ class BaseFireSim:
         self.water_drop_at_cell_as_rain(cell, water_depth_cm)
 
     def water_drop_at_cell_as_rain(self, cell: Cell, water_depth_cm: float):
-        """_summary_
+        """Apply water drop as equivalent rainfall to the specified cell.
+
+        Only applies to burnable cells. Adds cell to active water drops
+        for moisture tracking.
 
         Args:
-            cell (Cell): _description_
-            water_depth_cm (float): _description_
+            cell (Cell): Cell to apply water to.
+            water_depth_cm (float): Equivalent rainfall depth in centimeters.
 
         Raises:
-            ValueError: _description_
+            ValueError: If water_depth_cm is negative.
         """
         if water_depth_cm < 0:
             raise ValueError(f"Water depth must be >=0, {water_depth_cm} passed in")
@@ -1099,12 +1208,12 @@ class BaseFireSim:
             self._updated_cells[cell.id] = cell
 
     def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float):
-        """_summary_
+        """Apply water drop as direct moisture increase at the specified coordinates.
 
         Args:
-            x_m (float): _description_
-            y_m (float): _description_
-            moisture_inc (float): _description_
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
+            moisture_inc (float): Moisture content increase as a fraction.
         """
         # Get cell from specified x, y location
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -1113,12 +1222,12 @@ class BaseFireSim:
             self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
     def water_drop_at_indices_as_moisture_bump(self, row: int, col: int, moisture_inc: float):
-        """_summary_
+        """Apply water drop as direct moisture increase at the specified grid indices.
 
         Args:
-            row (int): _description_
-            col (int): _description_
-            moisture_inc (float): _description_
+            row (int): Row index in the cell grid.
+            col (int): Column index in the cell grid.
+            moisture_inc (float): Moisture content increase as a fraction.
         """
         # Get cell from specified indices
         cell = self.get_cell_from_indices(row, col)
@@ -1127,14 +1236,17 @@ class BaseFireSim:
         self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
     def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float):
-        """_summary_
+        """Apply water drop as direct moisture increase to the specified cell.
+
+        Only applies to burnable cells. Adds cell to active water drops
+        for moisture tracking.
 
         Args:
-            cell (Cell): _description_
-            moisture_inc (float): _description_
+            cell (Cell): Cell to apply water to.
+            moisture_inc (float): Moisture content increase as a fraction.
 
         Raises:
-            ValueError: _description_
+            ValueError: If moisture_inc is negative.
         """
 
         if moisture_inc < 0:
@@ -1147,12 +1259,21 @@ class BaseFireSim:
             self._updated_cells[cell.id] = cell
 
     def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None, id: str = None) -> str:
-        """_summary_
+        """Construct a fire break along a line geometry.
+
+        If construction_rate is None, the fire break is applied instantly.
+        Otherwise, it is constructed progressively over time.
 
         Args:
-            line (LineString): _description_
-            width_m (float): _description_
-            construction_rate (float, optional): _description_. Defaults to None.
+            line (LineString): Shapely LineString defining the fire break path.
+            width_m (float): Width of the fire break in meters.
+            construction_rate (float, optional): Construction rate in m/s.
+                If None, fire break is applied instantly.
+            id (str, optional): Unique identifier for the fire break.
+                Auto-generated if not provided.
+
+        Returns:
+            str: Identifier of the constructed fire break.
         """
 
         if construction_rate is None:
@@ -1194,7 +1315,14 @@ class BaseFireSim:
         return id
 
     def stop_fireline_construction(self, fireline_id: str):
+        """Stop construction of an active fireline.
 
+        Finalizes the partially constructed fireline and adds it to the
+        permanent fire breaks list.
+
+        Args:
+            fireline_id (str): Identifier of the fireline to stop constructing.
+        """
         if self._active_firelines.get(fireline_id) is not None:
             fireline = self._active_firelines[fireline_id]
             partial_line = fireline["partial_line"]
@@ -1205,7 +1333,11 @@ class BaseFireSim:
         # TODO: do we want to throw an error here if an invalid id is passed in
 
     def _update_active_firelines(self) -> None:
-        """_summary_
+        """Update progress of active fireline construction.
+
+        Extends partially constructed fire lines based on their
+        construction rate. Completes fire lines that reach their
+        full length.
         """
 
         step_size = self._cell_size / 4.0
@@ -1268,14 +1400,14 @@ class BaseFireSim:
             del self._active_firelines[fireline_id]
 
     def truncate_linestring(self, line: LineString, length: float) -> LineString:
-        """_summary_
+        """Truncate a LineString to the specified length.
 
         Args:
-            line (LineString): _description_
-            length (float): _description_
+            line (LineString): Original line to truncate.
+            length (float): Desired length in meters.
 
         Returns:
-            LineString: _description_
+            LineString: Truncated line, or original if length exceeds line length.
         """
         if length <= 0:
             return LineString([line.coords[0]])
@@ -1305,10 +1437,14 @@ class BaseFireSim:
         """Get all cells that intersect with the given geometry.
 
         Args:
-            geometry (Union[Polygon, LineString, Point]): The geometry to check for cell intersections.
+            geom (Union[Polygon, LineString, Point]): Shapely geometry to check
+                for cell intersections.
 
         Returns:
-            List[Cell]: A list of Cell objects that intersect with the geometry.
+            List[Cell]: List of Cell objects that intersect with the geometry.
+
+        Raises:
+            ValueError: If geometry type is not Polygon, LineString, or Point.
         """
         cells = set()
         if isinstance(geom, Polygon):
@@ -1375,13 +1511,17 @@ class BaseFireSim:
             cell.a_a = 0.115 / 60 # convert to 1 / sec
 
     def get_action_entries(self, logger: bool = False) -> List[ActionsEntry]:
-        """_summary_
+        """Get action entries for logging active control actions.
+
+        Collects current state of long-term retardants, active firelines,
+        water drops, and newly constructed fire breaks.
 
         Args:
-            logger (bool, optional): _description_. Defaults to False.
+            logger (bool, optional): Whether call is from the logger.
+                Affects cache cleanup. Defaults to False.
 
         Returns:
-            List[ActionsEntry]: _description_
+            List[ActionsEntry]: List of action entries for current actions.
         """
 
         entries = []
@@ -1481,38 +1621,40 @@ class BaseFireSim:
 
         return entries
     
-    def get_prediction_entry(self):
-        """_summary_
+    def get_prediction_entry(self) -> PredictionEntry:
+        """Get prediction entry for logging current prediction state.
 
         Returns:
-            _type_: _description_
+            PredictionEntry: Entry containing current time and prediction data.
         """
         return PredictionEntry(self._curr_time_s, self.curr_prediction)
 
     def is_firesim(self) -> bool:
-        """_summary_
+        """Check if this instance is a FireSim (real-time simulation).
 
         Returns:
-            bool: _description_
+            bool: True if this is a FireSim instance.
         """
         return self.__class__.__name__ == "FireSim"
-    
+
     def is_prediction(self) -> bool:
-        """_summary_
+        """Check if this instance is a FirePredictor (forward prediction).
 
         Returns:
-            bool: _description_
+            bool: True if this is a FirePredictor instance.
         """
         return self.__class__.__name__ == "FirePredictor"
 
     def add_agent(self, agent: AgentBase):
-        """Add agent to sim's list of registered agent.
-        
-        Enables sim to log agent data along with sim data so that it is included in visualizations.
+        """Add agent to the simulation's registered agent list.
 
-        :param agent: agent to be added to the sim's list
-        :type agent: :class:`~base_classes.agent_base.AgentBase`
-        :raises TypeError: if agent is not an instance of :class:`~base_classes.agent_base.AgentBase`
+        Registered agents are logged and displayed in visualizations.
+
+        Args:
+            agent (AgentBase): Agent to register with the simulation.
+
+        Raises:
+            TypeError: If agent is not an instance of AgentBase.
         """
         if isinstance(agent, AgentBase):
             self._agent_list.append(agent)
@@ -1620,10 +1762,10 @@ class BaseFireSim:
 
     @property
     def roads(self) -> list:
-        """_summary_
+        """Road data for the simulation.
 
         Returns:
-            list: _description_
+            list: List of (road_coords, road_type, road_width) tuples, or None.
         """
         return self._roads
 
@@ -1635,10 +1777,10 @@ class BaseFireSim:
 
     @property
     def fire_breaks(self) -> list:
-        """_summary_
+        """List of fire breaks in the simulation.
 
         Returns:
-            list: _description_
+            list: List of (LineString, width, id) tuples for each fire break.
         """
         return self._fire_breaks
 

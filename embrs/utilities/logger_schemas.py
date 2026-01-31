@@ -46,7 +46,7 @@ class CellLogEntry:
         dfm_10hr (float): 10-hour dead fuel moisture content (fraction).
         dfm_100hr (float): 100-hour dead fuel moisture content (fraction).
         ros (float): Rate of spread in m/s.
-        I_ss (float): Steady-state fireline intensity. TODO:verify units.
+        I_ss (float): Steady-state fireline intensity. btu/ft/min
         wind_speed (float): Wind speed in m/s.
         wind_dir (float): Wind direction in degrees.
         retardant (bool): Whether retardant is applied to this cell.

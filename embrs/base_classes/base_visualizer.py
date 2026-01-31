@@ -1,3 +1,15 @@
+"""Base visualization functionality for fire simulation display.
+
+Provides common visualization components including grid rendering, weather
+display, static map elements (roads, firebreaks), and prediction overlays.
+
+Classes:
+    - BaseVisualizer: Base class for simulation visualization.
+
+.. autoclass:: BaseVisualizer
+    :members:
+"""
+
 from embrs.utilities.logger_schemas import CellLogEntry, AgentLogEntry, ActionsEntry
 from embrs.utilities.data_classes import VisualizerInputs
 from embrs.utilities.fire_util import RoadConstants as rc, CellStates, CrownStatus
@@ -19,8 +31,31 @@ from shapely.geometry import LineString
 
 from datetime import timedelta
 
+
 class BaseVisualizer:
+    """Base class for fire simulation visualization.
+
+    Provides common visualization functionality including hexagonal grid
+    rendering, weather data display, static elements (roads, firebreaks,
+    elevation contours), and prediction overlays.
+
+    Attributes:
+        fig: Matplotlib figure object.
+        h_ax: Main axes for the hexagonal grid display.
+        render (bool): Whether to render to screen (False for headless).
+        cell_size (float): Size of hexagonal cells in meters.
+        width_m (float): Simulation width in meters.
+        height_m (float): Simulation height in meters.
+    """
+
     def __init__(self, params: VisualizerInputs, render=True):
+        """Initialize the visualizer with simulation parameters.
+
+        Args:
+            params (VisualizerInputs): Configuration parameters for visualization.
+            render (bool, optional): Whether to render to screen. Use False
+                for headless operation. Defaults to True.
+        """
         self.render = render
 
         if not self.render:
@@ -82,6 +117,11 @@ class BaseVisualizer:
         self.initial_state = self.fig.canvas.copy_from_bbox(self.h_ax.bbox)
 
     def _process_weather(self):
+        """Process weather data for visualization.
+
+        Calculates global wind speed normalization and converts
+        temperature units if needed.
+        """
         if self.show_wind_field:
             all_speeds = [forecast[:, :, 0] for forecast in self.wind_forecast]
             self.global_max_speed = max(np.max(s) for s in all_speeds)
@@ -92,6 +132,7 @@ class BaseVisualizer:
                 self.temp_forecast = [np.round(F_to_C(temp), 1) for temp in self.temp_forecast]
 
     def _setup_figure(self):
+        """Set up the matplotlib figure and axes."""
         if self.render:
             plt.ion()
 
@@ -104,7 +145,14 @@ class BaseVisualizer:
                         labelleft=False, labelbottom=False)
 
     def _setup_grid(self, init_entries: list[CellLogEntry]) -> None:
+        """Initialize the hexagonal grid display.
 
+        Creates polygon patches for all cells and sets initial colors
+        based on cell state and fuel type.
+
+        Args:
+            init_entries (list[CellLogEntry]): Initial cell state entries.
+        """
         # Pre-create all polygons and store them
         self.all_polygons = []
         fuel_types_seen = set()
@@ -133,6 +181,14 @@ class BaseVisualizer:
         self._init_static_elements()
 
     def _get_cell_color(self, entry: CellLogEntry):
+        """Get the display color for a cell based on its state.
+
+        Args:
+            entry (CellLogEntry): Cell state entry.
+
+        Returns:
+            tuple: RGBA color tuple for the cell.
+        """
         if entry.state == CellStates.FUEL:
             base_color = mcolors.to_rgba(fc.fuel_color_mapping[entry.fuel])
             fuel_frac = entry.w_n_dead / entry.w_n_dead_start if entry.w_n_dead_start > 0 else 1.0
@@ -147,6 +203,14 @@ class BaseVisualizer:
             return (0, 0, 0, 0)  # transparent for inactive cells
 
     def update_grid(self, sim_time_s: float, entries: list[CellLogEntry], agents: list[AgentLogEntry] = [], actions: list[ActionsEntry] = []) -> None:
+        """Update the grid display with new cell states.
+
+        Args:
+            sim_time_s (float): Current simulation time in seconds.
+            entries (list[CellLogEntry]): Updated cell state entries.
+            agents (list[AgentLogEntry], optional): Agent positions. Defaults to [].
+            actions (list[ActionsEntry], optional): Active control actions. Defaults to [].
+        """
         # Update weather data if needed
         weather_idx = int(np.floor(sim_time_s / self.forecast_t_step))
         if self.show_weather_data and weather_idx != self.forecast_idx and weather_idx < len(self.temp_forecast):
@@ -202,11 +266,18 @@ class BaseVisualizer:
 
 
     def close(self):
+        """Close the visualization figure."""
         if self.fig and plt.fignum_exists(self.fig.number):
             plt.close(self.fig)
             self.fig = None
 
     def reset_figure(self, done=False):
+        """Reset the visualization figure.
+
+        Args:
+            done (bool, optional): If True, only closes without reinitializing.
+                Defaults to False.
+        """
         self.close()
         if done:
             return
@@ -220,7 +291,11 @@ class BaseVisualizer:
         self.fig.canvas.flush_events()
 
     def _init_static_elements(self):
+        """Initialize static visualization elements.
 
+        Draws elevation contours, weather display, compass, time displays,
+        roads, fire breaks, legend, and scale bar.
+        """
         # === Elevation contour ===
         x = np.arange(0, self.grid_width)
         y = np.arange(0, self.grid_height)
@@ -364,6 +439,14 @@ class BaseVisualizer:
 
 
     def meters_to_points(self, meters):
+        """Convert meters to matplotlib points for sizing elements.
+
+        Args:
+            meters (float): Distance in meters.
+
+        Returns:
+            float: Equivalent size in matplotlib points.
+        """
         fig_width_inch, _ = self.fig.get_size_inches()
         meters_per_inch = self.width_m / fig_width_inch
         meters_per_point = meters_per_inch / 72
@@ -371,11 +454,14 @@ class BaseVisualizer:
 
 
     def visualize_prediction(self, prediction):
-        """Visualizes a prediction grid on top of the current simulation visualization.
-        
+        """Visualize a fire spread prediction overlay.
+
+        Displays predicted fire arrival times as colored points on the grid,
+        with colors indicating arrival time.
+
         Args:
-            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
-                                    representing predicted fire spread
+            prediction (dict): Dictionary mapping timestamps (seconds) to lists
+                of (x, y) coordinate tuples where fire is predicted to arrive.
         """
         # Clear any existing prediction visualization
         if hasattr(self, 'prediction_scatter'):
@@ -405,12 +491,15 @@ class BaseVisualizer:
 
 
     def visualize_ensemble_prediction(self, burn_probability):
-        """Visualizes the final burn probability for each cell.
-        
+        """Visualize ensemble burn probability overlay.
+
+        Displays the final burn probability from an ensemble prediction,
+        with color intensity indicating probability of burning.
+
         Args:
-            burn_probability (dict): Dictionary mapping timestamps to dictionaries of 
-                                    {(x,y): probability} representing cumulative burn 
-                                    probability at each time step
+            burn_probability (dict): Dictionary mapping timestamps to
+                dictionaries of {(x, y): probability} representing cumulative
+                burn probability at each time step. Uses the final time step.
         """
         # Clear any existing prediction visualization
         if hasattr(self, 'prediction_scatter'):

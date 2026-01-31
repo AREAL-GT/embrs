@@ -1,23 +1,34 @@
-"""Module containing abstract control class
+"""Abstract control class for user-defined fire suppression strategies.
+
+Users extend ControlClass to implement custom control logic that interacts
+with the fire simulation at each time step.
+
+Classes:
+    - ControlClass: Abstract base for fire suppression algorithms.
 
 .. autoclass:: ControlClass
     :members:
-
 """
 
 from abc import ABC, abstractmethod
 from embrs.fire_simulator.fire import FireSim
 
 class ControlClass(ABC):
-    """Abstract base class that custom control code must implement to be used with the simulator.
+    """Abstract base class for user-defined fire suppression control code.
+
+    Subclasses must implement the process_state method, which is called
+    after each simulation iteration to apply suppression actions.
     """
 
     @abstractmethod
     def process_state(self, fire: FireSim) -> None:
-        """This method is called after each iteration of the simulation.
-        The current :class:`~fire_simulator.fire.FireSim` object is passed in.
-        This is where any changes to the fire's state or firefighting actions should be made.
+        """Process the current simulation state and apply control actions.
 
-        :param fire: The current :class:`~fire_simulator.fire.FireSim` instance running
-        :type fire: :class:`~fire_simulator.fire.FireSim`
+        Called after each simulation iteration. Implement this method to
+        access fire state and apply suppression actions such as retardant
+        drops, water drops, or fireline construction.
+
+        Args:
+            fire (FireSim): The current FireSim instance. Access fire state
+                via fire.burning_cells, fire.frontier, fire.curr_time_s, etc.
         """

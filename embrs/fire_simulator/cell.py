@@ -41,7 +41,6 @@ class Cell:
         aspect (float): Upslope direction in degrees (0° = North, 90° = East, etc.).
         slope_deg (float): Slope angle of the terrain at the cell (degrees).
         fuel_type (Fuel): Fuel classification based on the 13 Anderson FBFMs.
-        fuel_content (float): Remaining fuel fraction (0.0 to 1.0).
         state (CellStates): Current fire state (FUEL, FIRE, BURNT).
         neighbors (dict): Dictionary of adjacent cell neighbors.
         burnable_neighbors (dict): Subset of `neighbors` that are in a burnable state.
@@ -142,7 +141,7 @@ class Cell:
         # Wind adjustment factor based on sheltering condition
         self._set_wind_adj_factor()
 
-        # Variables to keep track of burning fuel content
+        # Set to true when fire has spread across entire cell
         self.fully_burning = False
 
         self.init_dead_mf = cell_data.init_dead_mf
