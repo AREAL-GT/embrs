@@ -108,7 +108,7 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str = None) -> Tuple[np.ndarray, float]:
+def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str = None, num_workers: int = None) -> Tuple[np.ndarray, float]:
     """Runs WindNinja with domain-average initialization in parallel.
 
     Args:
@@ -118,6 +118,10 @@ def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str =
                         If provided, uses this instead of the global temp_file_path.
                         This is essential for parallel ensemble predictions to avoid
                         race conditions between workers.
+        num_workers: Number of worker processes for parallel WindNinja execution.
+                    If None (default), uses min(cpu_count(), num_tasks).
+                    Set to 1 for sequential execution (useful when caller is
+                    already parallelizing at a higher level).
 
     Returns:
         Tuple of (forecast array, time_step)
@@ -152,11 +156,8 @@ def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str =
             if os.path.isfile(file_path):
                 os.remove(file_path)
             elif os.path.isdir(file_path):
-                for sub_file_name in os.listdir(file_path):
-                    sub_file_path = os.path.join(file_path, sub_file_name)
-                    if os.path.isfile(sub_file_path):
-                        os.remove(sub_file_path)
-                os.rmdir(file_path)
+                # Use shutil.rmtree to handle arbitrarily nested directories
+                shutil.rmtree(file_path)
 
     # Prepare arguments for parallel execution
     tasks = [
@@ -180,7 +181,11 @@ def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str =
     ]
     # Use multiprocessing Pool to parallelize
     num_tasks = len(tasks)
-    num_workers = min(cpu_count(), num_tasks)  # Limit workers to available CPU cores
+    # Use provided num_workers, or auto-detect based on CPU cores
+    if num_workers is None:
+        num_workers = min(cpu_count(), num_tasks)  # Limit workers to available CPU cores
+    else:
+        num_workers = min(num_workers, num_tasks)  # Don't use more workers than tasks
 
     pool = Pool(processes=num_workers)
 
