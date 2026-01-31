@@ -1,9 +1,8 @@
-"""
-Core fire simulation model.
+"""Core fire simulation model.
 
-This module defines the `FireSim` class, which implements a **wildfire simulation** 
-based on fire spread dynamics, wind conditions, and terrain influences. It extends 
-`BaseFireSim` and incorporates **hexagonal grid modeling** to track fire behavior 
+This module defines the FireSim class, which implements wildfire simulation
+based on fire spread dynamics, wind conditions, and terrain influences. It extends
+BaseFireSim and incorporates hexagonal grid modeling to track fire behavior
 at a cellular level.
 
 Classes:
@@ -28,55 +27,22 @@ from embrs.models.crown_model import crown_fire
 class FireSim(BaseFireSim):
     """A hexagonal grid-based wildfire simulation model.
 
-    `FireSim` extends `BaseFireSim` and models wildfire spread using **Rothermel's 
-    fire spread equations**. It focuses on the core fire behavior simulation while
-    inheriting grid management, weather, and terrain functionality from BaseFire.
+    Extends BaseFireSim and models wildfire spread using Rothermel's fire spread
+    equations. Handles core fire behavior simulation while inheriting grid management,
+    weather, and terrain functionality from the base class.
 
     Attributes:
-        burnout_thresh (float): The fraction of fuel consumption at which a cell is 
-                                considered fully burned.
-        logger (Optional[Logger]): A logging utility for storing simulation outputs.
-        progress_bar (Optional[tqdm]): A progress bar for tracking simulation steps.
-        _updated_cells (dict): Stores cells that have been modified during the current iteration.
-        _soaked (list): Stores cells that have been suppressed or extinguished.
-        _burning_cells (list): Contains all currently burning cells.
-        _new_ignitions (list): Stores new ignitions to be processed in the next iteration.
-        _agent_list (list): Tracks agents (e.g., firefighters, sensors) interacting with the fire.
-        _agents_added (bool): Indicates whether agents have been added to the simulation.
-        _visualizer (Optional[Visualizer]): Reference to the visualizer for visualization.
-
-    Methods:
-        iterate(): Advances the simulation by one time step.
-        ignite_neighbors(): Attempts to ignite neighboring cells based on spread conditions.
-        _init_iteration(): Resets and updates key variables at the start of each time step.
-        log_changes(): Records simulation updates for logging and visualization.
-        set_visualizer(): Sets the visualizer reference for this simulation.
-        visualize_prediction(): Visualizes a prediction grid on top of the current simulation visualization.
-
-    Notes:
-        - The fire simulation operates on a **point-up hexagonal grid** managed by BaseFire.
-        - Fire spread is calculated using **Rothermel's fire behavior model**.
-        - The simulation tracks both fire progression and suppression efforts.
+        logger (Logger): Logging utility for storing simulation outputs.
+        progress_bar (tqdm): Progress bar for tracking simulation steps.
+        agent_list (list): Agents interacting with the fire.
+        agents_added (bool): Whether agents have been added to the simulation.
     """
     def __init__(self, sim_params: SimParams):
-        """Initializes the wildfire simulation with input parameters and sets up core tracking structures.
-
-        This constructor initializes key attributes related to fire progression, cell state tracking, 
-        and agent interactions. It also sets up logging and a progress bar for monitoring 
-        the simulation.
+        """Initialize the wildfire simulation.
 
         Args:
-            sim_params (SimParams): A structured input object containing all necessary simulation parameters, 
-                                including terrain, fuel, wind conditions, and ignition points.
-
-        Attributes Initialized:
-            - **Logging & Monitoring:**
-                - `logger` (Optional[Logger]): Handles simulation logging.
-                - `progress_bar` (Optional[tqdm]): Tracks simulation progress visually.
-
-            - **Agent Tracking:**
-                - `_agent_list` (list): Holds agents (firefighters, sensors, etc.) interacting with the fire.
-                - `_agents_added` (bool): Indicates whether agents have been added to the simulation.
+            sim_params (SimParams): Simulation parameters including terrain, fuel,
+                wind conditions, and ignition points.
         """
         print("Fire Simulation Initializing...")
         
@@ -101,39 +67,17 @@ class FireSim(BaseFireSim):
         self._init_iteration(True)
 
     def iterate(self):
-        """Advances the fire simulation by one time step.
+        """Advance the fire simulation by one time step.
 
-        This function updates fire propagation, wind conditions, and the state of burning cells.
-        It handles new ignitions, spreads fire based on calculated rates of spread (ROS), 
-        and removes cells that have fully burned.
+        Updates fire propagation, weather conditions, and burning cell states.
+        Handles new ignitions, calculates rate of spread, and transitions fully
+        burned cells to BURNT state.
 
-        Behavior:
-            - On the first iteration (`_iters == 0`):
-                - Marks `self.weather_changed` as `True`.
-                - Initializes `_new_ignitions` with `starting_ignitions`.
-                - Sets the state of newly ignited cells to `CellStates.FIRE` and computes 
-                their initial fire spread parameters.
-            - Adds new ignitions to `_burning_cells` and resets `_new_ignitions`.
-            - Calls `_init_iteration()` to prepare for the time step.
-            - Iterates through burning cells and:
-                1. **Updates wind and fire spread parameters** if wind has changed or if 
-                the cell hasn't reached steady-state ROS.
-                2. **Calculates steady-state rate of spread (`r_ss`) and fireline intensity (`I_ss`)** 
-                using `calc_propagation_in_cell()`.
-                3. **Computes real-time ROS (`r_t`) and fireline intensity (`I_t`)**.
-                4. **Advances fire spread** by updating `fire_spread` distances.
-                5. **Determines if fire has reached the cell edge**, calling `ignite_neighbors()` 
-                to attempt ignition of adjacent cells.
-                6. **Removes fully burned cells** from `_burning_cells` and updates their state 
-                to `CellStates.BURNT`.
-                7. **Increments elapsed time for fire acceleration calculations**.
-            - Calls `log_changes()` to record updates.
-
-        Notes:
-            - Fire spread is calculated using a **hexagonal grid model**.
-            - ROS is updated dynamically based on wind changes and fire behavior.
-            - Fire can only ignite neighboring cells that are still in a **burnable** state.
-            - A mass-loss approach for fuel consumption is **not yet implemented**.
+        Side Effects:
+            - Updates cell states and fire spread distances.
+            - May ignite neighboring cells.
+            - Logs changes if logger is configured.
+            - Updates visualizer if configured.
         """
         # Set-up iteration
         if self._init_iteration():
@@ -188,6 +132,17 @@ class FireSim(BaseFireSim):
         self._iters += 1
 
     def _log_changes(self):
+        """Cache all simulation updates for logging.
+
+        Collects cell state changes, agent positions, prediction data, and
+        action entries, then sends them to the logger for buffered output.
+
+        Side Effects:
+            - Caches cell updates via logger.cache_cell_updates.
+            - Caches agent updates if agents are registered.
+            - Caches current prediction if one exists (then clears it).
+            - Caches action entries from the control interface.
+        """
         self.logger.cache_cell_updates(self._get_cell_updates())
 
         if self.agents_added:
@@ -200,20 +155,16 @@ class FireSim(BaseFireSim):
         self.logger.cache_action_updates(self.get_action_entries(logger=True))
 
     def _init_iteration(self, in_constructor: bool = False) -> bool:
-        """Initialize or update the simulation state for the current iteration.
+        """Initialize or update simulation state for the current iteration.
 
-        This method handles both first-time initialization (when _iters == 0) and 
-        subsequent iteration updates. It manages:
-        - Progress bar initialization and updates
-        - Weather condition updates
-        - New ignition processing
-        - Fire spread parameter calculations
-        - Crown fire status updates
-        - Fuel consumption history computation
+        Handles first-time initialization and subsequent iteration updates including
+        progress bar, weather conditions, new ignitions, and fire spread parameters.
+
+        Args:
+            in_constructor (bool): True when called from __init__, False otherwise.
 
         Returns:
-            bool: True if the simulation should terminate (due to time limit or no active fires),
-                 False otherwise.
+            bool: True if simulation should terminate, False otherwise.
         """
         if in_constructor:
             if self.progress_bar is None:
@@ -291,42 +242,61 @@ class FireSim(BaseFireSim):
 
         return False
 
-    def _get_agent_updates(self):
-        """Returns a list of dictionaries describing the location of each agent in __agent_list
+    def _get_agent_updates(self) -> list:
+        """Collect log entries for all registered agents.
 
-        :return: List of dictionaries, describing the x,y position of each agent as well as their
-                 display preferences
-        :rtype: list
+        Returns:
+            list: List of AgentLogEntry objects, one per agent, containing
+                position and display properties at the current simulation time.
         """
         agent_data = [agent.to_log_entry(self.curr_time_s) for agent in self.agent_list]
         return agent_data
     
-    def _get_cell_updates(self):
+    def _get_cell_updates(self) -> list:
+        """Collect log entries for all cells modified this iteration.
+
+        Returns:
+            list: List of CellLogEntry objects for cells in _updated_cells.
+        """
         cell_data = [cell.to_log_entry(self.curr_time_s) for cell in list(self._updated_cells.values())]
 
         return cell_data
 
     def set_visualizer(self, visualizer):
-        """Sets the visualizer reference for this simulation.
-        
+        """Set the visualizer reference for this simulation.
+
         Args:
-            visualizer: The Visualizer instance to use for visualization
+            visualizer (RealTimeVisualizer): Visualizer instance to use.
         """
         self._visualizer = visualizer
 
-    def visualize_prediction(self, prediction_grid):
-        """Visualizes a prediction grid on top of the current simulation visualization.
-        
+    def visualize_prediction(self, prediction_grid: dict):
+        """Display a prediction grid on the visualization.
+
         Args:
-            prediction_grid (dict): Dictionary mapping timestamps to lists of (x,y) coordinates
-                                  representing predicted fire spread
+            prediction_grid (dict): Prediction data mapping timestamps to
+                coordinate lists.
+
+        Side Effects:
+            - Passes prediction to visualizer if available.
+            - Stores prediction in self.curr_prediction for logging.
         """
         if self._visualizer is not None:
             self._visualizer.visualize_prediction(prediction_grid)
 
         self.curr_prediction = prediction_grid
 
-    def visualize_ensemble_prediction(self, prediction_grid):
+    def visualize_ensemble_prediction(self, prediction_grid: dict):
+        """Visualize ensemble prediction results on the current visualization.
+
+        Args:
+            prediction_grid (dict): Ensemble prediction data structure containing
+                multiple forecast scenarios.
+
+        Side Effects:
+            - Passes prediction to visualizer if available.
+            - Stores prediction in self.curr_prediction for logging.
+        """
         if self._visualizer is not None:
             self._visualizer.visualize_ensemble_prediction(prediction_grid)
 
@@ -334,14 +304,10 @@ class FireSim(BaseFireSim):
 
     @property
     def agent_list(self) -> list:
-        """List of :class:`~base_classes.agent_base.AgentBase` objects representing agents
-        registered with the sim.
-        """
-
+        """List of agents registered with the simulation."""
         return self._agent_list
 
     @property
     def agents_added(self) -> bool:
-        """`True` if agents have been registered in sim's agent list, returns `False` otherwise
-        """
+        """True if agents have been registered, False otherwise."""
         return self._agents_added

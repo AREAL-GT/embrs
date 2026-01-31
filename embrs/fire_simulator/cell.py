@@ -25,8 +25,8 @@ from embrs.utilities.logger_schemas import CellLogEntry
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
 
-    Each cell maintains its physical properties (elevation, slope, aspect), 
-    fuel characteristics, fire state, and interactions with neighboring cells. 
+    Each cell maintains its physical properties (elevation, slope, aspect),
+    fuel characteristics, fire state, and interactions with neighboring cells.
     Cells are structured in a **point-up** hexagonal grid to model fire spread dynamics.
 
     Attributes:
@@ -37,25 +37,35 @@ class Cell:
         cell_area (float): Area of the hexagonal cell (square meters).
         x_pos (float): X-coordinate of the cell in the simulation space (meters).
         y_pos (float): Y-coordinate of the cell in the simulation space (meters).
-        z (float): Elevation of the cell (meters).
+        elevation_m (float): Elevation of the cell (meters).
         aspect (float): Upslope direction in degrees (0° = North, 90° = East, etc.).
         slope_deg (float): Slope angle of the terrain at the cell (degrees).
-        fuel_type (Fuel): Fuel classification based on the 13 Anderson FBFMs.
+        fuel (Fuel): Fire Behavior Fuel Model (FBFM) for the cell, from either Anderson 13 or Scott-Burgan 40.
         state (CellStates): Current fire state (FUEL, FIRE, BURNT).
         neighbors (dict): Dictionary of adjacent cell neighbors.
         burnable_neighbors (dict): Subset of `neighbors` that are in a burnable state.
-        wind_forecast (list): Forecasted wind conditions [(speed, direction)].
-        curr_wind (tuple): Current wind conditions (speed, direction).
+        forecast_wind_speeds (list): Forecasted wind speeds in m/s.
+        forecast_wind_dirs (list): Forecasted wind directions in degrees (cartesian).
     """
 
     def __init__(self, id: int, col: int, row: int, cell_size: float):
-        """_summary_
+        """Initialize a hexagonal cell with position and geometry.
+
+        Creates a cell at the specified grid position and calculates its spatial
+        coordinates based on the hexagonal grid layout. The cell is initialized
+        with default values for fire state and fuel properties.
 
         Args:
-            id (int): _description_
-            col (int): _description_
-            row (int): _description_
-            cell_size (float): _description_
+            id (int): Unique identifier for this cell.
+            col (int): Column index in the simulation grid.
+            row (int): Row index in the simulation grid.
+            cell_size (float): Edge length of the hexagon in meters.
+
+        Notes:
+            - Spatial position is calculated using point-up hexagon geometry.
+            - For even rows: x = col * cell_size * sqrt(3)
+            - For odd rows: x = (col + 0.5) * cell_size * sqrt(3)
+            - y = row * cell_size * 1.5
         """
         self.id = id
 
@@ -105,10 +115,22 @@ class Cell:
         self._parent = weakref.ref(parent)
 
     def _set_cell_data(self, cell_data: CellData):
-        """_summary_
+        """Configure cell properties from terrain and fuel data.
+
+        Initializes the cell's physical properties, fuel characteristics, and
+        fire spread parameters from a CellData object. This method is called
+        during simulation setup after the cell geometry is established.
 
         Args:
-            cell_data (CellData): _description_
+            cell_data (CellData): Container with fuel type, elevation, slope,
+                aspect, canopy properties, and initial moisture fractions.
+
+        Side Effects:
+            - Sets terrain attributes (elevation, slope, aspect).
+            - Sets canopy attributes and calculates wind adjustment factor.
+            - Initializes fuel moisture arrays for dead and live fuels.
+            - Creates the Shapely polygon representation.
+            - Sets cell state to CellStates.FUEL.
         """
 
         # Set Fuel type
@@ -203,7 +225,16 @@ class Cell:
         self.a_a = 0.3 / 60
 
     def set_arrays(self):
-        """_summary_
+        """Initialize fuel moisture tracking arrays for this cell.
+
+        Creates DeadFuelMoisture objects for each relevant fuel size class
+        (1-hr, 10-hr, 100-hr) based on the fuel model and initializes the
+        moisture content array with starting values.
+
+        Side Effects:
+            - Creates self.dfms list containing DeadFuelMoisture instances.
+            - Sets self.wdry and self.sigma from fuel model properties.
+            - Initializes self.fmois array with initial moisture fractions.
         """
         indices = self._fuel.rel_indices
 
@@ -235,6 +266,18 @@ class Cell:
         self.fmois = np.array(fmois)
 
     def project_distances_to_surf(self, distances: np.ndarray):
+        """Project horizontal distances onto the sloped terrain surface.
+
+        Adjusts the flat-ground distances to each cell edge by accounting for
+        the slope and aspect of the terrain. This ensures fire spread distances
+        are measured along the actual terrain surface.
+
+        Args:
+            distances (np.ndarray): Horizontal distances to cell edges in meters.
+
+        Side Effects:
+            - Sets self.distances to the slope-adjusted distances in meters.
+        """
         slope_rad = np.deg2rad(self.slope_deg)
         aspect = (self.aspect + 180) % 360
         deltas = np.deg2rad(aspect - np.array(self.directions))
@@ -242,6 +285,22 @@ class Cell:
         self.distances = distances / proj
 
     def get_ign_params(self, n_loc: int):
+        """Calculate fire spread directions and distances from an ignition location.
+
+        Computes the radial spread directions from the specified ignition point
+        within the cell to each edge or vertex. Initializes arrays for tracking
+        rate of spread and fireline intensity in each direction.
+
+        Args:
+            n_loc (int): Ignition location index within the cell.
+                0=center, 1-6=vertices, 7-12=edge midpoints.
+
+        Side Effects:
+            - Sets self.directions: array of compass directions in degrees.
+            - Sets self.distances: slope-adjusted distances to cell boundaries.
+            - Sets self.end_pts: coordinates of cell boundary points.
+            - Initializes self.avg_ros, self.I_t, self.r_t to zero arrays.
+        """
         self.directions, distances, self.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
         self.project_distances_to_surf(distances)
         self.avg_ros = np.zeros_like(self.directions)
@@ -249,32 +308,37 @@ class Cell:
         self.r_t = np.zeros_like(self.directions)
 
     def _set_wind_forecast(self, wind_speed: np.ndarray, wind_dir: np.ndarray):
-        """Stores the local forecasted wind speed and direction for the cell.
-
-        This method takes in forecasted wind speed and direction values for the specific 
-        cell and stores them as a list of tuples (`self.wind_forecast`), where each tuple 
-        contains wind speed (m/s) and direction (degrees). The initial wind conditions 
-        are set to the first forecasted value.
+        """Store the local forecasted wind speed and direction for the cell.
 
         Args:
-            wind_speed (np.ndarray): An array of forecasted wind speeds (in meters per second).
-            wind_dir (np.ndarray): An array of corresponding wind directions (in degrees).
-
-        Behavior:
-            - Combines `wind_speed` and `wind_dir` into a list of tuples.
-            - Stores the result in `self.wind_forecast`.
+            wind_speed (np.ndarray): Array of forecasted wind speeds in m/s.
+            wind_dir (np.ndarray): Array of wind directions in degrees, using
+                cartesian convention (0° = blowing toward North/+y,
+                90° = blowing toward East/+x).
 
         Side Effects:
-            - Updates `self.wind_forecast` with the forecasted wind data.
-
-        Notes:
-            - Wind direction is assumed to be in degrees, following cartesian convention.
+            - Sets self.forecast_wind_speeds with the speed array.
+            - Sets self.forecast_wind_dirs with the direction array.
         """ 
         self.forecast_wind_speeds = wind_speed
         self.forecast_wind_dirs = wind_dir
 
     def _step_moisture(self, weather_stream: WeatherStream, idx: int, update_interval_hr: float = 1):
+        """Advance dead fuel moisture calculations by one time interval.
 
+        Updates the moisture content of each dead fuel size class using the
+        Nelson dead fuel moisture model. Applies site-specific corrections
+        for elevation and calculates local solar radiation.
+
+        Args:
+            weather_stream (WeatherStream): Weather data source with temperature,
+                humidity, and solar radiation.
+            idx (int): Index into the weather stream for current conditions.
+            update_interval_hr (float): Time step for moisture update in hours.
+
+        Side Effects:
+            - Updates internal state of each DeadFuelMoisture object in self.dfms.
+        """
         elev_ref = weather_stream.ref_elev
 
         curr_weather = weather_stream.stream[idx]
@@ -305,6 +369,20 @@ class Cell:
                 bp0) # Current observation's stick barometric pressure (cal/cm^3)
 
     def _update_moisture(self, idx: float, weather_stream: WeatherStream):
+        """Update fuel moisture content to the current weather interval.
+
+        Advances the moisture model to the midpoint of the specified weather
+        interval and updates the moisture content array. For dynamic fuel models,
+        also updates dead herbaceous moisture.
+
+        Args:
+            idx (float): Weather interval index (0-based).
+            weather_stream (WeatherStream): Weather data source.
+
+        Side Effects:
+            - Updates self.fmois array with current moisture fractions.
+            - May update dead herbaceous moisture for dynamic fuel models.
+        """
         # Make target time the midpoint of the weather interval
         target_time_s = (idx + 0.5) * self._parent().weather_t_step  # Convert index to seconds
 
@@ -318,6 +396,20 @@ class Cell:
             self.fmois[3] = self.fmois[0]
 
     def _catch_up_moisture_to_curr(self, target_time_s: float, weather_stream: WeatherStream):
+        """Advance moisture calculations from last update time to target time.
+
+        Steps through weather intervals between the last moisture update and
+        the target time, calling _step_moisture for each interval. Handles
+        partial intervals at the start and end.
+
+        Args:
+            target_time_s (float): Target simulation time in seconds.
+            weather_stream (WeatherStream): Weather data source.
+
+        Side Effects:
+            - Updates self.moist_update_time_s to target_time_s.
+            - Updates internal state of DeadFuelMoisture objects.
+        """
         if self.moist_update_time_s >= target_time_s:
             return
 
@@ -349,7 +441,18 @@ class Cell:
 
         self.moist_update_time_s = curr
 
-    def curr_wind(self):
+    def curr_wind(self) -> tuple:
+        """Get the current wind speed and direction at this cell.
+
+        Returns the wind conditions for the current weather interval from the
+        cell's local wind forecast. For prediction runs, may trigger forecast
+        updates if needed.
+
+        Returns:
+            tuple: (wind_speed, wind_direction) where speed is in m/s and
+                direction is in degrees using cartesian convention
+                (0° = blowing toward North/+y, 90° = blowing toward East/+x).
+        """
         w_idx = self._parent()._curr_weather_idx - self._parent().sim_start_w_idx
 
         if self._parent().is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
@@ -419,26 +522,42 @@ class Cell:
         self.canopy_height = canopy_height
 
     def _set_canopy_base_height(self, canopy_base_height: float):
+        """Set the canopy base height for the cell.
+
+        Args:
+            canopy_base_height (float): Height from ground to bottom of canopy
+                in meters.
+
+        Side Effects:
+            - Updates the canopy_base_height attribute.
+        """
         self.canopy_base_height = canopy_base_height
 
     
     def _set_canopy_bulk_density(self, canopy_bulk_density: float):
+        """Set the canopy bulk density for the cell.
+
+        Args:
+            canopy_bulk_density (float): Mass of canopy fuel per unit volume
+                in kg/m^3.
+
+        Side Effects:
+            - Updates the canopy_bulk_density attribute.
+        """
         self.canopy_bulk_density = canopy_bulk_density
 
     def _set_wind_adj_factor(self):
-        """Sets the wind adjustment factor (WAF) for the cell based on the fuel type and canopy characteristics.
-        The wind adjustment factor is calculated using equations adapted from Albini and Baughman (1979).
-        It adjusts the wind speed to account for the effects of vegetation and canopy cover on fire spread.
-        If the fuel type is not burnable, the wind adjustment factor is set to 1. Otherwise, the factor is 
-        calculated based on the canopy cover and height.
-        For canopy cover less than or equal to 5%, an unsheltered WAF equation is used:
-            WAF = 1.83 / log((20 + 0.36 * H) / (0.13 * H))
-        where H is the fuel depth in feet.
-        For canopy cover greater than 5%, a sheltered WAF equation is used:
-            WAF = 0.555 / (sqrt(f * 3.28 * H) * log((20 + 1.18 * H) / (0.43 * H)))
-        where H is the canopy height in feet and f is the crown fill portion.
-        Attributes:
-            wind_adj_factor (float): The calculated wind adjustment factor.
+        """Calculate and set the wind adjustment factor for this cell.
+
+        Computes the wind adjustment factor (WAF) based on fuel type and canopy
+        characteristics using equations from Albini and Baughman (1979).
+
+        For non-burnable fuels, WAF is set to 1. For burnable fuels:
+        - Unsheltered (canopy cover <= 5%): uses fuel depth
+        - Sheltered (canopy cover > 5%): uses canopy height and crown fill
+
+        Side Effects:
+            - Sets self.wind_adj_factor.
         """
         
         if not self.fuel.burnable:
@@ -504,6 +623,24 @@ class Cell:
             self.I_h_ss = 0
 
     def add_retardant(self, duration_hr: float, effectiveness: float):
+        """Apply long-term fire retardant to this cell.
+
+        Marks the cell as treated with retardant, which reduces the rate of
+        spread by the effectiveness factor until the retardant expires.
+
+        Args:
+            duration_hr (float): Duration of retardant effectiveness in hours.
+            effectiveness (float): Reduction factor for rate of spread (0.0-1.0).
+                A value of 0.5 reduces ROS by 50%.
+
+        Raises:
+            ValueError: If effectiveness is not in range [0, 1].
+
+        Side Effects:
+            - Sets self._retardant to True.
+            - Sets self._retardant_factor to (1 - effectiveness).
+            - Sets self.retardant_expiration_s to expiration time.
+        """
         if effectiveness < 0 or effectiveness > 1:
             raise ValueError(f"Retardant effectiveness must be between 0 and 1 ({effectiveness} passed in)")
 
@@ -513,6 +650,24 @@ class Cell:
         self.retardant_expiration_s = self._parent().curr_time_s + (duration_hr * 3600)
 
     def water_drop_as_rain(self, water_depth_cm: float, duration_s: float = 30):
+        """Apply a water drop modeled as equivalent rainfall.
+
+        Simulates water delivery by treating the water as cumulative
+        rainfall input to the fuel moisture model. Updates moisture state
+        immediately.
+
+        Args:
+            water_depth_cm (float): Equivalent water depth in centimeters.
+            duration_s (float): Duration of the water application in seconds.
+
+        Side Effects:
+            - Updates self.local_rain with accumulated water depth.
+            - Advances moisture model through the application period.
+            - Updates self.fmois with new moisture fractions.
+
+        Notes:
+            - No effect on non-burnable fuel types.
+        """
         if not self.fuel.burnable:
             return
 
@@ -541,6 +696,23 @@ class Cell:
             self.fmois[3] = self.fmois[0]
 
     def water_drop_as_moisture_bump(self, moisture_bump: float):
+        """Apply a water drop as a direct fuel moisture increase.
+
+        Simulates water delivery by directly increasing the outer node moisture
+        of each dead fuel class, then advances the moisture model briefly to
+        allow diffusion.
+
+        Args:
+            moisture_bump (float): Moisture fraction to add to fuel surface.
+
+        Side Effects:
+            - Increases outer node moisture on each DeadFuelMoisture object.
+            - Advances moisture model by 30 seconds.
+            - Updates self.fmois with new moisture fractions.
+
+        Notes:
+            - No effect on non-burnable fuel types.
+        """
         if not self.fuel.burnable:
             return
 
@@ -577,12 +749,21 @@ class Cell:
                 f"type: {self.fuel.name}, "
                 f"state: {self.state}")
     
-    def calc_hold_prob(self, flame_len_m):
-        """Calculate the probability that the fuel break in the cell will hold 
-        Returns 0 if there is no fire break present
+    def calc_hold_prob(self, flame_len_m: float) -> float:
+        """Calculate the probability that a fuel break will stop fire spread.
+
+        Uses the Mees et al. (1993) model to estimate the probability that a
+        fuel discontinuity (road, firebreak) will prevent fire from crossing.
 
         Args:
-            flame_len_m (_type_): _description_
+            flame_len_m (float): Flame length at the fire front in meters.
+
+        Returns:
+            float: Probability that the fuel break holds (0.0-1.0).
+                Returns 0 if no fuel break is present in this cell.
+
+        Notes:
+            - Based on Mees, et al. (1993).
         """
         # Mees et. al 1993
         if self._break_width == 0:
@@ -648,13 +829,16 @@ class Cell:
         return Polygon(hex_coords)
     
     def to_log_entry(self, time: float) -> CellLogEntry:
-        """_summary_
+        """Create a log entry capturing the cell's current state.
+
+        Generates a structured record of the cell's fire behavior, fuel moisture,
+        wind conditions, and other properties for logging and playback.
 
         Args:
-            time (float): _description_
+            time (float): Current simulation time in seconds.
 
         Returns:
-            CellLogEntry: _description_
+            CellLogEntry: Dataclass containing cell state for logging.
         """
 
         if self.fuel.burnable:
@@ -706,6 +890,17 @@ class Cell:
         return entry
 
     def iter_neighbor_cells(self):
+        """Iterate over neighboring Cell objects.
+
+        Yields each adjacent cell by looking up neighbor IDs in the parent
+        simulation's cell_dict.
+
+        Yields:
+            Cell: Each neighboring cell object.
+
+        Notes:
+            - Returns immediately if parent reference is None.
+        """
         parent = self._parent()
 
         if parent is None:
@@ -753,14 +948,12 @@ class Cell:
         return self.id > other.id
 
     def __getstate__(self):
-        """
-        Custom pickle to handle weak reference to parent.
+        """Prepare cell state for pickling.
 
-        The _parent weak reference cannot be pickled, so we exclude it.
-        It will be restored by FirePredictor.__setstate__ calling set_parent().
+        Excludes the weak reference to parent which cannot be pickled.
 
         Returns:
-            dict: Cell state dictionary with _parent excluded
+            dict: Cell state dictionary with _parent set to None.
         """
         state = self.__dict__.copy()
         # Remove weak reference - will be restored later
@@ -768,28 +961,22 @@ class Cell:
         return state
 
     def __setstate__(self, state):
-        """
-        Restore cell state after unpickling.
-
-        Parent reference is set to None and will be fixed by
-        FirePredictor.__setstate__().
+        """Restore cell state after unpickling.
 
         Args:
-            state (dict): Cell state dictionary from __getstate__
+            state (dict): Cell state dictionary from __getstate__.
         """
         self.__dict__.update(state)
         # Parent will be set later via cell.set_parent(predictor)
 
     @property
     def col(self) -> int:
-        """Column index of the cell within the :py:attr:`~fire_simulator.fire.FireSim.cell_grid`
-        """
+        """Column index of the cell in the simulation grid."""
         return self._col
 
     @property
     def row(self) -> int:
-        """Row index of the cell within the :py:attr:`~fire_simulator.fire.FireSim.cell_grid`
-        """
+        """Row index of the cell in the simulation grid."""
         return self._row
 
     @property
@@ -802,66 +989,56 @@ class Cell:
 
     @property
     def cell_area(self) -> float:
-        """Area of the cell, measured in meters squared.
-        """
+        """Area of the cell in square meters."""
         return self._cell_area
 
     @property
     def x_pos(self) -> float:
-        """x position of the cell within the sim, measured in meters.
-        
-        x values increase left to right in the sim visualization window
+        """X-coordinate of the cell center in meters.
+
+        Increases left to right in the visualization.
         """
         return self._x_pos
 
     @property
     def y_pos(self) -> float:
-        """y position of the cell within the sim, measured in meters.
-        
-        y values increase bottom to top in the sim visualization window
+        """Y-coordinate of the cell center in meters.
+
+        Increases bottom to top in the visualization.
         """
         return self._y_pos
 
     @property
     def elevation_m(self) -> float:
-        """Elevation of the cell measured in meters
-        """
+        """Elevation of the cell in meters."""
         return self._elevation_m
 
     @property
     def fuel(self) -> Fuel:
-        """Type of fuel present at the cell.
-        
-        Can be any of the 13 Anderson FBFMs
+        """Fuel model for this cell.
+
+        Can be any Anderson or Scott-Burgan fuel model.
         """
         return self._fuel
 
     @property
     def state(self) -> CellStates:
-        """Current state of the cell.
-        
-        Can be :py:attr:`CellStates.FUEL`, :py:attr:`CellStates.BURNT`, or :py:attr:`CellStates.FIRE`.
-        """
+        """Current fire state of the cell (FUEL, FIRE, or BURNT)."""
         return self._state
 
     @property
     def neighbors(self) -> dict:
-        """List of cells that are adjacent to the cell.
-        
-        Each list element is in the form (id, (dx, dy))
-        
-        - "id" is the id of the neighboring cell
-        - "(dx, dy)" is the difference between the column and row respectively of the cell and its neighbor
+        """Dictionary of adjacent cells.
+
+        Keys are neighbor cell IDs, values are (dx, dy) tuples indicating
+        the column and row offset from this cell to the neighbor.
         """
         return self._neighbors
 
     @property
     def burnable_neighbors(self) -> dict:
-        """Set of cells adjacent to the cell which are in a burnable state.
+        """Dictionary of adjacent cells that are in a burnable state.
 
-        Each element is in the form (id, (dx, dy))
-        
-        - "id" is the id of the neighboring cell
-        - "(dx, dy)" is the difference between the column and row respectively of the cell and its neighbor
+        Same format as neighbors: keys are cell IDs, values are (dx, dy) offsets.
         """
         return self._burnable_neighbors
