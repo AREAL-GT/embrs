@@ -299,7 +299,6 @@ class ScottBurgan40(Fuel):
 class FuelConstants:
     """_summary_
     """
-    burnout_thresh = 0.01
 
     # Dictionary of fuel number to name
     fuel_names = {1: "Short grass", 2: "Timber grass", 3: "Tall grass", 4: "Chaparral",

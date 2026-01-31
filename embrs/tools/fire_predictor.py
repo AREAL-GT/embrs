@@ -1343,7 +1343,6 @@ class FirePredictor(BaseFireSim):
         # From BaseFireSim.__init__ lines 45-88
         self.display_frequency = 300
         self._sim_params = sim_params
-        self.burnout_thresh = 0.01
         self.sim_start_w_idx = data['fire_state']['curr_weather_idx']
         self._curr_weather_idx = data['fire_state']['curr_weather_idx']
         self._last_weather_update = data['fire_state']['last_weather_update']

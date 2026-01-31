@@ -74,7 +74,6 @@ class BaseFireSim:
         # Constant parameters
         self.display_frequency = 300
         self._sim_params = sim_params
-        self.burnout_thresh = 0.01
 
         # Variables to keep track of current weather conditions
         self.sim_start_w_idx = 0
