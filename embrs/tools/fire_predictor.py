@@ -1,9 +1,14 @@
-"""
-Fire prediction module for EMBRS.
+"""Fire prediction module for EMBRS.
 
-Provides the FirePredictor class for running forward fire spread predictions
-with uncertainty modeling. Supports both single predictions and ensemble
-predictions with parallel execution.
+Provides forward fire spread prediction with uncertainty modeling. Supports
+single predictions, ensemble predictions with parallel execution, and
+pre-computed forecast pools for efficient rollout scenarios.
+
+Classes:
+    - FirePredictor: Ensemble fire prediction with wind uncertainty.
+
+.. autoclass:: FirePredictor
+    :members:
 """
 
 import copy
@@ -42,7 +47,20 @@ if TYPE_CHECKING:
 
 @dataclass
 class _ForecastGenerationTask:
-    """Internal task descriptor for parallel forecast generation."""
+    """Internal task descriptor for parallel forecast generation.
+
+    Encapsulates all data needed by a worker process to generate a single
+    perturbed wind forecast via WindNinja.
+
+    Attributes:
+        forecast_id (int): Unique identifier for this forecast within the pool.
+        perturbed_stream (WeatherStream): Weather stream with AR(1) perturbations applied.
+        map_params (MapParams): Map parameters for WindNinja terrain processing.
+        wind_speed_bias (float): Constant bias added to wind speed in m/s.
+        wind_dir_bias (float): Constant bias added to wind direction in degrees.
+        speed_seed (int): Random seed used for speed perturbation reproducibility.
+        dir_seed (int): Random seed used for direction perturbation reproducibility.
+    """
     forecast_id: int
     perturbed_stream: 'WeatherStream'
     map_params: MapParams
@@ -53,16 +71,19 @@ class _ForecastGenerationTask:
 
 
 def _generate_single_forecast(task: _ForecastGenerationTask) -> ForecastData:
-    """
-    Worker function to generate a single forecast via WindNinja.
+    """Generate a single wind forecast via WindNinja.
 
-    This runs in a separate process via ProcessPoolExecutor.
+    Worker function executed in a separate process via ProcessPoolExecutor.
+    Creates a unique temporary directory to avoid file conflicts when multiple
+    forecasts are generated in parallel.
 
     Args:
-        task: Task descriptor containing all necessary parameters.
+        task (_ForecastGenerationTask): Task descriptor with weather stream,
+            map parameters, bias values, and random seeds.
 
     Returns:
-        ForecastData containing the generated wind forecast.
+        ForecastData: Generated wind forecast with metadata including the
+            perturbed weather stream, bias values, and generation timestamp.
     """
     # Create unique temp directory for this forecast to avoid conflicts
     worker_id = f"pool_{task.forecast_id}_{uuid.uuid4().hex[:6]}"
@@ -94,18 +115,42 @@ def _generate_single_forecast(task: _ForecastGenerationTask) -> ForecastData:
 
 
 class FirePredictor(BaseFireSim):
-    """
-    Fire spread predictor with uncertainty modeling.
+    """Fire spread predictor with uncertainty modeling.
 
     Extends BaseFireSim to run forward predictions from the current fire state.
-    Supports wind uncertainty, rate of spread bias, and ensemble predictions.
+    Supports wind uncertainty via AR(1) perturbations, rate of spread bias,
+    and ensemble predictions with parallel execution.
+
+    The predictor maintains a reference to the parent FireSim and synchronizes
+    its state before each prediction. For ensemble predictions, the predictor
+    is serialized and reconstructed in worker processes without the parent
+    reference.
+
+    Attributes:
+        fire (FireSim): Reference to the parent fire simulation. None in workers.
+        time_horizon_hr (float): Prediction duration in hours.
+        wind_uncertainty_factor (float): Scaling factor for wind perturbation (0-1).
+        wind_speed_bias (float): Constant wind speed bias in m/s.
+        wind_dir_bias (float): Constant wind direction bias in degrees.
+        ros_bias_factor (float): Multiplicative factor for rate of spread (0.5-1.5).
+        dead_mf (float): Dead fuel moisture fraction for prediction.
+        live_mf (float): Live fuel moisture fraction for prediction.
+        model_spotting (bool): Whether to model ember spotting.
     """
 
     # =========================================================================
     # Initialization & Configuration
     # =========================================================================
 
-    def __init__(self, params: PredictorParams, fire: FireSim):
+    def __init__(self, params: PredictorParams, fire: FireSim) -> None:
+        """Initialize fire predictor with parameters and parent simulation.
+
+        Args:
+            params (PredictorParams): Configuration for prediction behavior
+                including time horizon, uncertainty factors, and fuel moisture.
+            fire (FireSim): Parent fire simulation to predict from. The predictor
+                synchronizes with this simulation before each prediction run.
+        """
         # Live reference to the fire sim
         self.fire = fire
         self.c_size = -1
@@ -117,8 +162,22 @@ class FirePredictor(BaseFireSim):
 
         self.set_params(params)
 
-    def set_params(self, params: PredictorParams):
-        """Configure predictor parameters and optionally regenerate cell grid."""
+    def set_params(self, params: PredictorParams) -> None:
+        """Configure predictor parameters and optionally regenerate cell grid.
+
+        Updates all prediction parameters from the provided PredictorParams.
+        If cell_size_m has changed since the last call, regenerates the
+        entire cell grid (expensive operation).
+
+        Args:
+            params (PredictorParams): New parameter values. All fields are used
+                to update internal state.
+
+        Side Effects:
+            - Updates all uncertainty and bias parameters
+            - May regenerate cell grid if cell_size_m changed
+            - Computes nominal ignition probability for spotting
+        """
         generate_cell_grid = False
 
         # How long the prediction will run for
@@ -173,19 +232,24 @@ class FirePredictor(BaseFireSim):
             # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
             self.orig_grid, self.orig_dict = copy.deepcopy((self._cell_grid, self._cell_dict))
 
-    def _apply_member_params(self, params: PredictorParams):
-        """
-        Apply member-specific parameters without regenerating cell grid.
+    def _apply_member_params(self, params: PredictorParams) -> None:
+        """Apply member-specific parameters without regenerating cell grid.
 
-        This is a lightweight version of set_params() that only updates
-        uncertainty/bias parameters, not grid structure. Used for per-member
-        parameter customization in ensemble predictions.
-
-        Note: cell_size_m is ignored - all members use the predictor's
-        original cell size to avoid expensive grid regeneration.
+        Lightweight version of set_params() that only updates uncertainty and
+        bias parameters, not grid structure. Used for per-member parameter
+        customization in ensemble predictions.
 
         Args:
-            params: PredictorParams with member-specific values.
+            params (PredictorParams): Member-specific parameter values.
+
+        Notes:
+            cell_size_m is ignored - all members use the predictor's original
+            cell size to avoid expensive grid regeneration. A warning is issued
+            if cell_size_m differs from the predictor's cell size.
+
+        Side Effects:
+            Updates time_horizon_hr, bias factors, AR parameters, fuel moisture,
+            and spotting parameters.
         """
         import warnings
 
@@ -230,26 +294,30 @@ class FirePredictor(BaseFireSim):
         speed_seed: int = None,
         dir_seed: int = None
     ) -> Tuple['WeatherStream', int, int]:
-        """
-        Apply AR(1) perturbation to a weather stream.
+        """Apply AR(1) perturbation to a weather stream.
 
         Creates a copy of the weather stream with biases and autoregressive
-        noise applied to wind speed and direction. This method is used for
-        generating perturbed forecasts for ensemble predictions.
+        noise applied to wind speed and direction. Used for generating
+        perturbed forecasts for ensemble predictions.
 
         Args:
-            weather_stream: Original weather stream to perturb.
-            start_idx: Starting index in the stream.
-            num_indices: Number of entries to include. If None, uses
-                enough entries to cover self.time_horizon_hr.
-            speed_seed: Random seed for speed perturbation. If None, generates one.
-            dir_seed: Random seed for direction perturbation. If None, generates one.
+            weather_stream (WeatherStream): Original weather stream to perturb.
+            start_idx (int): Starting index in the stream. Defaults to 0.
+            num_indices (int): Number of entries to include. If None, uses
+                enough entries to cover time_horizon_hr.
+            speed_seed (int): Random seed for speed perturbation. If None,
+                generates a random seed.
+            dir_seed (int): Random seed for direction perturbation. If None,
+                generates a random seed.
 
         Returns:
-            Tuple of (perturbed_stream, speed_seed_used, dir_seed_used).
-            Seeds are returned for reproducibility tracking.
+            tuple: (perturbed_stream, speed_seed_used, dir_seed_used) where
+                perturbed_stream is the modified WeatherStream and seeds are
+                returned for reproducibility tracking.
 
-        # TODO: Perturb the temperature and relative humidity as well using AR(1) error
+        Notes:
+            TODO:verify Consider extending to perturb temperature and relative
+            humidity using AR(1) error model as well.
         """
         from embrs.models.weather import WeatherStream
 
@@ -297,23 +365,33 @@ class FirePredictor(BaseFireSim):
     # Main Public Interface
     # =========================================================================
 
-    def run(self, fire_estimate: StateEstimate = None, visualize=False) -> PredictionOutput:
-        """
-        Run a single fire spread prediction.
+    def run(
+        self,
+        fire_estimate: StateEstimate = None,
+        visualize: bool = False
+    ) -> PredictionOutput:
+        """Run a single fire spread prediction.
+
+        Executes forward prediction from either the current fire simulation
+        state or a provided state estimate. Synchronizes with the parent
+        fire simulation, generates perturbed wind forecasts, and iterates
+        the fire spread model.
 
         Args:
-            fire_estimate: Optional state estimate to initialize from.
-                          If None, uses current fire simulation state.
-                          If provided with start_time_s, prediction starts from
-                          that future time instead of current fire time.
-            visualize: If True, display prediction on fire visualizer.
+            fire_estimate (StateEstimate): Optional state estimate to initialize
+                from. If None, uses current fire simulation state. If provided
+                with start_time_s, prediction starts from that future time.
+            visualize (bool): If True, display prediction on fire visualizer.
+                Defaults to False.
 
         Returns:
-            PredictionOutput containing spread timeline and fire behavior data.
+            PredictionOutput: Contains spread timeline (cell positions by time),
+                flame length, fireline intensity, rate of spread, spread direction,
+                crown fire status, hold probabilities, and breach status.
 
         Raises:
-            ValueError: If fire_estimate.start_time_s is invalid (in the past
-                       or beyond weather forecast coverage).
+            ValueError: If fire_estimate.start_time_s is in the past or beyond
+                weather forecast coverage.
         """
         # Extract custom start time if provided
         custom_start_time_s = None
@@ -368,48 +446,48 @@ class FirePredictor(BaseFireSim):
         forecast_pool: Optional[ForecastPool] = None,
         forecast_indices: Optional[List[int]] = None
     ) -> EnsemblePredictionOutput:
-        """
-        Run ensemble predictions using multiple initial state estimates.
+        """Run ensemble predictions using multiple initial state estimates.
 
-        Executes predictions in parallel, each starting from a different
-        StateEstimate. Results are aggregated into probabilistic predictions.
+        Execute predictions in parallel, each starting from a different
+        StateEstimate. Results are aggregated into probabilistic burn maps
+        and fire behavior statistics.
 
-        This method uses custom serialization to avoid reconstructing FireSim
-        for each ensemble member.
+        Uses custom serialization to efficiently transfer predictor state to
+        worker processes without reconstructing the full FireSim.
 
         Args:
-            state_estimates: List of StateEstimate objects representing
-                            different possible initial fire states.
-            visualize: If True, visualize aggregated burn probability.
-            num_workers: Number of parallel workers (default: cpu_count).
-            random_seeds: Optional list of random seeds for reproducibility.
-            return_individual: If True, include individual predictions in output.
-            predictor_params_list: Optional list of PredictorParams, one per
-                            state estimate. If provided, each ensemble member
-                            uses its own params. If None, all members use the
-                            predictor's current params. Note: providing this
-                            automatically enables vary_wind_per_member (unless
-                            using forecast_pool).
-            vary_wind_per_member: If True, each worker runs _predict_wind()
-                            independently (generating unique perturbed forecasts).
-                            If False, all members share the same wind forecast
-                            computed in the main process. Ignored when forecast_pool
-                            is provided.
-            forecast_pool: Optional pre-computed forecast pool. If provided,
-                            workers use forecasts from pool instead of generating
-                            new ones via WindNinja.
-            forecast_indices: Optional list of indices into forecast_pool,
-                            one per state_estimate. If None and forecast_pool is
-                            provided, indices are sampled randomly with replacement.
+            state_estimates (list[StateEstimate]): Initial fire states for
+                each ensemble member. Each may include burning_polys,
+                burnt_polys, and optional start_time_s.
+            visualize (bool): If True, visualize aggregated burn probability
+                on the fire visualizer. Defaults to False.
+            num_workers (int): Number of parallel workers. Defaults to cpu_count.
+            random_seeds (list[int]): Optional seeds for reproducibility,
+                one per state estimate.
+            return_individual (bool): If True, include individual PredictionOutput
+                objects in the returned EnsemblePredictionOutput. Defaults to False.
+            predictor_params_list (list[PredictorParams]): Optional per-member
+                parameters. If provided, each member uses its own params.
+                Automatically enables vary_wind_per_member unless using
+                forecast_pool.
+            vary_wind_per_member (bool): If True, each worker generates its own
+                perturbed wind forecast. If False, all members share the same
+                wind forecast. Ignored when forecast_pool is provided.
+            forecast_pool (ForecastPool): Optional pre-computed forecasts.
+                Workers use forecasts from pool instead of running WindNinja.
+            forecast_indices (list[int]): Optional indices into forecast_pool,
+                one per state_estimate. If None, indices are sampled randomly
+                with replacement.
 
         Returns:
-            EnsemblePredictionOutput with aggregated predictions.
+            EnsemblePredictionOutput: Aggregated ensemble results including
+                burn probability maps, fire behavior statistics, and optional
+                individual predictions.
 
         Raises:
-            ValueError: If state_estimates is empty, seeds length mismatch,
-                       predictor_params_list length mismatch,
-                       or any start_time_s is invalid.
-            RuntimeError: If more than 50% of members fail.
+            ValueError: If state_estimates is empty, length mismatches occur,
+                or any start_time_s is invalid.
+            RuntimeError: If more than 50% of ensemble members fail.
         """
         import multiprocessing as mp
         import warnings
@@ -586,29 +664,30 @@ class FirePredictor(BaseFireSim):
         num_workers: int = None,
         random_seed: int = None
     ) -> ForecastPool:
-        """
-        Generate a pool of perturbed wind forecasts in parallel.
+        """Generate a pool of perturbed wind forecasts in parallel.
 
-        Creates n_forecasts independent wind forecasts, each with different
+        Create n_forecasts independent wind forecasts, each with different
         AR(1) perturbations applied to the base weather stream. WindNinja
         is called in parallel for efficiency.
 
-        The resulting pool can be reused across:
-        - Global predictions (1:1 mapping of members to forecasts)
-        - Task rollouts (sampling with replacement from the pool)
+        The resulting pool can be reused across multiple ensemble runs. When
+        passed to run_ensemble with explicit forecast_indices, each member uses
+        the specified forecast. When forecast_indices is omitted, run_ensemble
+        samples from the pool with replacement.
 
         Args:
-            n_forecasts: Number of forecasts to generate.
-            num_workers: Number of parallel workers. Defaults to
+            n_forecasts (int): Number of forecasts to generate.
+            num_workers (int): Number of parallel workers. Defaults to
                 min(cpu_count, n_forecasts).
-            random_seed: Base seed for reproducibility. If None, uses
+            random_seed (int): Base seed for reproducibility. If None, uses
                 random seeds for each forecast.
 
         Returns:
-            ForecastPool containing all generated forecasts.
+            ForecastPool: Container with all generated forecasts, base weather
+                stream, map parameters, and creation metadata.
 
         Raises:
-            RuntimeError: If called without a fire reference.
+            RuntimeError: If called without a fire reference (fire is None).
         """
         if self.fire is None:
             raise RuntimeError("Cannot generate forecast pool without fire reference")
@@ -691,8 +770,20 @@ class FirePredictor(BaseFireSim):
     # Core Prediction Logic
     # =========================================================================
 
-    def _prediction_loop(self):
-        """Main prediction iteration loop."""
+    def _prediction_loop(self) -> None:
+        """Execute main prediction iteration loop.
+
+        Iterates the fire spread model until end time is reached. For each
+        iteration: updates weather, computes steady-state spread rates for
+        burning cells, propagates fire to neighbors, handles spotting, and
+        records fire behavior metrics.
+
+        Side Effects:
+            - Populates spread, flame_len_m, fli_kw_m, ros_ms, spread_dir,
+              crown_fire, hold_probs, and breaches dictionaries
+            - Updates cell states (FIRE -> BURNT)
+            - Sets _finished to True when complete
+        """
         self._iters = 0
 
         while self._init_iteration():
@@ -727,12 +818,21 @@ class FirePredictor(BaseFireSim):
 
         self._finished = True
 
-    def _init_iteration(self):
-        """
-        Initialize each prediction iteration.
+    def _init_iteration(self) -> bool:
+        """Initialize each prediction iteration.
 
-        Handles first iteration setup and subsequent iterations differently.
-        Returns False when prediction should end.
+        Handle first iteration setup (cell ignition) and subsequent iterations
+        (fire behavior computation). Updates current time, checks weather,
+        and manages ignition queues.
+
+        Returns:
+            bool: True if prediction should continue, False if end time reached.
+
+        Behavior:
+            - First iteration (iters=0): Sets cell states to FIRE, initializes
+              steady-state rates with ros_bias_factor applied.
+            - Subsequent iterations: Computes flame length, fireline intensity,
+              determines fireline breach, and handles ember lofting.
         """
         self._curr_time_s = (self._iters * self._time_step) + self.start_time_s
 
@@ -820,13 +920,24 @@ class FirePredictor(BaseFireSim):
 
         return True
 
-    def _set_states(self, state_estimate: StateEstimate = None):
-        """
-        Initialize prediction state from fire simulation or state estimate.
+    def _set_states(self, state_estimate: StateEstimate = None) -> None:
+        """Initialize prediction state from fire simulation or state estimate.
+
+        Reset the cell grid to original state and configure initial burning
+        and burnt regions based on either the parent fire simulation state
+        or a provided StateEstimate.
 
         Args:
-            state_estimate: Optional state estimate. If None, uses current
-                           fire simulation state (or serialized state in workers).
+            state_estimate (StateEstimate): Optional state estimate. If None,
+                uses current fire simulation state (or serialized state in
+                worker processes where fire is None).
+
+        Side Effects:
+            - Deep copies orig_grid and orig_dict to _cell_grid and _cell_dict
+            - Resets _burnt_cells, _burning_cells, _updated_cells, and
+              _scheduled_spot_fires
+            - Fixes weak references in copied cells to point to self
+            - Sets starting_ignitions based on burning regions
         """
         # Reset all data structures to the original
         # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
@@ -879,16 +990,21 @@ class FirePredictor(BaseFireSim):
     # Weather & Wind
     # =========================================================================
 
-    def _catch_up_with_fire(self, custom_start_time_s: Optional[float] = None):
-        """
-        Synchronize predictor time state with parent fire simulation.
+    def _catch_up_with_fire(self, custom_start_time_s: Optional[float] = None) -> None:
+        """Synchronize predictor time state with parent fire simulation.
 
-        In worker processes (self.fire is None), uses serialized state instead.
+        Set prediction start time, end time, and generate wind forecast.
+        In worker processes (fire is None), uses serialized state instead.
 
         Args:
-            custom_start_time_s: Optional start time in seconds from simulation start.
-                If provided, validates and uses this as the prediction start time.
-                If None, uses current fire simulation time (default behavior).
+            custom_start_time_s (float): Optional start time in seconds from
+                simulation start. If provided, validates and uses this as the
+                prediction start time. If None, uses current fire simulation time.
+
+        Side Effects:
+            - Sets _curr_time_s, start_time_s, _end_time
+            - Sets _start_weather_idx for custom start times
+            - Calls _predict_wind() unless forecast was pre-assigned from pool
         """
         # Store the start weather index for any-time predictions
         self._start_weather_idx = None
@@ -931,15 +1047,22 @@ class FirePredictor(BaseFireSim):
             if getattr(self, '_vary_wind_per_member', False) or self.wind_forecast is None:
                 self._predict_wind()
 
-    def _predict_wind(self):
-        """
-        Generate perturbed wind forecast for prediction.
+    def _predict_wind(self) -> None:
+        """Generate perturbed wind forecast for prediction.
 
-        Applies bias and autoregressive noise to create uncertain wind forecasts.
-        In worker processes (self.fire is None), uses serialized weather stream.
+        Apply bias and AR(1) autoregressive noise to create uncertain wind
+        forecasts. Runs WindNinja to compute terrain-adjusted wind fields.
 
+        In worker processes (fire is None), uses serialized weather stream.
         Uses _start_weather_idx if set (any-time mode), otherwise uses fire's
         current weather index.
+
+        Side Effects:
+            - Sets wind_forecast array with shape (n_times, rows, cols, 2)
+              where last dimension is [speed_ms, direction_deg]
+            - Sets wind_xpad, wind_ypad for coordinate alignment
+            - Updates _weather_stream with perturbed values
+            - Creates temporary directory for WindNinja output
         """
         if self.fire is not None:
             new_weather_stream = copy.deepcopy(self.fire._weather_stream)
@@ -1007,8 +1130,18 @@ class FirePredictor(BaseFireSim):
 
         self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
 
-    def _set_prediction_forecast(self, cell: Cell):
-        """Set wind forecast for a specific cell based on its position."""
+    def _set_prediction_forecast(self, cell) -> None:
+        """Set wind forecast for a specific cell based on its position.
+
+        Look up wind speed and direction from the forecast grid at the cell's
+        spatial position, accounting for grid resolution and padding offsets.
+
+        Args:
+            cell (Cell): Cell to update with wind forecast data.
+
+        Side Effects:
+            Calls cell._set_wind_forecast() with interpolated wind values.
+        """
         x_wind = max(cell.x_pos - self.wind_xpad, 0)
         y_wind = max(cell.y_pos - self.wind_ypad, 0)
 
@@ -1029,8 +1162,20 @@ class FirePredictor(BaseFireSim):
     # Spotting Model
     # =========================================================================
 
-    def _ignite_spots(self):
-        """Process ember landings and schedule/ignite spot fires."""
+    def _ignite_spots(self) -> None:
+        """Process ember landings and schedule or ignite spot fires.
+
+        Compute ignition probability for each ember landing based on travel
+        distance and nominal ignition probability. Schedule successful ignitions
+        for future time steps and ignite any previously scheduled spot fires
+        that are due.
+
+        Side Effects:
+            - Clears embers from the Perryman spotting model
+            - Adds entries to _scheduled_spot_fires
+            - Appends ignited cells to _new_ignitions
+            - Updates cell states to FIRE for ignited spots
+        """
         # Decay constant for ignition probability
         lambda_s = 0.005
 
@@ -1094,12 +1239,15 @@ class FirePredictor(BaseFireSim):
                 if time > self.curr_time_s:
                     break
 
-    def _calc_nominal_prob(self):
-        """
-        Calculate nominal ignition probability for spotting.
+    def _calc_nominal_prob(self) -> float:
+        """Calculate nominal ignition probability for spotting.
 
-        Uses method from "Ignition Probability" (Schroeder 1969) as
-        described in the Perryman paper.
+        Compute base ignition probability using the method from "Ignition
+        Probability" (Schroeder 1969) as described in the Perryman spotting
+        model paper. Probability depends on dead fuel moisture content.
+
+        Returns:
+            float: Nominal ignition probability (0.0-1.0).
         """
         Q_ig = 250 + 1116 * self.dead_mf
         Q_ig_cal = BTU_lb_to_cal_g(Q_ig)
@@ -1114,20 +1262,26 @@ class FirePredictor(BaseFireSim):
         start_time_s: float,
         time_horizon_hr: Optional[float] = None
     ) -> Tuple[int, float]:
-        """
-        Validate start time and compute corresponding weather index.
+        """Validate start time and compute corresponding weather index.
+
+        Check that the requested start time is not in the past and that the
+        weather forecast covers the full prediction horizon from that time.
 
         Args:
-            start_time_s: Desired start time in seconds from simulation start.
-            time_horizon_hr: Optional time horizon to use for validation.
+            start_time_s (float): Desired start time in seconds from simulation
+                start.
+            time_horizon_hr (float): Optional time horizon in hours for validation.
                 If None, uses self.time_horizon_hr.
 
         Returns:
-            Tuple of (weather_index, validated_start_time).
+            tuple: (weather_index, validated_start_time) where weather_index is
+                the index into the weather stream and validated_start_time is
+                the confirmed start time in seconds.
 
         Raises:
-            ValueError: If start_time_s is in the past relative to current fire time,
-                       or if weather forecast doesn't cover the full prediction horizon.
+            ValueError: If start_time_s is in the past relative to current fire
+                time, or if weather forecast doesn't cover the full prediction
+                horizon.
         """
         # Use provided time horizon or fall back to instance attribute
         horizon_hr = time_horizon_hr if time_horizon_hr is not None else self.time_horizon_hr
@@ -1186,23 +1340,26 @@ class FirePredictor(BaseFireSim):
         vary_wind: bool = False,
         forecast_pool: Optional[ForecastPool] = None,
         forecast_indices: Optional[List[int]] = None
-    ):
-        """
-        Prepare predictor for parallel execution by extracting serializable data.
+    ) -> None:
+        """Prepare predictor for parallel execution by extracting serializable data.
 
-        Must be called once before pickling the predictor. Captures the current
-        state of the parent FireSim and stores it in a serializable format.
-
-        This method should be called in the main process before spawning workers.
+        Must be called once before pickling the predictor. Capture the current
+        state of the parent FireSim and store it in a serializable format.
+        Call this in the main process before spawning workers.
 
         Args:
-            vary_wind: If True, workers will generate their own wind forecasts.
-                       If False, use pre-computed shared wind forecast.
-            forecast_pool: Optional pre-computed forecast pool.
-            forecast_indices: Indices mapping each member to a pool forecast.
+            vary_wind (bool): If True, workers generate their own wind forecasts.
+                If False, use pre-computed shared wind forecast. Defaults to False.
+            forecast_pool (ForecastPool): Optional pre-computed forecast pool.
+            forecast_indices (list[int]): Indices mapping each ensemble member
+                to a forecast in the pool.
 
         Raises:
-            RuntimeError: If called without a fire reference.
+            RuntimeError: If called without a fire reference (fire is None).
+
+        Side Effects:
+            Populates _serialization_data dict with fire state, parameters,
+            weather stream, and optionally pre-computed wind forecast.
         """
         if self.fire is None:
             raise RuntimeError("Cannot prepare predictor without fire reference")
@@ -1264,16 +1421,16 @@ class FirePredictor(BaseFireSim):
             self._serialization_data['wind_xpad'] = self.wind_xpad
             self._serialization_data['wind_ypad'] = self.wind_ypad
 
-    def __getstate__(self):
-        """
-        Serialize predictor for parallel execution.
+    def __getstate__(self) -> dict:
+        """Serialize predictor for parallel execution.
 
-        Returns only the essential data needed to reconstruct the predictor
-        in a worker process. Excludes non-serializable components like the
+        Return only the essential data needed to reconstruct the predictor
+        in a worker process. Exclude non-serializable components like the
         parent FireSim reference, visualizer, and logger.
 
         Returns:
-            dict: Minimal state dictionary for serialization.
+            dict: Minimal state dictionary containing serialization_data,
+                orig_grid, orig_dict, and c_size.
 
         Raises:
             RuntimeError: If prepare_for_serialization() was not called first.
@@ -1294,18 +1451,22 @@ class FirePredictor(BaseFireSim):
 
         return state
 
-    def __setstate__(self, state):
-        """
-        Reconstruct predictor in worker process WITHOUT calling BaseFireSim.__init__.
+    def __setstate__(self, state: dict) -> None:
+        """Reconstruct predictor in worker process without full initialization.
 
-        This method manually restores all attributes that BaseFireSim.__init__()
-        would have set, but WITHOUT the expensive cell creation loop.
-
-        The key optimization: use pre-built cell templates (orig_grid, orig_dict)
-        instead of reconstructing cells from map data.
+        Manually restore all attributes that BaseFireSim.__init__() would set,
+        but without the expensive cell creation loop. Use pre-built cell
+        templates (orig_grid, orig_dict) instead of reconstructing cells from
+        map data.
 
         Args:
-            state (dict): State dictionary from __getstate__.
+            state (dict): State dictionary from __getstate__ containing
+                serialization_data, orig_grid, orig_dict, and c_size.
+
+        Side Effects:
+            Restores all instance attributes needed for prediction, including
+            maps, fuel models, weather stream, and optionally wind forecast.
+            Sets fire to None (no parent reference in workers).
         """
         
         from embrs.models.perryman_spot import PerrymanSpotting
@@ -1511,8 +1672,17 @@ class FirePredictor(BaseFireSim):
     # Visualization
     # =========================================================================
 
-    def _visualize_ensemble(self, ensemble_output: EnsemblePredictionOutput):
-        """Visualize ensemble prediction results on the fire visualizer."""
+    def _visualize_ensemble(self, ensemble_output: EnsemblePredictionOutput) -> None:
+        """Visualize ensemble prediction results on the fire visualizer.
+
+        Args:
+            ensemble_output (EnsemblePredictionOutput): Aggregated ensemble
+                results containing burn probability maps.
+
+        Side Effects:
+            Calls fire.visualize_ensemble_prediction() to render burn
+            probability overlay on the simulation display.
+        """
         self.fire.visualize_ensemble_prediction(ensemble_output.burn_probability)
 
 
@@ -1526,32 +1696,33 @@ def _run_ensemble_member_worker(
     seed: Optional[int] = None,
     member_params: Optional[PredictorParams] = None
 ) -> PredictionOutput:
-    """
-    Worker function for parallel ensemble prediction.
+    """Execute a single ensemble member prediction in a worker process.
 
-    Receives a deserialized FirePredictor (via __setstate__) and runs
-    a single prediction. The predictor has been reconstructed in this
-    worker process without the original FireSim reference.
+    Receive a deserialized FirePredictor (via __setstate__) and run a single
+    prediction. The predictor has been reconstructed without the original
+    FireSim reference.
 
     Supports any-time predictions: if state_estimate.start_time_s is set,
     the prediction starts from that future time instead of the fire's
-    current time at serialization. The worker computes the appropriate
-    weather index offset from the serialized base state.
+    current time at serialization.
 
     Args:
-        predictor: Deserialized FirePredictor instance.
-        state_estimate: Initial fire state for this ensemble member.
-            May include start_time_s for any-time predictions.
-        seed: Random seed for reproducibility.
-        member_params: Optional per-member parameters. If provided,
-            applies these params before running prediction.
+        predictor (FirePredictor): Deserialized predictor instance.
+        state_estimate (StateEstimate): Initial fire state for this member.
+            May include start_time_s for future-time predictions.
+        seed (int): Random seed for reproducibility. If None, uses default
+            random state.
+        member_params (PredictorParams): Optional per-member parameters.
+            If provided, applies these params before running prediction.
 
     Returns:
-        PredictionOutput for this ensemble member. Output timestamps are
-        global (from simulation start), not relative to start_time_s.
+        PredictionOutput: Prediction results for this ensemble member.
+            Timestamps are global (from simulation start), not relative
+            to start_time_s.
 
     Raises:
-        Exception: Any errors during prediction (will be caught by executor).
+        Exception: Any errors during prediction are logged and re-raised
+            for the executor to handle.
     """
     # Set random seed if provided
     if seed is not None:
@@ -1579,14 +1750,26 @@ def _run_ensemble_member_worker(
 def _aggregate_ensemble_predictions(
     predictions: List[PredictionOutput]
 ) -> EnsemblePredictionOutput:
-    """
-    Aggregate multiple prediction outputs into ensemble statistics.
+    """Aggregate multiple prediction outputs into ensemble statistics.
+
+    Compute probabilistic burn maps, fire behavior statistics (mean, std, min,
+    max), crown fire frequency, spread direction statistics using circular
+    mean, and fireline breach statistics.
 
     Args:
-        predictions: List of PredictionOutput from ensemble members.
+        predictions (list[PredictionOutput]): Individual prediction outputs
+            from ensemble members.
 
     Returns:
-        EnsemblePredictionOutput with probabilistic predictions.
+        EnsemblePredictionOutput: Aggregated ensemble results including:
+            - burn_probability: Cumulative burn probability by time and location
+            - flame_len_m_stats: Flame length statistics per cell
+            - fli_kw_m_stats: Fireline intensity statistics per cell
+            - ros_ms_stats: Rate of spread statistics per cell
+            - spread_dir_stats: Circular mean direction and dispersion per cell
+            - crown_fire_frequency: Fraction of members with crown fire per cell
+            - hold_prob_stats: Fireline hold probability statistics
+            - breach_frequency: Fraction of members breaching each fireline cell
     """
     n_ensemble = len(predictions)
 

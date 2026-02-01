@@ -495,7 +495,7 @@ class CellData:
         elevation (float): Elevation in meters.
         aspect (float): Aspect in degrees (0=N, 90=E).
         slope_deg (float): Slope in degrees.
-        canopy_cover (float): Canopy cover as fraction.
+        canopy_cover (float): Canopy cover as a percentage.
         canopy_height (float): Canopy height in meters.
         canopy_base_height (float): Canopy base height in meters.
         canopy_bulk_density (float): Canopy bulk density in kg/m^3.
