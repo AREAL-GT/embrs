@@ -340,7 +340,8 @@ def calc_moisture_damping(m_f: float, m_x: float) -> float:
 
     r_m = m_f / m_x
 
-    moist_damping = 1 - 2.59 * r_m + 5.11 * (r_m)**2 - 3.52 * (r_m)**3
+    # Horner's form: fewer multiplications than expanded polynomial
+    moist_damping = 1 + r_m * (-2.59 + r_m * (5.11 - 3.52 * r_m))
 
     return max(0, moist_damping)
 

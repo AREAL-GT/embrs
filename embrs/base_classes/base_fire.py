@@ -480,7 +480,7 @@ class BaseFireSim:
         # Compute intersections between fire spread and distances to neighbors
         intersections = np.where(cell.fire_spread > cell.distances)[0]
 
-        for idx in sorted(intersections, reverse=True):
+        for idx in intersections:
             if idx not in cell.intersections:
                 # Check if ignition signal should be sent to each intersecting neighbor
                 if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
@@ -839,20 +839,23 @@ class BaseFireSim:
             cell._set_state(CellStates.BURNT)
 
 
-    @property
-    def frontier(self) -> set:
-        """Set of cell IDs at the fire frontier.
+    def get_frontier(self) -> set:
+        """Get set of cell IDs at the fire frontier.
 
         The frontier consists of FUEL cells adjacent to burning cells
         that could potentially ignite. Cells completely surrounded by
         fire are removed from the frontier.
+
+        Note:
+            This method has the side effect of pruning cells that are
+            completely surrounded by fire from the internal frontier set.
 
         Returns:
             set: Cell IDs of cells at the fire frontier.
         """
         frontier_copy = set(self._frontier)
 
-        # Loop over frontier to remove any cells completely surround by fire
+        # Loop over frontier to remove any cells completely surrounded by fire
         for c in frontier_copy:
             remove = True
             for neighbor_id in self.cell_dict[c].burnable_neighbors:
@@ -865,6 +868,26 @@ class BaseFireSim:
                 self._frontier.remove(c)
 
         return self._frontier
+
+    @property
+    def frontier(self) -> set:
+        """Set of cell IDs at the fire frontier.
+
+        .. deprecated::
+            Use :meth:`get_frontier` instead. This property has side effects
+            (modifies internal state) which is unexpected for a property.
+            It will be removed in a future version.
+
+        Returns:
+            set: Cell IDs of cells at the fire frontier.
+        """
+        import warnings
+        warnings.warn(
+            "The 'frontier' property is deprecated. Use 'get_frontier()' method instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.get_frontier()
 
     def get_avg_fire_coord(self) -> Tuple[float, float]:
         """Get the average position of all burning cells.

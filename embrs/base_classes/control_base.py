@@ -30,5 +30,5 @@ class ControlClass(ABC):
 
         Args:
             fire (FireSim): The current FireSim instance. Access fire state
-                via fire.burning_cells, fire.frontier, fire.curr_time_s, etc.
+                via fire.burning_cells, fire.get_frontier(), fire.curr_time_s, etc.
         """

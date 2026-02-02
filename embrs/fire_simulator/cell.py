@@ -453,10 +453,11 @@ class Cell:
                 direction is in degrees using cartesian convention
                 (0° = blowing toward North/+y, 90° = blowing toward East/+x).
         """
-        w_idx = self._parent()._curr_weather_idx - self._parent().sim_start_w_idx
+        parent = self._parent()
+        w_idx = parent._curr_weather_idx - parent.sim_start_w_idx
 
-        if self._parent().is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
-            self._parent()._set_prediction_forecast(self)
+        if parent.is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
+            parent._set_prediction_forecast(self)
         
         curr_wind = (self.forecast_wind_speeds[w_idx], self.forecast_wind_dirs[w_idx])
 
@@ -671,9 +672,10 @@ class Cell:
         if not self.fuel.burnable:
             return
 
-        now_idx = self._parent()._curr_weather_idx
-        now_s = self._parent().curr_time_s
-        weather_stream = self._parent()._weather_stream
+        parent = self._parent()
+        now_idx = parent._curr_weather_idx
+        now_s = parent.curr_time_s
+        weather_stream = parent._weather_stream
 
         # 1. Step moisture from last update to the current time
         self._catch_up_moisture_to_curr(now_s, weather_stream)
@@ -717,9 +719,10 @@ class Cell:
             return
 
         # Catch cell up to current time
-        now_idx = self._parent()._curr_weather_idx
-        now_s = self._parent().curr_time_s
-        weather_stream = self._parent()._weather_stream
+        parent = self._parent()
+        now_idx = parent._curr_weather_idx
+        now_s = parent.curr_time_s
+        weather_stream = parent._weather_stream
         self._catch_up_moisture_to_curr(now_s, weather_stream)
 
         for dfm in self.dfms:

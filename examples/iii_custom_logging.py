@@ -52,7 +52,7 @@ class CustomLogging(ControlClass):
             return
 
         burning_cells = len(fire.burning_cells)
-        frontier_cells = len(fire.frontier)
+        frontier_cells = len(fire.get_frontier())
         avg_coord = self._format_avg_coord(fire)
         fire.logger.log_message(
             f"[t={fire.curr_time_m:.1f} min] burning={burning_cells} | frontier={frontier_cells} | "
