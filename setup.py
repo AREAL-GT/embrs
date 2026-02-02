@@ -20,6 +20,17 @@ setup(
         'tkcalendar',
         'msgpack',
         'rasterio',
-        'PyQt5'
+        'PyQt5',
+        'timezonefinder',
+        'pyarrow',
     ],
+    extras_require={
+        'dev': [
+            'pytest>=7.0',
+            'pytest-cov>=4.0',
+            'ruff>=0.1.0',
+            'memory-profiler>=0.60',
+        ],
+    },
+    python_requires='>=3.9',
 )

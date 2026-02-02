@@ -512,7 +512,7 @@ class CellData:
     canopy_height: Optional[float] = None
     canopy_base_height: Optional[float] = None
     canopy_bulk_density: Optional[float] = None
-    init_dead_mf: Optional[float] = 0.08
+    init_dead_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
     live_h_mf: Optional[float] = 0.3
     live_w_mf: Optional[float] = 0.3
 

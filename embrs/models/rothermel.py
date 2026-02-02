@@ -335,6 +335,9 @@ def calc_moisture_damping(m_f: float, m_x: float) -> float:
     Returns:
         float: _description_
     """
+    if m_x == 0:
+        return 0
+
     r_m = m_f / m_x
 
     moist_damping = 1 - 2.59 * r_m + 5.11 * (r_m)**2 - 3.52 * (r_m)**3
