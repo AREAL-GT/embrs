@@ -249,12 +249,12 @@ wind_speed_step = (
     .sort_index()
 )
 wind_speed_grid = reindex_to_grid(wind_speed_step, duration_s, dt_s)
-wind_speed_grid = wind_speed_grid.rename(columns={"value": "mean_wind_speed_mps"})
+wind_speed_grid = wind_speed_grid.rename(columns={"value": "mean_wind_speed_ms"})
 
 plt.figure(figsize=(9, 3))
 plt.plot(
     wind_speed_grid["timestamp"] / 3600.0,
-    wind_speed_grid["mean_wind_speed_mps"],
+    wind_speed_grid["mean_wind_speed_ms"],
     color="steelblue",
     linewidth=2,
 )

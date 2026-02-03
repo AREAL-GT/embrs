@@ -76,7 +76,7 @@ class InterfaceDemo(ControlClass):
 
         # Periodically report frontier and burning cell information
         if fire.iters % 50 == 0:
-            print(f"Iter {fire.iters} | Frontier size: {len(fire.frontier)} | Burning cells: {len(fire.burning_cells)} | Finished: {fire.finished}")
+            print(f"Iter {fire.iters} | Frontier size: {len(fire.get_frontier())} | Burning cells: {len(fire.burning_cells)} | Finished: {fire.finished}")
             if fire.burning_cells:
                 x_avg, y_avg = fire.get_avg_fire_coord()
                 print(f"Avg. fire coordinate: ({x_avg} m, {y_avg} m)")
@@ -162,6 +162,6 @@ class InterfaceDemo(ControlClass):
         print(f"Prediction entry: {prediction_entry.to_dict()}")
 
         # Frontier, fire break, and road snapshots
-        print(f"Frontier ids: {list(fire.frontier)}")
+        print(f"Frontier ids: {list(fire.get_frontier())}")
         print(f"Fire break cell count: {len(fire.fire_break_cells)}, fire break definitions: {len(fire.fire_breaks)}")
         print(f"Road list length: {len(fire.roads) if fire.roads else 0}")

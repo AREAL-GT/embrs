@@ -16,7 +16,6 @@ import numpy as np
 import os
 import uuid
 import time as time_module
-from dataclasses import dataclass
 from multiprocessing import cpu_count
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
@@ -28,10 +27,10 @@ from embrs.utilities.data_classes import (
     StateEstimate,
     EnsemblePredictionOutput,
     CellStatistics,
-    ForecastData,
-    ForecastPool,
     MapParams
 )
+from embrs.tools.forecast_pool import ForecastData, ForecastPool
+from embrs.tools.predictor_serializer import PredictorSerializer
 from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
@@ -39,79 +38,6 @@ from embrs.models.wind_forecast import run_windninja, temp_file_path
 
 if TYPE_CHECKING:
     from embrs.models.weather import WeatherStream
-
-
-# =============================================================================
-# Module-level dataclass for parallel forecast generation
-# =============================================================================
-
-@dataclass
-class _ForecastGenerationTask:
-    """Internal task descriptor for parallel forecast generation.
-
-    Encapsulates all data needed by a worker process to generate a single
-    perturbed wind forecast via WindNinja.
-
-    Attributes:
-        forecast_id (int): Unique identifier for this forecast within the pool.
-        perturbed_stream (WeatherStream): Weather stream with AR(1) perturbations applied.
-        map_params (MapParams): Map parameters for WindNinja terrain processing.
-        wind_speed_bias (float): Constant bias added to wind speed in m/s.
-        wind_dir_bias (float): Constant bias added to wind direction in degrees.
-        speed_seed (int): Random seed used for speed perturbation reproducibility.
-        dir_seed (int): Random seed used for direction perturbation reproducibility.
-    """
-    forecast_id: int
-    perturbed_stream: 'WeatherStream'
-    map_params: MapParams
-    wind_speed_bias: float
-    wind_dir_bias: float
-    speed_seed: int
-    dir_seed: int
-
-
-def _generate_single_forecast(task: _ForecastGenerationTask) -> ForecastData:
-    """Generate a single wind forecast via WindNinja.
-
-    Worker function executed in a separate process via ProcessPoolExecutor.
-    Creates a unique temporary directory to avoid file conflicts when multiple
-    forecasts are generated in parallel.
-
-    Args:
-        task (_ForecastGenerationTask): Task descriptor with weather stream,
-            map parameters, bias values, and random seeds.
-
-    Returns:
-        ForecastData: Generated wind forecast with metadata including the
-            perturbed weather stream, bias values, and generation timestamp.
-    """
-    # Create unique temp directory for this forecast to avoid conflicts
-    worker_id = f"pool_{task.forecast_id}_{uuid.uuid4().hex[:6]}"
-    custom_temp = os.path.join(temp_file_path, worker_id)
-
-    # Run WindNinja with num_workers=1 to disable internal parallelization
-    # (forecast-level parallelization is already happening in generate_forecast_pool)
-    forecast_array = run_windninja(
-        task.perturbed_stream,
-        task.map_params,
-        custom_temp,
-        num_workers=1
-    )
-
-    # Apply flipud transformation (required for coordinate alignment)
-    for layer in range(forecast_array.shape[0]):
-        forecast_array[layer] = np.flipud(forecast_array[layer])
-
-    return ForecastData(
-        wind_forecast=forecast_array,
-        weather_stream=task.perturbed_stream,
-        wind_speed_bias=task.wind_speed_bias,
-        wind_dir_bias=task.wind_dir_bias,
-        speed_error_seed=task.speed_seed,
-        dir_error_seed=task.dir_seed,
-        forecast_id=task.forecast_id,
-        generation_time=time_module.time()
-    )
 
 
 class FirePredictor(BaseFireSim):
@@ -318,11 +244,17 @@ class FirePredictor(BaseFireSim):
         Notes:
             TODO:verify Consider extending to perturb temperature and relative
             humidity using AR(1) error model as well.
-        """
-        from embrs.models.weather import WeatherStream
 
-        new_weather_stream = copy.deepcopy(weather_stream)
-        weather_t_step = new_weather_stream.time_step * 60  # Convert to seconds
+        Performance Note:
+            Uses shallow copy of WeatherStream and creates new WeatherEntry objects
+            directly to avoid expensive deepcopy operations on the entire stream.
+        """
+        from embrs.utilities.data_classes import WeatherEntry
+
+        # Shallow copy preserves references to params, geo, etc. but allows
+        # us to replace the stream list without modifying the original
+        new_weather_stream = copy.copy(weather_stream)
+        weather_t_step = weather_stream.time_step * 60  # Convert to seconds
 
         if num_indices is None:
             num_indices = int(np.ceil((self.time_horizon_hr * 3600) / weather_t_step))
@@ -343,15 +275,25 @@ class FirePredictor(BaseFireSim):
         dir_error = 0.0
         new_stream = []
 
-        for entry in new_weather_stream.stream[start_idx:end_idx]:
-            new_entry = copy.deepcopy(entry)
+        # Create new WeatherEntry objects directly instead of deepcopying
+        for entry in weather_stream.stream[start_idx:end_idx]:
+            # Apply bias and accumulated error to create perturbed entry
+            perturbed_speed = max(0.0, entry.wind_speed + speed_error + self.wind_speed_bias)
+            perturbed_dir = (entry.wind_dir_deg + dir_error + self.wind_dir_bias) % 360
 
-            # Apply bias and accumulated error
-            new_entry.wind_speed += speed_error + self.wind_speed_bias
-            new_entry.wind_speed = max(0.0, new_entry.wind_speed)
-            new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
-            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
-
+            new_entry = WeatherEntry(
+                wind_speed=perturbed_speed,
+                wind_dir_deg=perturbed_dir,
+                temp=entry.temp,
+                rel_humidity=entry.rel_humidity,
+                cloud_cover=entry.cloud_cover,
+                rain=entry.rain,
+                dni=entry.dni,
+                dhi=entry.dhi,
+                ghi=entry.ghi,
+                solar_zenith=entry.solar_zenith,
+                solar_azimuth=entry.solar_azimuth
+            )
             new_stream.append(new_entry)
 
             # Update errors using AR(1) process
@@ -692,78 +634,17 @@ class FirePredictor(BaseFireSim):
         if self.fire is None:
             raise RuntimeError("Cannot generate forecast pool without fire reference")
 
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        from tqdm import tqdm
-
-        num_workers = num_workers or min(cpu_count(), n_forecasts)
-
-        # Set up reproducible seeds if requested
-        if random_seed is not None:
-            base_rng = np.random.default_rng(random_seed)
-            seeds = [
-                (int(base_rng.integers(0, 2**31)), int(base_rng.integers(0, 2**31)))
-                for _ in range(n_forecasts)
-            ]
-        else:
-            seeds = [(None, None) for _ in range(n_forecasts)]
-
-        # Get current state from fire simulation
-        curr_weather_idx = self.fire._curr_weather_idx
-        base_weather_stream = self.fire._weather_stream
-        map_params = self.fire._sim_params.map_params
-
-        # Prepare tasks
-        tasks = []
-        for i, (speed_seed, dir_seed) in enumerate(seeds):
-            # Generate perturbed weather stream
-            perturbed_stream, used_speed_seed, used_dir_seed = self._perturb_weather_stream(
-                base_weather_stream,
-                start_idx=curr_weather_idx,
-                speed_seed=speed_seed,
-                dir_seed=dir_seed
-            )
-
-            tasks.append(_ForecastGenerationTask(
-                forecast_id=i,
-                perturbed_stream=perturbed_stream,
-                map_params=map_params,
-                wind_speed_bias=self.wind_speed_bias,
-                wind_dir_bias=self.wind_dir_bias,
-                speed_seed=used_speed_seed,
-                dir_seed=used_dir_seed
-            ))
-
-        # Generate forecasts in parallel
-        forecasts = [None] * n_forecasts
-
-        print(f"Generating forecast pool: {n_forecasts} forecasts using {num_workers} workers...")
-
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            future_to_idx = {
-                executor.submit(_generate_single_forecast, task): task.forecast_id
-                for task in tasks
-            }
-
-            for future in tqdm(as_completed(future_to_idx), total=n_forecasts,
-                              desc="WindNinja forecasts"):
-                idx = future_to_idx[future]
-                try:
-                    forecast_data = future.result()
-                    forecasts[idx] = forecast_data
-                except Exception as e:
-                    print(f"Forecast {idx} failed: {e}")
-                    raise
-
-        # Get the datetime that index 0 of the forecasts corresponds to
-        forecast_start_datetime = base_weather_stream.stream_times[curr_weather_idx]
-
-        return ForecastPool(
-            forecasts=forecasts,
-            base_weather_stream=copy.deepcopy(base_weather_stream),
-            map_params=copy.deepcopy(map_params),
-            predictor_params=copy.deepcopy(self._params),
-            created_at_time_s=self.fire._curr_time_s,
-            forecast_start_datetime=forecast_start_datetime
+        # Delegate to ForecastPool.generate() which owns the pool generation process
+        return ForecastPool.generate(
+            fire=self.fire,
+            predictor_params=self._params,
+            n_forecasts=n_forecasts,
+            num_workers=num_workers,
+            random_seed=random_seed,
+            wind_speed_bias=self._params.wind_speed_bias,
+            wind_dir_bias=self._params.wind_dir_bias,
+            wind_uncertainty_factor=self.wind_uncertainty_factor,
+            verbose=True
         )
 
     # =========================================================================
@@ -813,6 +694,10 @@ class FirePredictor(BaseFireSim):
             self.update_control_interface_elements()
 
             self._burning_cells = list(fires_still_burning)
+
+            # Clear updated cells to prevent unbounded memory growth
+            # (cells are tracked per-iteration, not across iterations)
+            self._updated_cells.clear()
 
             self._iters += 1
 
@@ -953,6 +838,12 @@ class FirePredictor(BaseFireSim):
         for cell in self._cell_dict.values():
             cell.set_parent(self)
 
+        # Sync grid manager with the freshly copied cell grid
+        # This ensures get_cells_at_geometry returns the correct cell objects
+        if hasattr(self, '_grid_manager') and self._grid_manager is not None:
+            self._grid_manager._cell_grid = self._cell_grid
+            self._grid_manager._cell_dict = self._cell_dict
+
         if state_estimate is None:
             # Set the burnt cells based on fire state
             # If we're in a worker (self.fire is None), use serialized fire state
@@ -1063,20 +954,29 @@ class FirePredictor(BaseFireSim):
             - Sets wind_xpad, wind_ypad for coordinate alignment
             - Updates _weather_stream with perturbed values
             - Creates temporary directory for WindNinja output
+
+        Performance Note:
+            Uses shallow copy of WeatherStream and creates new WeatherEntry objects
+            directly to avoid expensive deepcopy operations on the entire stream.
         """
+        from embrs.utilities.data_classes import WeatherEntry
+
+        # Get source weather stream (shallow copy to avoid expensive deepcopy)
         if self.fire is not None:
-            new_weather_stream = copy.deepcopy(self.fire._weather_stream)
+            source_stream = self.fire._weather_stream
+            new_weather_stream = copy.copy(source_stream)
             # Use custom start weather index if set (any-time mode)
             curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
                        else self.fire._curr_weather_idx)
         else:
             # In worker: use serialized weather stream
-            new_weather_stream = copy.deepcopy(self._weather_stream)
+            source_stream = self._weather_stream
+            new_weather_stream = copy.copy(source_stream)
             # Use custom start weather index if set (any-time mode)
             curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
                        else self._curr_weather_idx)
 
-        self.weather_t_step = new_weather_stream.time_step * 60
+        self.weather_t_step = source_stream.time_step * 60
 
         num_indices = int(np.ceil((self.time_horizon_hr * 3600) / self.weather_t_step))
 
@@ -1092,14 +992,25 @@ class FirePredictor(BaseFireSim):
 
         new_stream = []
 
-        for entry in new_weather_stream.stream[curr_idx:end_idx + 1]:
-            new_entry = copy.deepcopy(entry)
+        # Create new WeatherEntry objects directly instead of deepcopying
+        for entry in source_stream.stream[curr_idx:end_idx + 1]:
+            # Apply bias and accumulated error to create perturbed entry
+            perturbed_speed = max(0, entry.wind_speed + speed_error + self.wind_speed_bias)
+            perturbed_dir = (entry.wind_dir_deg + dir_error + self.wind_dir_bias) % 360
 
-            new_entry.wind_speed += speed_error + self.wind_speed_bias
-            new_entry.wind_speed = np.max([0, new_entry.wind_speed])
-            new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
-            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
-
+            new_entry = WeatherEntry(
+                wind_speed=perturbed_speed,
+                wind_dir_deg=perturbed_dir,
+                temp=entry.temp,
+                rel_humidity=entry.rel_humidity,
+                cloud_cover=entry.cloud_cover,
+                rain=entry.rain,
+                dni=entry.dni,
+                dhi=entry.dhi,
+                ghi=entry.ghi,
+                solar_zenith=entry.solar_zenith,
+                solar_azimuth=entry.solar_azimuth
+            )
             new_stream.append(new_entry)
 
             speed_error = self.beta * speed_error + np.random.normal(0, self.wnd_spd_std)
@@ -1361,65 +1272,13 @@ class FirePredictor(BaseFireSim):
             Populates _serialization_data dict with fire state, parameters,
             weather stream, and optionally pre-computed wind forecast.
         """
-        if self.fire is None:
-            raise RuntimeError("Cannot prepare predictor without fire reference")
-
-        # Extract fire state at prediction start
-        fire_state = {
-            'curr_time_s': self.fire._curr_time_s,
-            'curr_weather_idx': self.fire._curr_weather_idx,
-            'last_weather_update': self.fire._last_weather_update,
-            'burning_cell_polygons': UtilFuncs.get_cell_polygons(self.fire._burning_cells),
-            'burnt_cell_polygons': (UtilFuncs.get_cell_polygons(self.fire._burnt_cells)
-                                   if self.fire._burnt_cells else None),
-        }
-
-        # Deep copy simulation parameters
-        sim_params_copy = copy.deepcopy(self.fire._sim_params)
-        weather_stream_copy = copy.deepcopy(self.fire._weather_stream)
-
-        # Store all serializable data
-        self._serialization_data = {
-            'sim_params': sim_params_copy,
-            'predictor_params': copy.deepcopy(self._params),
-            'fire_state': fire_state,
-            'weather_stream': weather_stream_copy,
-            'vary_wind_per_member': vary_wind,
-
-            # Predictor-specific attributes
-            'time_horizon_hr': self.time_horizon_hr,
-            'wind_uncertainty_factor': self.wind_uncertainty_factor,
-            'wind_speed_bias': self.wind_speed_bias,
-            'wind_dir_bias': self.wind_dir_bias,
-            'ros_bias_factor': self.ros_bias_factor,
-            'beta': self.beta,
-            'wnd_spd_std': self.wnd_spd_std,
-            'wnd_dir_std': self.wnd_dir_std,
-            'dead_mf': self.dead_mf,
-            'live_mf': self.live_mf,
-            'nom_ign_prob': self.nom_ign_prob,
-
-            # Elevation data (always needed)
-            'coarse_elevation': self.coarse_elevation,
-        }
-
-        # Add forecast pool information
-        if forecast_pool is not None:
-            self._serialization_data['use_pooled_forecast'] = True
-            self._serialization_data['forecast_pool'] = forecast_pool
-            self._serialization_data['forecast_indices'] = forecast_indices
-        else:
-            self._serialization_data['use_pooled_forecast'] = False
-            self._serialization_data['forecast_pool'] = None
-            self._serialization_data['forecast_indices'] = None
-
-        # Only include pre-computed wind forecast if not varying per member
-        # and not using a forecast pool
-        if not vary_wind and forecast_pool is None:
-            self._serialization_data['wind_forecast'] = self.wind_forecast
-            self._serialization_data['flipud_forecast'] = self.flipud_forecast
-            self._serialization_data['wind_xpad'] = self.wind_xpad
-            self._serialization_data['wind_ypad'] = self.wind_ypad
+        # Delegate to PredictorSerializer
+        PredictorSerializer.prepare_for_serialization(
+            self,
+            vary_wind=vary_wind,
+            forecast_pool=forecast_pool,
+            forecast_indices=forecast_indices
+        )
 
     def __getstate__(self) -> dict:
         """Serialize predictor for parallel execution.
@@ -1435,21 +1294,8 @@ class FirePredictor(BaseFireSim):
         Raises:
             RuntimeError: If prepare_for_serialization() was not called first.
         """
-        if self._serialization_data is None:
-            raise RuntimeError(
-                "Must call prepare_for_serialization() before pickling. "
-                "This ensures all necessary state is captured from the parent FireSim."
-            )
-
-        # Return minimal state
-        state = {
-            'serialization_data': self._serialization_data,
-            'orig_grid': self.orig_grid,  # Template cells (pre-built)
-            'orig_dict': self.orig_dict,  # Template cells (pre-built)
-            'c_size': self.c_size,
-        }
-
-        return state
+        # Delegate to PredictorSerializer
+        return PredictorSerializer.get_state(self)
 
     def __setstate__(self, state: dict) -> None:
         """Reconstruct predictor in worker process without full initialization.
@@ -1468,205 +1314,69 @@ class FirePredictor(BaseFireSim):
             maps, fuel models, weather stream, and optionally wind forecast.
             Sets fire to None (no parent reference in workers).
         """
-        
-        from embrs.models.perryman_spot import PerrymanSpotting
-        from embrs.models.fuel_models import Anderson13, ScottBurgan40
+        # Delegate to PredictorSerializer
+        PredictorSerializer.set_state(self, state)
 
-        # Extract serialization data
-        data = state['serialization_data']
-        sim_params = data['sim_params']
+    # =========================================================================
+    # Resource Management
+    # =========================================================================
 
-        # =====================================================================
-        # Phase 1: Restore FirePredictor-specific attributes
-        # =====================================================================
-        self.fire = None  # No parent fire in worker
-        self.c_size = state['c_size']
-        self._params = data['predictor_params']
-        self._serialization_data = data
+    def cleanup(self) -> None:
+        """Release all predictor resources including forecast pools.
 
-        self.time_horizon_hr = data['time_horizon_hr']
-        self.wind_uncertainty_factor = data['wind_uncertainty_factor']
-        self.wind_speed_bias = data['wind_speed_bias']
-        self.wind_dir_bias = data['wind_dir_bias']
-        self.ros_bias_factor = data['ros_bias_factor']
-        self.beta = data['beta']
-        self.wnd_spd_std = data['wnd_spd_std']
-        self.wnd_dir_std = data['wnd_dir_std']
-        self.dead_mf = data['dead_mf']
-        self.live_mf = data['live_mf']
-        self.nom_ign_prob = data['nom_ign_prob']
-        self._start_weather_idx = None  # Will be set by _catch_up_with_fire if needed
+        Clears all active forecast pools managed by ForecastPoolManager
+        and all prediction output data. Should be called when the predictor
+        is no longer needed to free memory.
 
-        # =====================================================================
-        # Phase 2: Restore BaseFireSim attributes (manually, without __init__)
-        # =====================================================================
+        This method is safe to call multiple times.
 
-        # From BaseFireSim.__init__ lines 45-88
-        self.display_frequency = 300
-        self._sim_params = sim_params
-        self.sim_start_w_idx = 0
-        self._curr_weather_idx = 0
-        self._last_weather_update = data['fire_state']['last_weather_update']
-        self.weather_changed = True
-        self._curr_time_s = data['fire_state']['curr_time_s']
-        self._iters = 0
-        self.logger = None  # No logger in worker
-        self._visualizer = None  # No visualizer in worker
-        self._finished = False
+        Example:
+            >>> predictor = FirePredictor(params, fire)
+            >>> pool = predictor.generate_forecast_pool(30)
+            >>> output = predictor.run_ensemble(estimates, forecast_pool=pool)
+            >>> # When done with prediction
+            >>> predictor.cleanup()
+        """
+        from embrs.tools.forecast_pool import ForecastPoolManager
+        ForecastPoolManager.clear_all()
+        self.clear_prediction_data()
 
-        # Empty containers (will be populated by _set_states)
-        self._updated_cells = {}
-        self._cell_dict = {}
-        self._long_term_retardants = set()
-        self._active_water_drops = []
-        self._burning_cells = []
-        self._new_ignitions = []
-        self._burnt_cells = set()
-        self._frontier = set()
-        self._fire_break_cells = []
-        self._active_firelines = {}
-        self._new_fire_break_cache = []
-        self.starting_ignitions = set()
-        self._urban_cells = []
-        self._scheduled_spot_fires = {}
+    def clear_prediction_data(self) -> None:
+        """Clear all prediction output data structures.
 
-        # From _parse_sim_params (lines 252-353)
-        map_params = sim_params.map_params
-        self._cell_size = self._params.cell_size_m
-        self._sim_duration = sim_params.duration_s
-        self._time_step = self._params.time_step_s
-        self._init_mf = self._params.dead_mf
-        self._fuel_moisture_map = getattr(sim_params, 'fuel_moisture_map', {})
-        self._fms_has_live = getattr(sim_params, 'fms_has_live', False)
-        self._init_live_h_mf = getattr(sim_params, 'live_h_mf', 0.0)
-        self._init_live_w_mf = getattr(sim_params, 'live_w_mf', 0.0)
-        self._size = map_params.size()
-        self._shape = map_params.shape(self._cell_size)
-        self._roads = map_params.roads
-        self.coarse_elevation = data['coarse_elevation']
+        Frees memory used by spread tracking, flame lengths, fire line
+        intensities, and other per-timestep data accumulated during prediction.
 
-        # Fuel class selection
-        fbfm_type = map_params.fbfm_type
-        if fbfm_type == "Anderson":
-            self.FuelClass = Anderson13
-        elif fbfm_type == "ScottBurgan":
-            self.FuelClass = ScottBurgan40
-        else:
-            raise ValueError(f"FBFM Type {fbfm_type} not supported")
+        This is called automatically by cleanup() but can also be called
+        separately to free memory while keeping the predictor usable.
 
-        # Map data (from lcp_data, but already in sim_params)
-        lcp_data = map_params.lcp_data
-        self._elevation_map = np.flipud(lcp_data.elevation_map)
-        self._slope_map = np.flipud(lcp_data.slope_map)
-        self._aspect_map = np.flipud(lcp_data.aspect_map)
-        self._fuel_map = np.flipud(lcp_data.fuel_map)
-        self._cc_map = np.flipud(lcp_data.canopy_cover_map)
-        self._ch_map = np.flipud(lcp_data.canopy_height_map)
-        self._cbh_map = np.flipud(lcp_data.canopy_base_height_map)
-        self._cbd_map = np.flipud(lcp_data.canopy_bulk_density_map)
-        self._data_res = lcp_data.resolution
+        Note:
+            The next call to predict() will re-initialize these data structures,
+            so this is safe to call between predictions.
+        """
+        # Clear spread tracking dictionaries
+        if hasattr(self, 'spread'):
+            self.spread.clear()
+        if hasattr(self, 'flame_len_m'):
+            self.flame_len_m.clear()
+        if hasattr(self, 'fli_kw_m'):
+            self.fli_kw_m.clear()
+        if hasattr(self, 'ros_ms'):
+            self.ros_ms.clear()
+        if hasattr(self, 'spread_dir'):
+            self.spread_dir.clear()
+        if hasattr(self, 'crown_fire'):
+            self.crown_fire.clear()
+        if hasattr(self, 'hold_probs'):
+            self.hold_probs.clear()
+        if hasattr(self, 'breaches'):
+            self.breaches.clear()
 
-        # Scenario data
-        scenario = map_params.scenario_data
-        self._fire_breaks = list(zip(scenario.fire_breaks, scenario.break_widths, scenario.break_ids))
-        self.fire_break_dict = {
-            id: (fire_break, break_width)
-            for fire_break, break_width, id in self._fire_breaks
-        }
-        self._initial_ignition = scenario.initial_ign
-
-        # Datetime and orientation
-        self._start_datetime = sim_params.weather_input.start_datetime
-        self._north_dir_deg = map_params.geo_info.north_angle_deg
-
-        # Check for pooled forecast mode
-        self._use_pooled_forecast = data.get('use_pooled_forecast', False)
-        self._wind_forecast_assigned = False
-
-        self._wind_res = sim_params.weather_input.mesh_resolution
-        
-        if self._use_pooled_forecast:
-            forecast_pool = data['forecast_pool']
-            forecast_indices = data['forecast_indices']
-            member_idx = data.get('member_index', 0)
-
-            # Get the assigned forecast for this member
-            forecast_idx = forecast_indices[member_idx]
-            assigned_forecast = forecast_pool.get_forecast(forecast_idx)
-
-            # Set wind forecast from pool
-            self.wind_forecast = assigned_forecast.wind_forecast
-            self.flipud_forecast = assigned_forecast.wind_forecast  # Already flipped in pool generation
-            self._weather_stream = assigned_forecast.weather_stream
-            self.weather_t_step = self._weather_stream.time_step * 60
-
-            # Calculate padding
-            self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
-
-            # Mark that wind is already set
-            self._wind_forecast_assigned = True
-            self._vary_wind_per_member = False
-        else:
-            # Check if wind should be computed per-member or restored from serialization
-            self._vary_wind_per_member = data.get('vary_wind_per_member', False)
-
-            if not self._vary_wind_per_member:
-                # Use pre-computed wind (shared across all members)
-                self.wind_forecast = data['wind_forecast']
-                self.flipud_forecast = data['flipud_forecast']
-                self.wind_xpad = data['wind_xpad']
-                self.wind_ypad = data['wind_ypad']
-            else:
-                # Wind will be computed later by _predict_wind() in _catch_up_with_fire
-                self.wind_forecast = None
-                self.flipud_forecast = None
-                self.wind_xpad = None
-                self.wind_ypad = None
-
-            # Weather stream from serialized data
-            self._weather_stream = data['weather_stream']
-            self.weather_t_step = self._weather_stream.time_step * 60
-
-
-        # Spotting parameters
-        self.model_spotting = self._params.model_spotting
-        self._spot_ign_prob = 0.0
-        if self.model_spotting:
-            self._canopy_species = sim_params.canopy_species
-            self._dbh_cm = sim_params.dbh_cm
-            self._spot_ign_prob = sim_params.spot_ign_prob
-            self._min_spot_distance = sim_params.min_spot_dist
-            self._spot_delay_s = self._params.spot_delay_s
-
-        # Moisture (prediction model specific)
-        self.fmc = 100  # Prediction model default
-
-        # =====================================================================
-        # Phase 3: Restore cell templates (CRITICAL - uses pre-built cells)
-        # =====================================================================
-
-        # Use the serialized templates instead of reconstructing
-        self.orig_grid = state['orig_grid']
-        self.orig_dict = state['orig_dict']
-
-        # Initialize cell_grid to the template shape
-        self._cell_grid = np.empty(self._shape, dtype=object)
-        self._grid_width = self._cell_grid.shape[1] - 1
-        self._grid_height = self._cell_grid.shape[0] - 1
-
-        # Fix weak references in cells (point to self instead of original fire)
-        for cell in self.orig_dict.values():
-            cell.set_parent(self)
-
-        # =====================================================================
-        # Phase 4: Rebuild lightweight components
-        # =====================================================================
-
-        size = map_params.size()
-
-        # Rebuild spotting model (PerrymanSpotting for prediction)
-        if self.model_spotting:
-            self.embers = PerrymanSpotting(self._spot_delay_s, size)
+        # Clear internal state tracking
+        if hasattr(self, '_updated_cells'):
+            self._updated_cells.clear()
+        if hasattr(self, '_scheduled_spot_fires'):
+            self._scheduled_spot_fires.clear()
 
     # =========================================================================
     # Visualization

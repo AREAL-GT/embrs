@@ -512,7 +512,7 @@ class CellData:
     canopy_height: Optional[float] = None
     canopy_base_height: Optional[float] = None
     canopy_bulk_density: Optional[float] = None
-    init_dead_mf: Optional[float] = 0.08
+    init_dead_mf: Optional[List[float]] = field(default_factory=lambda: [0.06, 0.07, 0.08])
     live_h_mf: Optional[float] = 0.3
     live_w_mf: Optional[float] = 0.3
 
@@ -611,101 +611,27 @@ class EnsemblePredictionOutput:
     individual_predictions: Optional[List[PredictionOutput]] = None
 
 
-@dataclass
-class ForecastData:
-    """Container for a single wind forecast and its generating parameters.
+# =============================================================================
+# Backwards compatibility for ForecastData and ForecastPool
+# These classes have been moved to embrs.tools.forecast_pool
+# =============================================================================
 
-    Stores a WindNinja output array along with the perturbation parameters
-    used to generate it, enabling reproducibility and reuse of forecasts
-    across ensemble predictions.
+def __getattr__(name):
+    """Lazy import for backwards compatibility.
 
-    Attributes:
-        wind_forecast: WindNinja output array.
-            Shape: (n_timesteps, height, width, 2) where [..., 0] = speed (m/s),
-            [..., 1] = direction (degrees).
-        weather_stream: The perturbed weather stream used to generate this forecast.
-        wind_speed_bias: Constant wind speed bias applied (m/s).
-        wind_dir_bias: Constant wind direction bias applied (degrees).
-        speed_error_seed: Random seed used for AR(1) speed noise.
-        dir_error_seed: Random seed used for AR(1) direction noise.
-        forecast_id: Unique identifier for this forecast within the pool.
-        generation_time: Unix timestamp when forecast was generated.
+    ForecastData, ForecastPool, and ForecastPoolManager have been moved to
+    embrs.tools.forecast_pool. This allows old import paths to continue
+    working while avoiding circular imports.
     """
-
-    wind_forecast: np.ndarray
-    weather_stream: 'WeatherStream'
-    wind_speed_bias: float
-    wind_dir_bias: float
-    speed_error_seed: int
-    dir_error_seed: int
-    forecast_id: int
-    generation_time: float
-
-
-@dataclass
-class ForecastPool:
-    """A collection of pre-computed wind forecasts for ensemble use.
-
-    Provides storage and sampling methods for a pool of perturbed wind
-    forecasts that can be reused across global predictions and rollouts.
-
-    Attributes:
-        forecasts: List of ForecastData objects.
-        base_weather_stream: Original unperturbed weather stream.
-        map_params: Map parameters used for WindNinja.
-        predictor_params: Predictor parameters at time of pool creation.
-        created_at_time_s: Simulation time (seconds) when pool was created.
-        forecast_start_datetime: Local datetime that index 0 of forecasts corresponds to.
-    """
-
-    forecasts: List[ForecastData]
-    base_weather_stream: 'WeatherStream'
-    map_params: 'MapParams'
-    predictor_params: 'PredictorParams'
-    created_at_time_s: float
-    forecast_start_datetime: 'datetime'
-
-    def __len__(self) -> int:
-        """Return the number of forecasts in the pool."""
-        return len(self.forecasts)
-
-    def __getitem__(self, idx: int) -> ForecastData:
-        """Get a forecast by index."""
-        return self.forecasts[idx]
-
-    def sample(self, n: int, replace: bool = True, seed: int = None) -> List[int]:
-        """Sample n indices from the pool.
-
-        Args:
-            n: Number of indices to sample.
-            replace: If True, sample with replacement (default). If False,
-                n must not exceed pool size.
-            seed: Random seed for reproducibility.
-
-        Returns:
-            List of forecast indices.
-
-        Raises:
-            ValueError: If replace=False and n > pool size.
-        """
-        rng = np.random.default_rng(seed)
-        return rng.choice(len(self.forecasts), size=n, replace=replace).tolist()
-
-    def get_forecast(self, idx: int) -> ForecastData:
-        """Get a specific forecast by index.
-
-        Args:
-            idx: Index of the forecast to retrieve.
-
-        Returns:
-            ForecastData at the specified index.
-        """
-        return self.forecasts[idx]
-
-    def get_weather_scenarios(self) -> List['WeatherStream']:
-        """Return all perturbed weather streams for time window calculation.
-
-        Returns:
-            List of WeatherStream objects, one per forecast in the pool.
-        """
-        return [f.weather_stream for f in self.forecasts]
+    if name in ('ForecastData', 'ForecastPool', 'ForecastPoolManager'):
+        import warnings
+        warnings.warn(
+            f"{name} has been moved to embrs.tools.forecast_pool. "
+            f"Please update your imports to: from embrs.tools.forecast_pool import {name}",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        from embrs.tools.forecast_pool import ForecastData, ForecastPool, ForecastPoolManager
+        return {'ForecastData': ForecastData, 'ForecastPool': ForecastPool,
+                'ForecastPoolManager': ForecastPoolManager}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

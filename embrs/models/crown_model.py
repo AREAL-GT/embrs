@@ -5,6 +5,18 @@ from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.fire_util import CrownStatus
 
+# Module-level cache for Fuel Model 10 (Anderson 13 classification)
+# Avoids creating a new instance on every crown_fire() call
+_FUEL_MODEL_10_CACHE = None
+
+
+def _get_fuel_model_10():
+    """Return cached Fuel Model 10 instance, creating it on first call."""
+    global _FUEL_MODEL_10_CACHE
+    if _FUEL_MODEL_10_CACHE is None:
+        _FUEL_MODEL_10_CACHE = Anderson13(10)
+    return _FUEL_MODEL_10_CACHE
+
 
 def crown_fire(cell: Cell, fmc: float):
     # Return if crown fire not possible 
@@ -88,9 +100,9 @@ def set_accel_constant(cell, cfb):
 
 def calc_R10(cell: Cell) -> float:
     # Calculate R_10 value for active crown fire ROS as described in Rothermel (1991)
-    # Computes the rate of spread using the surface fire rate of spread in Fuel Model 10 with 
+    # Computes the rate of spread using the surface fire rate of spread in Fuel Model 10 with
     # wind speed reduced by a factor of 0.4
-    fuel = Anderson13(10)
+    fuel = _get_fuel_model_10()
 
     # Ensure fuel moisture dimensions are right for Rothermel calcs
     fmois = cell.fmois

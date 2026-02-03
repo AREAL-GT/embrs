@@ -10,8 +10,13 @@ Classes:
     :members:
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from embrs.fire_simulator.fire import FireSim
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embrs.fire_simulator.fire import FireSim
 
 class ControlClass(ABC):
     """Abstract base class for user-defined fire suppression control code.
@@ -30,5 +35,5 @@ class ControlClass(ABC):
 
         Args:
             fire (FireSim): The current FireSim instance. Access fire state
-                via fire.burning_cells, fire.frontier, fire.curr_time_s, etc.
+                via fire.burning_cells, fire.get_frontier(), fire.curr_time_s, etc.
         """

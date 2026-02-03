@@ -15,7 +15,7 @@ class TestRetardant(ControlClass):
     def process_state(self, fire: FireSim):
 
         if (fire.curr_time_s - self.last_intervention) >= self.interval:
-            for cell_id in fire.frontier:
+            for cell_id in fire.get_frontier():
                 cell = fire.cell_dict[cell_id]
                 fire.add_retardant_at_cell(cell, 3, 1)
 

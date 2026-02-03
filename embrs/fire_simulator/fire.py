@@ -14,7 +14,6 @@ Classes:
 
 from tqdm import tqdm
 import numpy as np
-import copy
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
@@ -85,11 +84,13 @@ class FireSim(BaseFireSim):
             return
         
         # Loop over surface fires
-        for cell in copy.copy(self._burning_cells):
+        # Track cells to remove (avoids copying entire list)
+        cells_to_remove = []
+        for cell in self._burning_cells:
             if cell.fully_burning:
                 cell._set_state(CellStates.BURNT)
                 self._burnt_cells.add(cell)
-                self._burning_cells.remove(cell)
+                cells_to_remove.append(cell)
                 self._updated_cells[cell.id] = cell
                 continue
 
@@ -112,6 +113,10 @@ class FireSim(BaseFireSim):
             self.remove_neighbors(cell)
 
             self._updated_cells[cell.id] = cell
+
+        # Remove fully burned cells after iteration completes
+        for cell in cells_to_remove:
+            self._burning_cells.remove(cell)
 
         # Get set of spot fires started in this time step
         if self.model_spotting and self._spot_ign_prob > 0:

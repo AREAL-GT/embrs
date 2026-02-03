@@ -8,6 +8,41 @@ Functions are organized by conversion type: temperature, length, speed,
 fuel loading, heat flux, and heat content.
 """
 
+# ============================================================================
+# Pre-computed conversion constants
+# These avoid function calls during conversion calculations
+# ============================================================================
+
+# Length conversions
+_M_TO_FT = 3.28084
+_FT_TO_M = 1.0 / _M_TO_FT  # 0.3048
+
+# Speed conversions
+_FT_MIN_TO_M_S = 0.00508
+_M_S_TO_FT_MIN = 1.0 / _FT_MIN_TO_M_S  # 196.8503937...
+_MPH_TO_FT_MIN = 88.0
+_FT_MIN_TO_MPH = 1.0 / _MPH_TO_FT_MIN  # 0.01136363...
+
+# Fuel loading conversions
+_LBSFT2_TO_KISQ = 4.88243
+_KISQ_TO_LBSFT2 = 1.0 / _LBSFT2_TO_KISQ  # 0.204816...
+_TPA_TO_LBSFT2 = 0.04591
+_LBSFT2_TO_TPA = 1.0 / _TPA_TO_LBSFT2  # 21.781...
+_TPA_TO_KISQ_DIVISOR = 4.46
+_KISQ_TO_TPA = _TPA_TO_KISQ_DIVISOR  # 4.46
+
+# Heat flux conversions
+_BTU_FT2_MIN_TO_KW_M2 = 0.189276
+_BTU_FT_MIN_TO_KW_M = 0.05767
+
+# Heat content conversions
+_CAL_G_TO_BTU_LB = 1.8
+_BTU_LB_TO_CAL_G = 0.555
+
+
+# ============================================================================
+# Temperature conversions
+# ============================================================================
 
 def F_to_C(f_f: float) -> float:
     """Convert temperature from Fahrenheit to Celsius.
@@ -18,12 +53,12 @@ def F_to_C(f_f: float) -> float:
     Returns:
         float: Temperature in degrees Celsius.
     """
-    g = 5 / 9
-    h = 32
-    c = g * (f_f - h)
+    return (5.0 / 9.0) * (f_f - 32.0)
 
-    return c
 
+# ============================================================================
+# Length conversions
+# ============================================================================
 
 def m_to_ft(f_m: float) -> float:
     """Convert length from meters to feet.
@@ -34,10 +69,7 @@ def m_to_ft(f_m: float) -> float:
     Returns:
         float: Length in feet.
     """
-    g = 3.28084
-    f = f_m * g
-
-    return f
+    return f_m * _M_TO_FT
 
 
 def ft_to_m(f_ft: float) -> float:
@@ -49,11 +81,12 @@ def ft_to_m(f_ft: float) -> float:
     Returns:
         float: Length in meters.
     """
-    g = 1 / m_to_ft(1)
-    f = f_ft * g
+    return f_ft * _FT_TO_M
 
-    return f
 
+# ============================================================================
+# Speed conversions
+# ============================================================================
 
 def ft_min_to_m_s(f_ft_min: float) -> float:
     """Convert speed from feet per minute to meters per second.
@@ -64,10 +97,7 @@ def ft_min_to_m_s(f_ft_min: float) -> float:
     Returns:
         float: Speed in m/s.
     """
-    g = 0.00508
-    f = f_ft_min * g
-
-    return f
+    return f_ft_min * _FT_MIN_TO_M_S
 
 
 def m_s_to_ft_min(m_s: float) -> float:
@@ -79,9 +109,7 @@ def m_s_to_ft_min(m_s: float) -> float:
     Returns:
         float: Speed in ft/min.
     """
-    g = 1 / ft_min_to_m_s(1)
-    f = m_s * g
-    return f
+    return m_s * _M_S_TO_FT_MIN
 
 
 def ft_min_to_mph(f_ft_min: float) -> float:
@@ -93,10 +121,7 @@ def ft_min_to_mph(f_ft_min: float) -> float:
     Returns:
         float: Speed in mph.
     """
-    g = 1 / mph_to_ft_min(1)
-    f = f_ft_min * g
-
-    return f
+    return f_ft_min * _FT_MIN_TO_MPH
 
 
 def mph_to_ft_min(f_mph: float) -> float:
@@ -108,11 +133,12 @@ def mph_to_ft_min(f_mph: float) -> float:
     Returns:
         float: Speed in ft/min.
     """
-    g = 88
-    f = f_mph * g
+    return f_mph * _MPH_TO_FT_MIN
 
-    return f
 
+# ============================================================================
+# Fuel loading conversions
+# ============================================================================
 
 def Lbsft2_to_KiSq(f_libsft2: float) -> float:
     """Convert fuel loading from lb/ft^2 to kg/m^2.
@@ -123,10 +149,7 @@ def Lbsft2_to_KiSq(f_libsft2: float) -> float:
     Returns:
         float: Fuel loading in kg/m^2.
     """
-    g = 4.88243
-    f = f_libsft2 * g
-
-    return f
+    return f_libsft2 * _LBSFT2_TO_KISQ
 
 
 def KiSq_to_Lbsft2(f_kisq: float) -> float:
@@ -138,10 +161,7 @@ def KiSq_to_Lbsft2(f_kisq: float) -> float:
     Returns:
         float: Fuel loading in lb/ft^2.
     """
-    g = 1 / Lbsft2_to_KiSq(1)
-    f = f_kisq * g
-
-    return f
+    return f_kisq * _KISQ_TO_LBSFT2
 
 
 def TPA_to_KiSq(f_tpa: float) -> float:
@@ -153,9 +173,7 @@ def TPA_to_KiSq(f_tpa: float) -> float:
     Returns:
         float: Fuel loading in kg/m^2.
     """
-    g = 4.46
-    f = f_tpa / g
-    return f
+    return f_tpa / _TPA_TO_KISQ_DIVISOR
 
 
 def TPA_to_Lbsft2(f_tpa: float) -> float:
@@ -167,10 +185,7 @@ def TPA_to_Lbsft2(f_tpa: float) -> float:
     Returns:
         float: Fuel loading in lb/ft^2.
     """
-    g = 0.04591
-    f = f_tpa * g
-
-    return f
+    return f_tpa * _TPA_TO_LBSFT2
 
 
 def Lbsft2_to_TPA(f_lbsft2: float) -> float:
@@ -182,10 +197,7 @@ def Lbsft2_to_TPA(f_lbsft2: float) -> float:
     Returns:
         float: Fuel loading in tons per acre.
     """
-    g = 1 / TPA_to_Lbsft2(1)
-    f = f_lbsft2 * g
-
-    return f
+    return f_lbsft2 * _LBSFT2_TO_TPA
 
 
 def KiSq_to_TPA(f_kisq: float) -> float:
@@ -197,10 +209,12 @@ def KiSq_to_TPA(f_kisq: float) -> float:
     Returns:
         float: Fuel loading in tons per acre.
     """
-    f = 1 / TPA_to_KiSq(1)
-    g = f_kisq * f
-    return g
+    return f_kisq * _KISQ_TO_TPA
 
+
+# ============================================================================
+# Heat flux conversions
+# ============================================================================
 
 def BTU_ft2_min_to_kW_m2(f_btu_ft2_min: float) -> float:
     """Convert heat flux from BTU/(ft^2*min) to kW/m^2.
@@ -211,9 +225,7 @@ def BTU_ft2_min_to_kW_m2(f_btu_ft2_min: float) -> float:
     Returns:
         float: Heat flux in kW/m^2.
     """
-    g = 0.189276
-    f = f_btu_ft2_min * g
-    return f
+    return f_btu_ft2_min * _BTU_FT2_MIN_TO_KW_M2
 
 
 def BTU_ft_min_to_kW_m(f_btu_ft_min: float) -> float:
@@ -225,10 +237,12 @@ def BTU_ft_min_to_kW_m(f_btu_ft_min: float) -> float:
     Returns:
         float: Fireline intensity in kW/m.
     """
-    g = 0.05767
-    f = f_btu_ft_min * g
-    return f
+    return f_btu_ft_min * _BTU_FT_MIN_TO_KW_M
 
+
+# ============================================================================
+# Heat content conversions
+# ============================================================================
 
 def cal_g_to_BTU_lb(f_cal_g: float) -> float:
     """Convert heat content from cal/g to BTU/lb.
@@ -239,9 +253,7 @@ def cal_g_to_BTU_lb(f_cal_g: float) -> float:
     Returns:
         float: Heat content in BTU/lb.
     """
-    g = 1.8
-    f = f_cal_g * g
-    return f
+    return f_cal_g * _CAL_G_TO_BTU_LB
 
 
 def BTU_lb_to_cal_g(f_btu_lb: float) -> float:
@@ -253,6 +265,4 @@ def BTU_lb_to_cal_g(f_btu_lb: float) -> float:
     Returns:
         float: Heat content in cal/g.
     """
-    g = 0.555
-    f = f_btu_lb * g
-    return f
+    return f_btu_lb * _BTU_LB_TO_CAL_G
