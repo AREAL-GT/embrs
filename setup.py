@@ -23,6 +23,7 @@ setup(
         'PyQt5',
         'timezonefinder',
         'pyarrow',
+        'numba>=0.57.0',
     ],
     extras_require={
         'dev': [

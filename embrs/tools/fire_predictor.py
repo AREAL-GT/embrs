@@ -244,11 +244,17 @@ class FirePredictor(BaseFireSim):
         Notes:
             TODO:verify Consider extending to perturb temperature and relative
             humidity using AR(1) error model as well.
-        """
-        from embrs.models.weather import WeatherStream
 
-        new_weather_stream = copy.deepcopy(weather_stream)
-        weather_t_step = new_weather_stream.time_step * 60  # Convert to seconds
+        Performance Note:
+            Uses shallow copy of WeatherStream and creates new WeatherEntry objects
+            directly to avoid expensive deepcopy operations on the entire stream.
+        """
+        from embrs.utilities.data_classes import WeatherEntry
+
+        # Shallow copy preserves references to params, geo, etc. but allows
+        # us to replace the stream list without modifying the original
+        new_weather_stream = copy.copy(weather_stream)
+        weather_t_step = weather_stream.time_step * 60  # Convert to seconds
 
         if num_indices is None:
             num_indices = int(np.ceil((self.time_horizon_hr * 3600) / weather_t_step))
@@ -269,15 +275,25 @@ class FirePredictor(BaseFireSim):
         dir_error = 0.0
         new_stream = []
 
-        for entry in new_weather_stream.stream[start_idx:end_idx]:
-            new_entry = copy.deepcopy(entry)
+        # Create new WeatherEntry objects directly instead of deepcopying
+        for entry in weather_stream.stream[start_idx:end_idx]:
+            # Apply bias and accumulated error to create perturbed entry
+            perturbed_speed = max(0.0, entry.wind_speed + speed_error + self.wind_speed_bias)
+            perturbed_dir = (entry.wind_dir_deg + dir_error + self.wind_dir_bias) % 360
 
-            # Apply bias and accumulated error
-            new_entry.wind_speed += speed_error + self.wind_speed_bias
-            new_entry.wind_speed = max(0.0, new_entry.wind_speed)
-            new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
-            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
-
+            new_entry = WeatherEntry(
+                wind_speed=perturbed_speed,
+                wind_dir_deg=perturbed_dir,
+                temp=entry.temp,
+                rel_humidity=entry.rel_humidity,
+                cloud_cover=entry.cloud_cover,
+                rain=entry.rain,
+                dni=entry.dni,
+                dhi=entry.dhi,
+                ghi=entry.ghi,
+                solar_zenith=entry.solar_zenith,
+                solar_azimuth=entry.solar_azimuth
+            )
             new_stream.append(new_entry)
 
             # Update errors using AR(1) process
@@ -934,20 +950,29 @@ class FirePredictor(BaseFireSim):
             - Sets wind_xpad, wind_ypad for coordinate alignment
             - Updates _weather_stream with perturbed values
             - Creates temporary directory for WindNinja output
+
+        Performance Note:
+            Uses shallow copy of WeatherStream and creates new WeatherEntry objects
+            directly to avoid expensive deepcopy operations on the entire stream.
         """
+        from embrs.utilities.data_classes import WeatherEntry
+
+        # Get source weather stream (shallow copy to avoid expensive deepcopy)
         if self.fire is not None:
-            new_weather_stream = copy.deepcopy(self.fire._weather_stream)
+            source_stream = self.fire._weather_stream
+            new_weather_stream = copy.copy(source_stream)
             # Use custom start weather index if set (any-time mode)
             curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
                        else self.fire._curr_weather_idx)
         else:
             # In worker: use serialized weather stream
-            new_weather_stream = copy.deepcopy(self._weather_stream)
+            source_stream = self._weather_stream
+            new_weather_stream = copy.copy(source_stream)
             # Use custom start weather index if set (any-time mode)
             curr_idx = (self._start_weather_idx if self._start_weather_idx is not None
                        else self._curr_weather_idx)
 
-        self.weather_t_step = new_weather_stream.time_step * 60
+        self.weather_t_step = source_stream.time_step * 60
 
         num_indices = int(np.ceil((self.time_horizon_hr * 3600) / self.weather_t_step))
 
@@ -963,14 +988,25 @@ class FirePredictor(BaseFireSim):
 
         new_stream = []
 
-        for entry in new_weather_stream.stream[curr_idx:end_idx + 1]:
-            new_entry = copy.deepcopy(entry)
+        # Create new WeatherEntry objects directly instead of deepcopying
+        for entry in source_stream.stream[curr_idx:end_idx + 1]:
+            # Apply bias and accumulated error to create perturbed entry
+            perturbed_speed = max(0, entry.wind_speed + speed_error + self.wind_speed_bias)
+            perturbed_dir = (entry.wind_dir_deg + dir_error + self.wind_dir_bias) % 360
 
-            new_entry.wind_speed += speed_error + self.wind_speed_bias
-            new_entry.wind_speed = np.max([0, new_entry.wind_speed])
-            new_entry.wind_dir_deg += dir_error + self.wind_dir_bias
-            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
-
+            new_entry = WeatherEntry(
+                wind_speed=perturbed_speed,
+                wind_dir_deg=perturbed_dir,
+                temp=entry.temp,
+                rel_humidity=entry.rel_humidity,
+                cloud_cover=entry.cloud_cover,
+                rain=entry.rain,
+                dni=entry.dni,
+                dhi=entry.dhi,
+                ghi=entry.ghi,
+                solar_zenith=entry.solar_zenith,
+                solar_azimuth=entry.solar_azimuth
+            )
             new_stream.append(new_entry)
 
             speed_error = self.beta * speed_error + np.random.normal(0, self.wnd_spd_std)
@@ -1276,6 +1312,29 @@ class FirePredictor(BaseFireSim):
         """
         # Delegate to PredictorSerializer
         PredictorSerializer.set_state(self, state)
+
+    # =========================================================================
+    # Resource Management
+    # =========================================================================
+
+    def cleanup(self) -> None:
+        """Release all predictor resources including forecast pools.
+
+        Clears all active forecast pools managed by ForecastPoolManager.
+        Should be called when the predictor is no longer needed to free
+        memory from cached wind forecasts.
+
+        This method is safe to call multiple times.
+
+        Example:
+            >>> predictor = FirePredictor(params, fire)
+            >>> pool = predictor.generate_forecast_pool(30)
+            >>> output = predictor.run_ensemble(estimates, forecast_pool=pool)
+            >>> # When done with prediction
+            >>> predictor.cleanup()
+        """
+        from embrs.tools.forecast_pool import ForecastPoolManager
+        ForecastPoolManager.clear_all()
 
     # =========================================================================
     # Visualization

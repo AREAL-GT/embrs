@@ -182,6 +182,9 @@ class BaseFireSim:
         self._live_h_mf = live_h_mf
         self._live_w_mf = live_w_mf
 
+        # Pre-compute terrain data for all cells using vectorized operations
+        self._precompute_terrain_data()
+
         # Populate cell_grid with cells using the grid manager
         total_cells = self._shape[0] * self._shape[1]
         with tqdm(total=total_cells, desc="Initializing cells") as pbar:
@@ -189,6 +192,9 @@ class BaseFireSim:
                 cell_factory=self._create_cell,
                 progress_callback=pbar.update
             )
+
+        # Clear pre-computed data to free memory
+        self._clear_precomputed_terrain_data()
 
         # Populate neighbors field for each cell with pointers to each of its neighbors
         self._grid_manager.add_cell_neighbors()
@@ -218,6 +224,9 @@ class BaseFireSim:
         Creates a Cell object and populates it with terrain data, fuel type,
         moisture values, and wind forecast data from the simulation maps.
 
+        Uses pre-computed terrain data when available (from _precompute_terrain_data)
+        for better performance on large grids.
+
         Args:
             cell_id: Unique identifier for the cell.
             col: Column index in the grid.
@@ -237,16 +246,39 @@ class BaseFireSim:
 
         cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
 
-        # Get row and col of data arrays corresponding to cell
-        data_col = int(np.floor(cell_x / self._data_res))
-        data_row = int(np.floor(cell_y / self._data_res))
+        # Use pre-computed terrain data if available (vectorized extraction)
+        if hasattr(self, '_precomputed_fuel') and self._precomputed_fuel is not None:
+            # Get terrain values from pre-computed arrays
+            fuel_key = self._precomputed_fuel[row, col]
+            cell_data.elevation = self._precomputed_elevation[row, col]
+            cell_data.aspect = self._precomputed_aspect[row, col]
+            cell_data.slope_deg = self._precomputed_slope[row, col]
+            cell_data.canopy_cover = self._precomputed_cc[row, col]
+            cell_data.canopy_height = self._precomputed_ch[row, col]
+            cell_data.canopy_base_height = self._precomputed_cbh[row, col]
+            cell_data.canopy_bulk_density = self._precomputed_cbd[row, col]
+        else:
+            # Fallback to per-cell computation (for backwards compatibility)
+            # Get row and col of data arrays corresponding to cell
+            data_col = int(np.floor(cell_x / self._data_res))
+            data_row = int(np.floor(cell_y / self._data_res))
 
-        # Ensure data row and col in bounds
-        data_col = min(data_col, self._lcp_data.cols - 1)
-        data_row = min(data_row, self._lcp_data.rows - 1)
+            # Ensure data row and col in bounds
+            data_col = min(data_col, self._lcp_data.cols - 1)
+            data_row = min(data_row, self._lcp_data.rows - 1)
 
-        # Get fuel type
-        fuel_key = self._fuel_map[data_row, data_col]
+            # Get terrain values from maps
+            fuel_key = self._fuel_map[data_row, data_col]
+            cell_data.elevation = self._elevation_map[data_row, data_col]
+            cell_data.aspect = self._aspect_map[data_row, data_col]
+            cell_data.slope_deg = self._slope_map[data_row, data_col]
+            cell_data.canopy_cover = self._cc_map[data_row, data_col]
+            cell_data.canopy_height = self._ch_map[data_row, data_col]
+            cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
+            cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
+
+        # Store elevation in coarse grid
+        self.coarse_elevation[row, col] = cell_data.elevation
 
         # Set initial moisture values (default)
         cell_data.init_dead_mf = self._init_mf
@@ -262,28 +294,6 @@ class BaseFireSim:
         fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
         cell_data.fuel_type = fuel
 
-        # Get cell elevation from elevation map
-        cell_data.elevation = self._elevation_map[data_row, data_col]
-        self.coarse_elevation[row, col] = cell_data.elevation
-
-        # Get cell aspect from aspect map
-        cell_data.aspect = self._aspect_map[data_row, data_col]
-
-        # Get cell slope from slope map
-        cell_data.slope_deg = self._slope_map[data_row, data_col]
-
-        # Get canopy cover from canopy cover map
-        cell_data.canopy_cover = self._cc_map[data_row, data_col]
-
-        # Get canopy height from canopy height map
-        cell_data.canopy_height = self._ch_map[data_row, data_col]
-
-        # Get canopy base height from cbh map
-        cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
-
-        # Get canopy bulk density from cbd map
-        cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
-
         # Get data for cell
         new_cell._set_cell_data(cell_data)
 
@@ -296,6 +306,68 @@ class BaseFireSim:
         new_cell._set_wind_forecast(wind_speed, wind_dir)
 
         return new_cell
+
+    def _precompute_terrain_data(self) -> None:
+        """Pre-compute terrain data for all cells using vectorized operations.
+
+        This method uses numpy array operations to extract terrain data for all
+        cells at once, avoiding per-cell lookups during grid initialization.
+        The pre-computed data is stored in instance attributes and used by
+        _create_cell during grid population.
+
+        Performance Note:
+            This vectorized approach is significantly faster than per-cell
+            lookups, especially for large grids (1000x1000+).
+        """
+        # Compute all cell positions using grid manager
+        all_x, all_y = self._grid_manager.compute_all_cell_positions()
+
+        # Store positions for cell factory
+        self._precomputed_x = all_x
+        self._precomputed_y = all_y
+
+        # Compute data array indices for all cells
+        data_row_idx, data_col_idx = self._grid_manager.compute_data_indices(
+            all_x, all_y,
+            self._data_res,
+            self._lcp_data.rows,
+            self._lcp_data.cols
+        )
+
+        # Store indices for cell factory
+        self._precomputed_data_row = data_row_idx
+        self._precomputed_data_col = data_col_idx
+
+        # Vectorized extraction of all terrain data
+        # Using fancy indexing to extract values for all cells at once
+        self._precomputed_elevation = self._elevation_map[data_row_idx, data_col_idx]
+        self._precomputed_aspect = self._aspect_map[data_row_idx, data_col_idx]
+        self._precomputed_slope = self._slope_map[data_row_idx, data_col_idx]
+        self._precomputed_fuel = self._fuel_map[data_row_idx, data_col_idx]
+        self._precomputed_cc = self._cc_map[data_row_idx, data_col_idx]
+        self._precomputed_ch = self._ch_map[data_row_idx, data_col_idx]
+        self._precomputed_cbh = self._cbh_map[data_row_idx, data_col_idx]
+        self._precomputed_cbd = self._cbd_map[data_row_idx, data_col_idx]
+
+    def _clear_precomputed_terrain_data(self) -> None:
+        """Clear pre-computed terrain data to free memory.
+
+        Called after grid initialization is complete since the pre-computed
+        arrays are no longer needed.
+        """
+        # Clear large arrays to free memory
+        self._precomputed_x = None
+        self._precomputed_y = None
+        self._precomputed_data_row = None
+        self._precomputed_data_col = None
+        self._precomputed_elevation = None
+        self._precomputed_aspect = None
+        self._precomputed_slope = None
+        self._precomputed_fuel = None
+        self._precomputed_cc = None
+        self._precomputed_ch = None
+        self._precomputed_cbh = None
+        self._precomputed_cbd = None
 
     def _parse_sim_params(self, sim_params: SimParams):
         """Parse simulation parameters and initialize internal state.

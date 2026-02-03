@@ -828,3 +828,484 @@ class TestForecastPoolMemory:
         assert len(pool) == 0
         # Pool should be unregistered
         assert pool not in ForecastPoolManager.get_active_pools()
+
+
+# =============================================================================
+# ForecastPoolManager Eviction Tests
+# =============================================================================
+
+class TestForecastPoolEviction:
+    """Tests for ForecastPoolManager pool eviction behavior.
+
+    These tests verify that the pool manager correctly limits the number
+    of active pools and evicts oldest pools when the limit is exceeded.
+    """
+
+    def _create_pool(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params,
+        pool_id: int
+    ) -> ForecastPool:
+        """Helper to create a pool with a unique identifier."""
+        forecasts = [
+            ForecastData(
+                wind_forecast=sample_wind_forecast.copy(),
+                weather_stream=mock_weather_stream,
+                wind_speed_bias=float(pool_id),  # Use as identifier
+                wind_dir_bias=float(pool_id),
+                speed_error_seed=pool_id,
+                dir_error_seed=pool_id,
+                forecast_id=0,
+                generation_time=float(pool_id)
+            )
+        ]
+        return ForecastPool(
+            forecasts=forecasts,
+            base_weather_stream=mock_weather_stream,
+            map_params=sample_map_params,
+            predictor_params=sample_predictor_params,
+            created_at_time_s=float(pool_id),
+            forecast_start_datetime=datetime(2026, 7, 1, 12, 0)
+        )
+
+    def test_pool_eviction_at_max_capacity(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that oldest pool is evicted when MAX_ACTIVE_POOLS is reached."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        # Set up clean state
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(3)
+
+            # Create 3 pools (at capacity)
+            pools = []
+            for i in range(3):
+                pool = self._create_pool(
+                    mock_weather_stream, sample_wind_forecast,
+                    sample_predictor_params, sample_map_params, i
+                )
+                pools.append(pool)
+
+            assert ForecastPoolManager.pool_count() == 3
+
+            # Create 4th pool - should evict pool 0
+            pool_4 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 3
+            )
+
+            # Still should have 3 pools
+            assert ForecastPoolManager.pool_count() == 3
+
+            # Pool 0 should be evicted (cleaned up)
+            assert len(pools[0]) == 0  # Forecasts cleared
+
+            # Check pool membership using identity comparison (avoids numpy array comparison)
+            active = ForecastPoolManager.get_active_pools()
+            active_ids = [id(p) for p in active]
+
+            assert id(pools[0]) not in active_ids  # Pool 0 evicted
+
+            # Pools 1, 2, and 4 should still be active
+            assert id(pools[1]) in active_ids
+            assert id(pools[2]) in active_ids
+            assert id(pool_4) in active_ids
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_pool_eviction_fifo_order(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that pools are evicted in FIFO order (oldest first)."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(2)
+
+            # Create pools in order 0, 1
+            pool_0 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 0
+            )
+            pool_1 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 1
+            )
+
+            # Create pool 2 - should evict pool 0 (oldest)
+            pool_2 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 2
+            )
+
+            assert len(pool_0) == 0  # Pool 0 evicted
+            assert len(pool_1) > 0   # Pool 1 still active
+            assert len(pool_2) > 0   # Pool 2 active
+
+            # Create pool 3 - should evict pool 1 (now oldest)
+            pool_3 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 3
+            )
+
+            assert len(pool_1) == 0  # Pool 1 evicted
+            assert len(pool_2) > 0   # Pool 2 still active
+            assert len(pool_3) > 0   # Pool 3 active
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_evicted_pool_forecasts_cleared(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that evicted pool's forecasts are properly cleared."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(1)
+
+            # Create first pool
+            pool_1 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 1
+            )
+
+            # Store reference to forecasts list before eviction
+            forecasts_before = pool_1.forecasts
+            assert len(forecasts_before) == 1
+
+            # Create second pool - should evict first
+            pool_2 = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, 2
+            )
+
+            # Forecasts list should be cleared (same list object, but empty)
+            assert len(pool_1.forecasts) == 0
+            assert forecasts_before is pool_1.forecasts  # Same list object
+            assert pool_1.forecasts == []  # But now empty
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_set_max_pools_evicts_excess(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that reducing max_pools evicts excess pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(5)
+
+            # Create 4 pools
+            pools = []
+            for i in range(4):
+                pool = self._create_pool(
+                    mock_weather_stream, sample_wind_forecast,
+                    sample_predictor_params, sample_map_params, i
+                )
+                pools.append(pool)
+
+            assert ForecastPoolManager.pool_count() == 4
+
+            # Reduce max to 2 - should evict 2 oldest pools
+            ForecastPoolManager.set_max_pools(2)
+
+            assert ForecastPoolManager.pool_count() == 2
+            assert len(pools[0]) == 0  # Evicted
+            assert len(pools[1]) == 0  # Evicted
+            assert len(pools[2]) > 0   # Still active
+            assert len(pools[3]) > 0   # Still active
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_disabled_manager_no_eviction(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that disabled manager does not track or evict pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(2)
+            ForecastPoolManager.disable()
+
+            # Create more pools than max
+            pools = []
+            for i in range(5):
+                pool = self._create_pool(
+                    mock_weather_stream, sample_wind_forecast,
+                    sample_predictor_params, sample_map_params, i
+                )
+                pools.append(pool)
+
+            # When disabled, pools are not registered, so count stays 0
+            assert ForecastPoolManager.pool_count() == 0
+
+            # All pools should still have their forecasts
+            for pool in pools:
+                assert len(pool) > 0
+
+        finally:
+            ForecastPoolManager.enable()
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_manager_total_memory_usage(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that manager tracks total memory usage across all pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(5)
+
+            # Initially zero
+            assert ForecastPoolManager.memory_usage() == 0
+
+            # Create 3 pools
+            pools = []
+            for i in range(3):
+                pool = self._create_pool(
+                    mock_weather_stream, sample_wind_forecast,
+                    sample_predictor_params, sample_map_params, i
+                )
+                pools.append(pool)
+
+            # Total memory should be sum of individual pools
+            expected_total = sum(p.memory_usage() for p in pools)
+            assert ForecastPoolManager.memory_usage() == expected_total
+
+            # Close one pool
+            pools[0].close()
+
+            # Memory should decrease
+            remaining_expected = sum(p.memory_usage() for p in pools[1:])
+            assert ForecastPoolManager.memory_usage() == remaining_expected
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+            ForecastPoolManager.clear_all()
+
+    def test_clear_all_releases_all_memory(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that clear_all releases memory from all pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+        original_max = ForecastPoolManager.MAX_ACTIVE_POOLS
+
+        try:
+            ForecastPoolManager.set_max_pools(5)
+
+            # Create pools
+            pools = []
+            for i in range(3):
+                pool = self._create_pool(
+                    mock_weather_stream, sample_wind_forecast,
+                    sample_predictor_params, sample_map_params, i
+                )
+                pools.append(pool)
+
+            assert ForecastPoolManager.memory_usage() > 0
+            assert ForecastPoolManager.pool_count() == 3
+
+            # Clear all
+            ForecastPoolManager.clear_all()
+
+            # Memory should be zero, count should be zero
+            assert ForecastPoolManager.memory_usage() == 0
+            assert ForecastPoolManager.pool_count() == 0
+
+            # All pools should be cleaned up
+            for pool in pools:
+                assert len(pool) == 0
+
+        finally:
+            ForecastPoolManager.set_max_pools(original_max)
+
+
+# =============================================================================
+# FirePredictor Cleanup Integration Tests
+# =============================================================================
+
+class TestFirePredictorCleanup:
+    """Tests for FirePredictor.cleanup() integration with ForecastPoolManager."""
+
+    def _create_pool(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params,
+        pool_id: int
+    ) -> ForecastPool:
+        """Helper to create a pool with a unique identifier."""
+        forecasts = [
+            ForecastData(
+                wind_forecast=sample_wind_forecast.copy(),
+                weather_stream=mock_weather_stream,
+                wind_speed_bias=float(pool_id),
+                wind_dir_bias=float(pool_id),
+                speed_error_seed=pool_id,
+                dir_error_seed=pool_id,
+                forecast_id=0,
+                generation_time=float(pool_id)
+            )
+        ]
+        return ForecastPool(
+            forecasts=forecasts,
+            base_weather_stream=mock_weather_stream,
+            map_params=sample_map_params,
+            predictor_params=sample_predictor_params,
+            created_at_time_s=float(pool_id),
+            forecast_start_datetime=datetime(2026, 7, 1, 12, 0)
+        )
+
+    def test_cleanup_clears_all_pools(
+        self,
+        mock_weather_stream,
+        sample_wind_forecast,
+        sample_predictor_params,
+        sample_map_params
+    ):
+        """Test that FirePredictor.cleanup() clears all forecast pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+        from embrs.tools.fire_predictor import FirePredictor
+        from unittest.mock import MagicMock
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+
+        # Create some pools
+        pools = []
+        for i in range(3):
+            pool = self._create_pool(
+                mock_weather_stream, sample_wind_forecast,
+                sample_predictor_params, sample_map_params, i
+            )
+            pools.append(pool)
+
+        assert ForecastPoolManager.pool_count() == 3
+
+        # Create a mock predictor (can't easily create real one without FireSim)
+        mock_fire = MagicMock()
+        mock_fire._sim_params = MagicMock()
+        mock_fire._sim_params.cell_size = 30.0
+        mock_fire._sim_params.map_params = sample_map_params
+        mock_fire._burning_cells = []
+        mock_fire._burnt_cells = []
+
+        # Create predictor and call cleanup
+        # Note: We can't easily create a real FirePredictor without a full FireSim,
+        # so we'll test the cleanup method directly
+        predictor = MagicMock(spec=FirePredictor)
+        predictor.cleanup = FirePredictor.cleanup.__get__(predictor, FirePredictor)
+
+        predictor.cleanup()
+
+        # All pools should be cleared
+        assert ForecastPoolManager.pool_count() == 0
+        for pool in pools:
+            assert len(pool) == 0
+
+    def test_cleanup_safe_to_call_multiple_times(self):
+        """Test that cleanup can be called multiple times without error."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+        from embrs.tools.fire_predictor import FirePredictor
+        from unittest.mock import MagicMock
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+
+        # Create a mock predictor
+        predictor = MagicMock(spec=FirePredictor)
+        predictor.cleanup = FirePredictor.cleanup.__get__(predictor, FirePredictor)
+
+        # Should not raise when called multiple times
+        predictor.cleanup()
+        predictor.cleanup()
+        predictor.cleanup()
+
+        assert ForecastPoolManager.pool_count() == 0
+
+    def test_cleanup_with_no_pools(self):
+        """Test that cleanup works when there are no pools."""
+        from embrs.tools.forecast_pool import ForecastPoolManager
+        from embrs.tools.fire_predictor import FirePredictor
+        from unittest.mock import MagicMock
+
+        ForecastPoolManager.enable()
+        ForecastPoolManager.clear_all()
+
+        assert ForecastPoolManager.pool_count() == 0
+
+        predictor = MagicMock(spec=FirePredictor)
+        predictor.cleanup = FirePredictor.cleanup.__get__(predictor, FirePredictor)
+
+        # Should not raise when there are no pools
+        predictor.cleanup()
+
+        assert ForecastPoolManager.pool_count() == 0

@@ -366,3 +366,65 @@ class GridManager:
                     cells.append(cell)
 
         return cells
+
+    def compute_all_cell_positions(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Pre-compute world coordinates for all cell centers.
+
+        Uses vectorized operations to compute x,y positions for all cells
+        in the grid based on hexagonal geometry.
+
+        The formula matches Cell.__init__:
+        - Even row: x = col * cell_size * sqrt(3)
+        - Odd row: x = (col + 0.5) * cell_size * sqrt(3)
+        - y = row * cell_size * 1.5
+
+        Returns:
+            Tuple of (all_x, all_y) where each is a 2D numpy array with
+            shape (num_rows, num_cols) containing the cell center coordinates.
+        """
+        # Create meshgrid of row and column indices
+        rows, cols = np.meshgrid(
+            np.arange(self._num_rows),
+            np.arange(self._num_cols),
+            indexing='ij'
+        )
+
+        # Compute cell centers using hexagonal grid geometry
+        # Matching Cell.__init__ formula exactly
+        hex_width = np.sqrt(3) * self._cell_size
+
+        # x position: col * hex_width for even rows, (col + 0.5) * hex_width for odd rows
+        all_x = (cols + 0.5 * (rows % 2)) * hex_width
+
+        # y position: row * cell_size * 1.5
+        all_y = rows * self._cell_size * 1.5
+
+        return all_x, all_y
+
+    def compute_data_indices(self, all_x: np.ndarray, all_y: np.ndarray,
+                             data_res: float, data_rows: int, data_cols: int
+                             ) -> Tuple[np.ndarray, np.ndarray]:
+        """Convert cell positions to terrain data array indices.
+
+        Vectorized computation of which terrain data pixels correspond to
+        each cell center.
+
+        Args:
+            all_x: 2D array of cell x coordinates.
+            all_y: 2D array of cell y coordinates.
+            data_res: Resolution of terrain data in meters per pixel.
+            data_rows: Number of rows in terrain data arrays.
+            data_cols: Number of columns in terrain data arrays.
+
+        Returns:
+            Tuple of (data_row_indices, data_col_indices) as 2D integer arrays.
+        """
+        # Convert world coordinates to data array indices
+        data_col_indices = np.floor(all_x / data_res).astype(np.int32)
+        data_row_indices = np.floor(all_y / data_res).astype(np.int32)
+
+        # Clip to valid range
+        np.clip(data_col_indices, 0, data_cols - 1, out=data_col_indices)
+        np.clip(data_row_indices, 0, data_rows - 1, out=data_row_indices)
+
+        return data_row_indices, data_col_indices

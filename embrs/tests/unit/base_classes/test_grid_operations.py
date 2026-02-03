@@ -934,3 +934,223 @@ class TestGridManagerInitGrid:
         for cell_id in range(16):
             assert cell_id in gm.cell_dict
             assert gm.cell_dict[cell_id].id == cell_id
+
+
+# ============================================================================
+# Tests for vectorized terrain loading methods
+# ============================================================================
+
+class TestGridManagerVectorizedPositions:
+    """Tests for GridManager.compute_all_cell_positions."""
+
+    def test_compute_positions_shape(self, cell_size):
+        """compute_all_cell_positions should return arrays with correct shape."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=15, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        assert all_x.shape == (10, 15)
+        assert all_y.shape == (10, 15)
+
+    def test_compute_positions_type(self, cell_size):
+        """compute_all_cell_positions should return numpy arrays."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=5, num_cols=5, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        assert isinstance(all_x, np.ndarray)
+        assert isinstance(all_y, np.ndarray)
+
+    def test_compute_positions_match_mock_cells(self, cell_size):
+        """Computed positions should match MockCell positions."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=8, num_cols=8, cell_size=cell_size)
+
+        # Compute vectorized positions
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        # Compare with MockCell positions
+        for row in range(8):
+            for col in range(8):
+                mock_cell = MockCell(id=0, col=col, row=row, cell_size=cell_size)
+
+                # Allow small floating point tolerance
+                assert abs(all_x[row, col] - mock_cell.x_pos) < 1e-10, \
+                    f"x mismatch at ({row}, {col}): {all_x[row, col]} vs {mock_cell.x_pos}"
+                assert abs(all_y[row, col] - mock_cell.y_pos) < 1e-10, \
+                    f"y mismatch at ({row}, {col}): {all_y[row, col]} vs {mock_cell.y_pos}"
+
+    def test_compute_positions_positive(self, cell_size):
+        """All computed positions should be non-negative."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=10, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        assert np.all(all_x >= 0)
+        assert np.all(all_y >= 0)
+
+    def test_compute_positions_odd_row_offset(self, cell_size):
+        """Odd rows should have x positions offset from even rows."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=4, num_cols=4, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        # Check that odd rows (1, 3) have different x offset than even rows (0, 2)
+        # For same column, odd row x should be offset by hex_width/2
+        hex_width = np.sqrt(3) * cell_size
+        expected_offset = hex_width / 2
+
+        for col in range(4):
+            # Compare row 0 (even) with row 1 (odd)
+            diff = all_x[1, col] - all_x[0, col]
+            assert abs(diff - expected_offset) < 1e-10
+
+
+class TestGridManagerComputeDataIndices:
+    """Tests for GridManager.compute_data_indices."""
+
+    def test_compute_data_indices_shape(self, cell_size):
+        """compute_data_indices should return arrays with correct shape."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=15, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        data_rows, data_cols = gm.compute_data_indices(
+            all_x, all_y,
+            data_res=10.0,
+            data_rows=100,
+            data_cols=150
+        )
+
+        assert data_rows.shape == (10, 15)
+        assert data_cols.shape == (10, 15)
+
+    def test_compute_data_indices_type(self, cell_size):
+        """compute_data_indices should return integer arrays."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=5, num_cols=5, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        data_rows, data_cols = gm.compute_data_indices(
+            all_x, all_y,
+            data_res=10.0,
+            data_rows=50,
+            data_cols=50
+        )
+
+        assert data_rows.dtype == np.int32
+        assert data_cols.dtype == np.int32
+
+    def test_compute_data_indices_in_bounds(self, cell_size):
+        """Computed indices should be within valid range."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=10, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        data_rows_count = 100
+        data_cols_count = 100
+        data_rows, data_cols = gm.compute_data_indices(
+            all_x, all_y,
+            data_res=5.0,
+            data_rows=data_rows_count,
+            data_cols=data_cols_count
+        )
+
+        # All indices should be in valid range [0, max-1]
+        assert np.all(data_rows >= 0)
+        assert np.all(data_rows < data_rows_count)
+        assert np.all(data_cols >= 0)
+        assert np.all(data_cols < data_cols_count)
+
+    def test_compute_data_indices_clipping(self, cell_size):
+        """Indices should be clipped to valid range when positions exceed data bounds."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        # Create a large grid that will exceed small data bounds
+        gm = GridManager(num_rows=100, num_cols=100, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        # Small data array that grid positions will exceed
+        data_rows_count = 10
+        data_cols_count = 10
+        data_rows, data_cols = gm.compute_data_indices(
+            all_x, all_y,
+            data_res=1000.0,  # Large resolution so positions map to small indices
+            data_rows=data_rows_count,
+            data_cols=data_cols_count
+        )
+
+        # Indices should still be in valid range
+        assert np.all(data_rows >= 0)
+        assert np.all(data_rows < data_rows_count)
+        assert np.all(data_cols >= 0)
+        assert np.all(data_cols < data_cols_count)
+
+    def test_compute_data_indices_deterministic(self, cell_size):
+        """compute_data_indices should produce consistent results."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=10, cell_size=cell_size)
+        all_x, all_y = gm.compute_all_cell_positions()
+
+        # Compute twice
+        data_rows1, data_cols1 = gm.compute_data_indices(
+            all_x, all_y, data_res=5.0, data_rows=100, data_cols=100
+        )
+        data_rows2, data_cols2 = gm.compute_data_indices(
+            all_x, all_y, data_res=5.0, data_rows=100, data_cols=100
+        )
+
+        np.testing.assert_array_equal(data_rows1, data_rows2)
+        np.testing.assert_array_equal(data_cols1, data_cols2)
+
+
+class TestVectorizedTerrainExtraction:
+    """Integration tests for vectorized terrain data extraction."""
+
+    def test_vectorized_extraction_matches_per_cell(self, cell_size):
+        """Vectorized extraction should match per-cell extraction."""
+        from embrs.base_classes.grid_manager import GridManager
+
+        gm = GridManager(num_rows=10, num_cols=10, cell_size=cell_size)
+
+        # Create mock terrain data
+        data_res = 10.0
+        data_rows = 100
+        data_cols = 100
+        elevation_map = np.random.rand(data_rows, data_cols) * 1000
+
+        # Compute vectorized positions and indices
+        all_x, all_y = gm.compute_all_cell_positions()
+        data_row_idx, data_col_idx = gm.compute_data_indices(
+            all_x, all_y, data_res, data_rows, data_cols
+        )
+
+        # Vectorized extraction
+        vectorized_elevations = elevation_map[data_row_idx, data_col_idx]
+
+        # Per-cell extraction (simulating old approach)
+        for row in range(10):
+            for col in range(10):
+                mock_cell = MockCell(id=0, col=col, row=row, cell_size=cell_size)
+                cell_x, cell_y = mock_cell.x_pos, mock_cell.y_pos
+
+                # Per-cell index computation
+                per_cell_col = int(np.floor(cell_x / data_res))
+                per_cell_row = int(np.floor(cell_y / data_res))
+                per_cell_col = min(per_cell_col, data_cols - 1)
+                per_cell_row = min(per_cell_row, data_rows - 1)
+
+                per_cell_elev = elevation_map[per_cell_row, per_cell_col]
+
+                # Values should match
+                assert vectorized_elevations[row, col] == per_cell_elev, \
+                    f"Mismatch at ({row}, {col})"

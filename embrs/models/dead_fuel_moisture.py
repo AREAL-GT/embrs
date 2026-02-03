@@ -1,7 +1,24 @@
+"""Dead Fuel Moisture Model.
+
+This module implements the Nelson dead fuel moisture model, which simulates
+moisture diffusion through cylindrical fuel sticks using implicit finite
+difference methods.
+
+The model tracks moisture content, temperature, and saturation at discrete
+nodes along the radius of the fuel stick, updating based on weather conditions.
+
+Performance Note:
+    The inner loop calculations are JIT-compiled using Numba when available.
+    Set EMBRS_DISABLE_JIT=1 to disable JIT compilation for debugging.
+"""
+
 import numpy as np
 import datetime
 import random
 
+from embrs.utilities.numba_utils import njit_if_enabled, NUMBA_AVAILABLE
+
+# Physical constants
 Aks = 2.0e-13
 Alb = 0.6
 Alpha = 0.25
@@ -27,12 +44,291 @@ Hrn = 0.112467
 Sir = 0.0714285
 Scr = 0.285714
 
+
+# =============================================================================
+# JIT-Compiled Kernels
+# =============================================================================
+
+@njit_if_enabled(cache=True)
+def _prepare_coefficients(m_nodes, m_w, m_s, m_t, m_d, m_x,
+                          m_Twold, m_Tsold, m_Ttold, m_Tv, m_To):
+    """Prepare coefficient arrays for finite difference solve.
+
+    This kernel copies current values to "old" arrays and computes
+    thermal and moisture diffusivity coefficients.
+
+    Uses vectorized array operations for efficiency.
+
+    Args:
+        m_nodes: Number of nodes
+        m_w, m_s, m_t, m_d, m_x: Current state arrays
+        m_Twold, m_Tsold, m_Ttold, m_Tv, m_To: Output coefficient arrays
+    """
+    # Vectorized array copies - Numba optimizes these efficiently
+    m_Twold[:] = m_w
+    m_Tsold[:] = m_s
+    m_Ttold[:] = m_t
+    # Vectorized coefficient computations
+    for i in range(m_nodes):
+        m_Tv[i] = Thdiff * m_x[i]
+        m_To[i] = m_d[i] * m_x[i]
+
+
+@njit_if_enabled(cache=True)
+def _compute_gravity_drainage(m_nodes, m_w, m_wsa, wdiff, gnu, m_x, m_vf, m_Tg):
+    """Compute gravity drainage coefficients.
+
+    Args:
+        m_nodes: Number of nodes
+        m_w: Moisture content array
+        m_wsa: Saturation moisture content
+        wdiff: Difference between max and saturation moisture
+        gnu: Kinematic viscosity
+        m_x: Radial position array
+        m_vf: Volume fraction factor
+        m_Tg: Output gravity drainage coefficient array
+    """
+    for i in range(m_nodes):
+        m_Tg[i] = 0.0
+        svp = (m_w[i] - m_wsa) / wdiff
+        if Sir <= svp <= Scr:
+            ak = Aks * (2.0 * np.sqrt(svp / Scr) - 1.0)
+            m_Tg[i] = (ak / (gnu * wdiff)) * m_x[i] * m_vf * (Scr / svp) ** 1.5
+
+
+@njit_if_enabled(cache=True)
+def _solve_saturation(m_nodes, m_dx, m_mdt, m_x, m_Tg, m_Tsold, m_s):
+    """Solve saturation diffusion using vectorized finite difference.
+
+    Uses numpy array slicing for interior nodes (1 to m_nodes-2).
+
+    Args:
+        m_nodes: Number of nodes
+        m_dx: Internodal distance
+        m_mdt: Moisture time step
+        m_x: Radial position array
+        m_Tg: Gravity drainage coefficient array
+        m_Tsold: Old saturation values
+        m_s: Saturation array (updated in place)
+    """
+    # Interior nodes only (indices 1 to m_nodes-2)
+    # East coefficients: m_Tg[i+1] / m_dx for i in 1..m_nodes-2
+    ae = m_Tg[2:m_nodes] / m_dx
+    # West coefficients: m_Tg[i-1] / m_dx for i in 1..m_nodes-2
+    aw = m_Tg[0:m_nodes-2] / m_dx
+    # Radial coefficients: m_x[i] * m_dx / m_mdt for i in 1..m_nodes-2
+    ar = m_x[1:m_nodes-1] * m_dx / m_mdt
+    # Diagonal coefficients
+    ap = ae + aw + ar
+
+    # Compute new saturation values for interior nodes
+    m_s[1:m_nodes-1] = (ae * m_Tsold[2:m_nodes] +
+                        aw * m_Tsold[0:m_nodes-2] +
+                        ar * m_Tsold[1:m_nodes-1]) / ap
+
+    # Clamp to [0, 1]
+    for i in range(1, m_nodes - 1):
+        if m_s[i] < 0.0:
+            m_s[i] = 0.0
+        elif m_s[i] > 1.0:
+            m_s[i] = 1.0
+
+    # Boundary condition: center node equals adjacent
+    m_s[m_nodes - 1] = m_s[m_nodes - 2]
+
+
+@njit_if_enabled(cache=True)
+def _check_continuous_liquid(m_nodes, m_s):
+    """Check if liquid is continuous across all interior nodes.
+
+    Args:
+        m_nodes: Number of nodes
+        m_s: Saturation array
+
+    Returns:
+        True if all interior nodes have saturation >= Sir
+    """
+    for i in range(1, m_nodes - 1):
+        if m_s[i] < Sir:
+            return False
+    return True
+
+
+@njit_if_enabled(cache=True)
+def _update_moisture_continuous(m_nodes, m_wsa, wdiff, m_wmx, m_s, m_w, random_vals):
+    """Update moisture when liquid is continuous (saturation-based).
+
+    Args:
+        m_nodes: Number of nodes
+        m_wsa: Saturation moisture content
+        wdiff: Difference between max and saturation moisture
+        m_wmx: Maximum moisture content
+        m_s: Saturation array
+        m_w: Moisture array (updated in place)
+        random_vals: Pre-generated random perturbation values (or None)
+    """
+    for i in range(1, m_nodes - 1):
+        m_w[i] = m_wsa + m_s[i] * wdiff
+        # Apply perturbation if random values provided
+        if random_vals is not None:
+            m_w[i] += random_vals[i]
+        # Clamp to valid range
+        if m_w[i] < 0.0:
+            m_w[i] = 0.0
+        elif m_w[i] > m_wmx:
+            m_w[i] = m_wmx
+
+    # Boundary condition
+    m_w[m_nodes - 1] = m_w[m_nodes - 2]
+
+
+@njit_if_enabled(cache=True)
+def _update_moisture_diffusion(m_nodes, m_dx, m_mdt, m_wmx, m_x, m_To, m_Twold, m_w):
+    """Update moisture using vectorized diffusion equation.
+
+    Args:
+        m_nodes: Number of nodes
+        m_dx: Internodal distance
+        m_mdt: Moisture time step
+        m_wmx: Maximum moisture content
+        m_x: Radial position array
+        m_To: Moisture diffusivity coefficient array
+        m_Twold: Old moisture values
+        m_w: Moisture array (updated in place)
+    """
+    # Interior nodes (indices 1 to m_nodes-2) - vectorized computation
+    ae = m_To[2:m_nodes] / m_dx
+    aw = m_To[0:m_nodes-2] / m_dx
+    ar = m_x[1:m_nodes-1] * m_dx / m_mdt
+    ap = ae + aw + ar
+
+    # Compute new moisture values
+    m_w[1:m_nodes-1] = (ae * m_Twold[2:m_nodes] +
+                        aw * m_Twold[0:m_nodes-2] +
+                        ar * m_Twold[1:m_nodes-1]) / ap
+
+    # Clamp to valid range
+    for i in range(1, m_nodes - 1):
+        if m_w[i] < 0.0:
+            m_w[i] = 0.0
+        elif m_w[i] > m_wmx:
+            m_w[i] = m_wmx
+
+    # Boundary condition
+    m_w[m_nodes - 1] = m_w[m_nodes - 2]
+
+
+@njit_if_enabled(cache=True)
+def _update_temperature(m_nodes, m_dx, m_mdt, m_x, m_Tv, m_Ttold, m_t):
+    """Update temperature using vectorized thermal diffusion.
+
+    Args:
+        m_nodes: Number of nodes
+        m_dx: Internodal distance
+        m_mdt: Moisture time step
+        m_x: Radial position array
+        m_Tv: Thermal diffusivity coefficient array
+        m_Ttold: Old temperature values
+        m_t: Temperature array (updated in place)
+    """
+    # Interior nodes (indices 1 to m_nodes-2) - vectorized computation
+    ae = m_Tv[2:m_nodes] / m_dx
+    aw = m_Tv[0:m_nodes-2] / m_dx
+    ar = m_x[1:m_nodes-1] * m_dx / m_mdt
+    ap = ae + aw + ar
+
+    # Compute new temperature values
+    m_t[1:m_nodes-1] = (ae * m_Ttold[2:m_nodes] +
+                        aw * m_Ttold[0:m_nodes-2] +
+                        ar * m_Ttold[1:m_nodes-1]) / ap
+
+    # Cap temperature at physical maximum
+    for i in range(1, m_nodes - 1):
+        if m_t[i] > 71.0:
+            m_t[i] = 71.0
+
+    # Boundary condition
+    m_t[m_nodes - 1] = m_t[m_nodes - 2]
+
+
+@njit_if_enabled(cache=True)
+def _compute_diffusivity(m_nodes, m_t, m_w, m_wsa, m_hf, m_density, bp, m_d):
+    """Compute moisture diffusivity at each node.
+
+    Args:
+        m_nodes: Number of nodes
+        m_t: Temperature array
+        m_w: Moisture array
+        m_wsa: Saturation moisture content
+        m_hf: Surface humidity
+        m_density: Fuel density
+        bp: Barometric pressure
+        m_d: Diffusivity array (updated in place)
+    """
+    for i in range(m_nodes):
+        tk = m_t[i] + 273.2
+        qv = 13550.0 - 10.22 * tk
+        cpv = 7.22 + 0.002374 * tk + 2.67e-07 * tk * tk
+        dv = 0.22 * 3600.0 * (0.0242 / bp) * ((tk / 273.2) ** 1.75)
+        ps1 = 0.0000239 * np.exp(20.58 - (5205.0 / tk))
+        c1 = 0.1617 - 0.001419 * m_t[i]
+        c2 = 0.4657 + 0.003578 * m_t[i]
+
+        wc = m_w[i] if m_w[i] < m_wsa else m_wsa
+
+        dhdm = 0.0
+        if m_w[i] < m_wsa:
+            if c2 != 1.0 and m_hf < 1.0 and c1 != 0.0 and c2 != 0.0:
+                dhdm = (1.0 - m_hf) * ((-np.log(1.0 - m_hf)) ** (1.0 - c2)) / (c1 * c2)
+        else:
+            if c2 != 1.0 and Hfs < 1.0 and c1 != 0.0 and c2 != 0.0:
+                dhdm = (1.0 - Hfs) * (Wsf ** (1.0 - c2)) / (c1 * c2)
+
+        daw = 1.3 - 0.64 * wc
+        svaw = 1.0 / daw
+        vfaw = svaw * wc / (0.685 + svaw * wc)
+        vfcw = (0.685 + svaw * wc) / ((1.0 / m_density) + svaw * wc)
+        rfcw = 1.0 - np.sqrt(1.0 - vfcw)
+        fac = 1.0 / (rfcw * vfcw)
+        con = 1.0 / (2.0 - vfaw)
+        qw = 5040.0 * np.exp(-14.0 * wc)
+        e = (qv + qw - cpv * tk) / 1.2
+        dvpr = 18.0 * 0.016 * (1.0 - vfcw) * dv * ps1 * dhdm / (m_density * 1.987 * tk)
+        m_d[i] = dvpr + 3600.0 * 0.0985 * con * fac * np.exp(-e / (1.987 * tk))
+
+
+# =============================================================================
+# DeadFuelMoisture Class
+# =============================================================================
+
 class DeadFuelMoisture:
+    """Nelson dead fuel moisture model for cylindrical fuel sticks.
+
+    This class implements a 1D implicit finite difference solver that simulates
+    moisture diffusion through fuel sticks based on weather conditions.
+
+    Attributes:
+        m_radius: Fuel stick radius (cm)
+        m_nodes: Number of radial nodes
+        m_w: Moisture content at each node (g/g)
+        m_t: Temperature at each node (°C)
+        m_s: Saturation at each node (fraction)
+    """
+
     def __init__(self, radius, stv, wmx, wfilmk):
+        """Initialize the dead fuel moisture model.
+
+        Args:
+            radius: Fuel stick radius (cm)
+            stv: Storm threshold (cm/h)
+            wmx: Maximum fiber saturation (g/g)
+            wfilmk: Water film constant
+        """
         self.m_semTime = None
         self.initializeParameters(radius, stv, wmx, wfilmk)
 
     def initializeParameters(self, radius, stv, wmx, wfilmk):
+        """Initialize model parameters based on fuel geometry."""
         self.m_radius = radius
         self.m_density = 0.4
         self.m_length = 41.0
@@ -76,6 +372,10 @@ class DeadFuelMoisture:
         return int(9.8202 + 26.865 / radius ** 1.4)
 
     def initializeStick(self):
+        """Initialize the fuel stick state arrays.
+
+        Arrays are stored as numpy arrays for compatibility with JIT kernels.
+        """
         # Internodal distance (cm)
         self.m_dx = self.m_radius / (self.m_nodes - 1)
         self.m_dx_2 = self.m_dx * 2
@@ -83,46 +383,49 @@ class DeadFuelMoisture:
         # Maximum possible stick moisture content (g/g)
         self.m_wmax = (1.0 / self.m_density) - (1.0 / 1.53)
 
-        # Initialize ambient air temperature to 20 oC
-        self.m_t = [20.0] * self.m_nodes
+        # Initialize arrays as numpy arrays for JIT compatibility
+        # Temperature array - initialized to 20°C (ambient)
+        self.m_t = np.full(self.m_nodes, 20.0, dtype=np.float64)
 
-        # Initialize fiber saturation point to 0 g/g
-        self.m_s = [0.0] * self.m_nodes
+        # Saturation array - initialized to 0
+        self.m_s = np.zeros(self.m_nodes, dtype=np.float64)
 
-        # Initialize bound water diffusivity to 0 cm2/h
-        self.m_d = [0.0] * self.m_nodes
+        # Diffusivity array - initialized to 0
+        self.m_d = np.zeros(self.m_nodes, dtype=np.float64)
 
-        # Initialize moisture content to half the local maximum (g/g)
-        self.m_w = [0.5 * self.m_wmx] * self.m_nodes
+        # Moisture array - initialized to half the maximum
+        self.m_w = np.full(self.m_nodes, 0.5 * self.m_wmx, dtype=np.float64)
 
-        # Derive nodal radial distances
-        self.m_x = [self.m_radius - (self.m_dx * i) for i in range(self.m_nodes - 1)]
-        self.m_x.append(0.0)
+        # Nodal radial distances
+        self.m_x = np.zeros(self.m_nodes, dtype=np.float64)
+        for i in range(self.m_nodes - 1):
+            self.m_x[i] = self.m_radius - (self.m_dx * i)
+        self.m_x[self.m_nodes - 1] = 0.0
 
-        # Derive nodal volume fractions
-        self.m_v = []
+        # Nodal volume fractions
+        self.m_v = np.zeros(self.m_nodes, dtype=np.float64)
         ro = self.m_radius
         ri = ro - 0.5 * self.m_dx
         a2 = self.m_radius * self.m_radius
-        self.m_v.append((ro * ro - ri * ri) / a2)
+        self.m_v[0] = (ro * ro - ri * ri) / a2
         vwt = self.m_v[0]
         for i in range(1, self.m_nodes - 1):
             ro = ri
             ri = ro - self.m_dx
-            self.m_v.append((ro * ro - ri * ri) / a2)
+            self.m_v[i] = (ro * ro - ri * ri) / a2
             vwt += self.m_v[i]
-        self.m_v.append(ri * ri / a2)
+        self.m_v[self.m_nodes - 1] = ri * ri / a2
         vwt += self.m_v[self.m_nodes - 1]
 
-        # Added by Stuart Brittain on 1/14/2007 for performance improvement in update()
-        self.m_Twold = [0.0] * self.m_nodes
-        self.m_Ttold = [0.0] * self.m_nodes
-        self.m_Tsold = [0.0] * self.m_nodes
-        self.m_Tv = [0.0] * self.m_nodes
-        self.m_To = [0.0] * self.m_nodes
-        self.m_Tg = [0.0] * self.m_nodes
+        # Temporary arrays for time stepping (numpy arrays for JIT)
+        self.m_Twold = np.zeros(self.m_nodes, dtype=np.float64)
+        self.m_Ttold = np.zeros(self.m_nodes, dtype=np.float64)
+        self.m_Tsold = np.zeros(self.m_nodes, dtype=np.float64)
+        self.m_Tv = np.zeros(self.m_nodes, dtype=np.float64)
+        self.m_To = np.zeros(self.m_nodes, dtype=np.float64)
+        self.m_Tg = np.zeros(self.m_nodes, dtype=np.float64)
 
-        # Initialize the environment, but set m_init to False when done
+        # Initialize the environment
         self.initializeEnvironment(
             20.0,  # Ambient air temperature (oC)
             0.20,  # Ambient air relative humidity (g/g)
@@ -131,73 +434,60 @@ class DeadFuelMoisture:
             20.0,  # Initial stick temperature (oC)
             0.20,  # Initial stick surface humidity (g/g)
             0.5 * self.m_wmx,  # Initial stick moisture content
-            0.0218)  # Initial stick barometric pressure (cal/cm3
+            0.0218)  # Initial stick barometric pressure (cal/cm3)
         self.m_init = False
 
         # Computation optimization parameters
-
-        # m_hwf == hw and aml computation factor used in update()
         self.m_hwf = 0.622 * self.m_hc * (Pr / Sc) ** 0.667
-
-        # m_amlf == aml optimization factor
         self.m_amlf = self.m_hwf / (0.24 * self.m_density * self.m_radius)
-
-        # m_capf = cap optimization factor
         rcav = 0.5 * Aw * Wl
         self.m_capf = 3600.0 * Pi * St * rcav * rcav / (16.0 * self.m_radius * self.m_radius * self.m_length * self.m_density)
-
-        # m_vf == optimization factor used in update()
         self.m_vf = St / (self.m_density * Wl * Scr)
 
     def diffusivity(self, bp):
-        for i in range(self.m_nodes):
-            tk = self.m_t[i] + 273.2
-            qv = 13550. - 10.22 * tk
-            cpv = 7.22 + .002374 * tk + 2.67e-07 * tk * tk
-            dv = 0.22 * 3600. * (0.0242 / bp) * ((tk / 273.2) ** 1.75)
-            ps1 = 0.0000239 * np.exp(20.58 - (5205. / tk))
-            c1 = 0.1617 - 0.001419 * self.m_t[i]
-            c2 = 0.4657 + 0.003578 * self.m_t[i]
-            wc = self.m_w[i] if self.m_w[i] < self.m_wsa else self.m_wsa
-            dhdm = 0.0
-            if self.m_w[i] < self.m_wsa:
-                if c2 != 1. and self.m_hf < 1.0 and c1 != 0.0 and c2 != 0.0:
-                    dhdm = (1.0 - self.m_hf) * ((-np.log(1.0 - self.m_hf)) ** (1.0 - c2)) / (c1 * c2)
-            else:
-                if c2 != 1. and Hfs < 1.0 and c1 != 0.0 and c2 != 0.0:
-                    dhdm = (1.0 - Hfs) * (Wsf ** (1.0 - c2)) / (c1 * c2)
-            daw = 1.3 - 0.64 * wc
-            svaw = 1. / daw
-            vfaw = svaw * wc / (0.685 + svaw * wc)
-            vfcw = (0.685 + svaw * wc) / ((1.0 / self.m_density) + svaw * wc)
-            rfcw = 1.0 - np.sqrt(1.0 - vfcw)
-            fac = 1.0 / (rfcw * vfcw)
-            con = 1.0 / (2.0 - vfaw)
-            qw = 5040. * np.exp(-14.0 * wc)
-            e = (qv + qw - cpv * tk) / 1.2
-            dvpr = 18.0 * 0.016 * (1.0 - vfcw) * dv * ps1 * dhdm / (self.m_density * 1.987 * tk)
-            self.m_d[i] = dvpr + 3600. * 0.0985 * con * fac * np.exp(-e / (1.987 * tk))
+        """Compute diffusivity using JIT kernel if available."""
+        _compute_diffusivity(
+            self.m_nodes, self.m_t, self.m_w, self.m_wsa,
+            self.m_hf, self.m_density, bp, self.m_d
+        )
 
     @staticmethod
     def createDeadFuelMoisture1():
+        """Create 1-hour fuel moisture model (fine fuels)."""
         return DeadFuelMoisture(0.20, 0.006, 0.85, 0.10)
 
     @staticmethod
     def createDeadFuelMoisture10():
+        """Create 10-hour fuel moisture model."""
         return DeadFuelMoisture(0.64, 0.05, 0.60, 0.05)
 
     @staticmethod
     def createDeadFuelMoisture100():
+        """Create 100-hour fuel moisture model."""
         return DeadFuelMoisture(2.00, 5.0, 0.40, 0.005)
 
     @staticmethod
     def createDeadFuelMoisture1000():
+        """Create 1000-hour fuel moisture model (large logs)."""
         return DeadFuelMoisture(6.40, 7.5, 0.32, 0.003)
-    
+
     def initialized(self):
+        """Check if environment has been initialized."""
         return self.m_init
 
     def initializeEnvironment(self, ta, ha, sr, rc, ti, hi, wi, bp):
+        """Initialize environmental conditions.
+
+        Args:
+            ta: Ambient air temperature (°C)
+            ha: Ambient air relative humidity (g/g)
+            sr: Solar radiation (W/m²)
+            rc: Cumulative rainfall (cm)
+            ti: Initial stick temperature (°C)
+            hi: Initial stick surface humidity (g/g)
+            wi: Initial stick moisture content (g/g)
+            bp: Barometric pressure (cal/cm³)
+        """
         self.m_ta0 = self.m_ta1 = ta
         self.m_ha0 = self.m_ha1 = ha
         self.m_sv0 = self.m_sv1 = sr / Smv
@@ -208,14 +498,15 @@ class DeadFuelMoisture:
         self.m_hf = hi
         self.m_wfilm = 0.0
         self.m_wsa = wi + 0.1
-        self.m_t = [ti] * self.m_nodes
-        self.m_w = [wi] * self.m_nodes
-        self.m_s = [0.0] * self.m_nodes
+        self.m_t[:] = ti
+        self.m_w[:] = wi
+        self.m_s[:] = 0.0
 
         self.diffusivity(self.m_bp0)
         self.m_init = True
 
     def meanMoisture(self):
+        """Calculate mean moisture using Simpson's rule integration."""
         wea, web = 0.0, 0.0
         wec = self.m_w[0]
         wei = self.m_dx / (3.0 * self.m_radius)
@@ -231,20 +522,18 @@ class DeadFuelMoisture:
         return wbr
 
     def meanWtdMoisture(self):
-        wbr = 0.0
-        for i in range(self.m_nodes):
-            wbr += self.m_w[i] * self.m_v[i]
+        """Calculate volume-weighted mean moisture."""
+        wbr = np.dot(self.m_w, self.m_v)
         wbr = min(wbr, self.m_wmx)
         wbr += self.m_wfilm
         return wbr
 
     def meanWtdTemperature(self):
-        wbr = 0.0
-        for i in range(self.m_nodes):
-            wbr += self.m_t[i] * self.m_v[i]
-        return wbr
+        """Calculate volume-weighted mean temperature."""
+        return np.dot(self.m_t, self.m_v)
 
     def pptRate(self):
+        """Get precipitation rate."""
         return (self.m_ra1 / self.m_et) if self.m_et > 0.00 else 0.00
 
     def setAdsorptionRate(self, adsorptionRate):
@@ -264,7 +553,7 @@ class DeadFuelMoisture:
 
     def setMaximumLocalMoisture(self, localMaxMc):
         self.m_wmx = localMaxMc
-    
+
     def setMoistureSteps(self, moistureSteps):
         self.m_mSteps = moistureSteps
 
@@ -293,6 +582,7 @@ class DeadFuelMoisture:
         self.m_wfilm = waterFilm
 
     def stateName(self):
+        """Get the name of the current moisture state."""
         states = [
             "None",             # 0
             "Adsorption",       # 1
@@ -310,9 +600,23 @@ class DeadFuelMoisture:
 
     @staticmethod
     def uniformRandom(min_val, max_val):
+        """Generate uniform random value in range."""
         return (max_val - min_val) * random.random() + min_val
-    
+
     def update(self, year, month, day, hour, minute, second, at, rh, sW, rcum, bpr):
+        """Update moisture based on datetime and weather.
+
+        Args:
+            year, month, day, hour, minute, second: Date/time
+            at: Air temperature (°C)
+            rh: Relative humidity (fraction)
+            sW: Solar radiation (W/m²)
+            rcum: Cumulative rainfall (cm)
+            bpr: Barometric pressure (cal/cm³)
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
         # Determine Julian date for this new observation
         jd0 = self.m_semTime.toordinal() + 1721424.5
         self.m_semTime = datetime.datetime(year, month, day, hour, minute, second)
@@ -329,8 +633,23 @@ class DeadFuelMoisture:
         return self.update_internal(et, at, rh, sW, rcum, bpr)
 
     def update_internal(self, et, at, rh, sW, rcum, bpr):
+        """Update moisture state for elapsed time.
 
-        # Catch bad data here
+        This is the main computational method. Inner loops are JIT-compiled
+        when Numba is available.
+
+        Args:
+            et: Elapsed time (hours)
+            at: Air temperature (°C)
+            rh: Relative humidity (fraction)
+            sW: Solar radiation (W/m²)
+            rcum: Cumulative rainfall (cm)
+            bpr: Barometric pressure (cal/cm³)
+
+        Returns:
+            True if update succeeded, False otherwise
+        """
+        # Validate inputs
         if et < 0.0000027:
             print(f"DeadFuelMoisture::update() has a regressive elapsed time of {et} hours.")
             return False
@@ -354,7 +673,7 @@ class DeadFuelMoisture:
             print(f"DeadFuelMoisture::update() has an out-of-range solar insolation of {sW} W/m2.")
             return False
 
-        # Save the previous weather observation values
+        # Save previous weather values
         self.m_ta0 = self.m_ta1
         self.m_ha0 = self.m_ha1
         self.m_sv0 = self.m_sv1
@@ -362,7 +681,7 @@ class DeadFuelMoisture:
         self.m_ra0 = self.m_ra1
         self.m_bp0 = self.m_bp1
 
-        # Save the current weather observation values
+        # Save current weather values
         self.m_ta1 = at
         self.m_ha1 = rh
         self.m_sv1 = sW / Smv
@@ -370,7 +689,7 @@ class DeadFuelMoisture:
         self.m_bp1 = bpr
         self.m_et = et
 
-        # Precipitation amount since last observation
+        # Precipitation calculations
         self.m_ra1 = self.m_rc1 - self.m_rc0
         self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur
         self.m_pptrate = self.m_ra1 / et / Pi
@@ -378,6 +697,7 @@ class DeadFuelMoisture:
         self.m_mdt_2 = self.m_mdt * 2.0
         self.m_sf = 3600.0 * self.m_mdt / (self.m_dx_2 * self.m_density)
         self.m_ddt = et / self.m_dSteps
+
         rai0 = self.m_mdt * self.m_rai0 * (1.0 - np.exp(-100.0 * self.m_pptrate))
         if self.m_ha1 < self.m_ha0:
             if self.m_rampRai0:
@@ -386,10 +706,22 @@ class DeadFuelMoisture:
                 rai0 *= 0.15
         rai1 = self.m_mdt * self.m_rai1 * self.m_pptrate
 
+        # State tracking
         tstate = [0] * 11
         ddtNext = self.m_ddt
         tt = self.m_mdt
-        for nstep in range(1, int(et / self.m_mdt) + 1):
+
+        # Pre-generate random values for perturbation if enabled
+        # (random.random() is not supported in Numba nopython mode)
+        if self.m_pertubateColumn:
+            random_vals = np.array([self.uniformRandom(-0.0001, 0.0001)
+                                   for _ in range(self.m_nodes)], dtype=np.float64)
+        else:
+            random_vals = None
+
+        # Main time-stepping loop
+        num_steps = int(et / self.m_mdt) + 1
+        for nstep in range(1, num_steps):
             tfract = tt / et
             ta = self.m_ta0 + (self.m_ta1 - self.m_ta0) * tfract
             ha = self.m_ha0 + (self.m_ha1 - self.m_ha0) * tfract
@@ -407,6 +739,7 @@ class DeadFuelMoisture:
             psd = 0.0000239 * np.exp(20.58 - (5205.0 / tdw))
             self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur + self.m_mdt
 
+            # Surface node calculations
             tfd = ta + (sr - hr * (ta - tsk + Kelvin)) / (hr + self.m_hc)
             qv = 13550.0 - 10.22 * (tfd + Kelvin)
             qw = 5040.0 * np.exp(-14.0 * self.m_w[0])
@@ -427,6 +760,7 @@ class DeadFuelMoisture:
             hf_log = -np.log(1.0 - self.m_hf)
             self.m_sem = c1 * hf_log ** c2
 
+            # State machine for surface moisture
             self.m_state = 0
             self.m_wfilm = 0.0
             aml = 0.0
@@ -488,64 +822,60 @@ class DeadFuelMoisture:
             self.m_s[0] = max(0.0, s_new)
             tstate[self.m_state] += 1
 
-            for i in range(self.m_nodes):
-                self.m_Twold[i] = self.m_w[i]
-                self.m_Tsold[i] = self.m_s[i]
-                self.m_Ttold[i] = self.m_t[i]
-                self.m_Tv[i] = Thdiff * self.m_x[i]
-                self.m_To[i] = self.m_d[i] * self.m_x[i]
+            # Prepare coefficients using JIT kernel
+            _prepare_coefficients(
+                self.m_nodes, self.m_w, self.m_s, self.m_t, self.m_d, self.m_x,
+                self.m_Twold, self.m_Tsold, self.m_Ttold, self.m_Tv, self.m_To
+            )
 
             if self.m_state != 9:
-                for i in range(self.m_nodes):
-                    self.m_Tg[i] = 0.0
-                    svp = (self.m_w[i] - self.m_wsa) / wdiff
-                    if Sir <= svp <= Scr:
-                        ak = Aks * (2.0 * np.sqrt(svp / Scr) - 1.0)
-                        self.m_Tg[i] = (ak / (gnu * wdiff)) * self.m_x[i] * self.m_vf * (Scr / svp) ** 1.5
+                # Compute gravity drainage coefficients
+                _compute_gravity_drainage(
+                    self.m_nodes, self.m_w, self.m_wsa, wdiff, gnu,
+                    self.m_x, self.m_vf, self.m_Tg
+                )
 
-                for i in range(1, self.m_nodes - 1):
-                    ae = self.m_Tg[i + 1] / self.m_dx
-                    aw = self.m_Tg[i - 1] / self.m_dx
-                    ar = self.m_x[i] * self.m_dx / self.m_mdt
-                    ap = ae + aw + ar
-                    self.m_s[i] = (ae * self.m_Tsold[i + 1] + aw * self.m_Tsold[i - 1] + ar * self.m_Tsold[i]) / ap
-                    self.m_s[i] = min(1.0, max(0.0, self.m_s[i]))
-                self.m_s[self.m_nodes - 1] = self.m_s[self.m_nodes - 2]
+                # Solve saturation diffusion
+                _solve_saturation(
+                    self.m_nodes, self.m_dx, self.m_mdt, self.m_x,
+                    self.m_Tg, self.m_Tsold, self.m_s
+                )
 
-                continuousLiquid = all(self.m_s[i] >= Sir for i in range(1, self.m_nodes - 1))
+                # Update moisture based on liquid continuity
+                continuousLiquid = _check_continuous_liquid(self.m_nodes, self.m_s)
+
                 if continuousLiquid:
-                    for i in range(1, self.m_nodes - 1):
-                        self.m_w[i] = self.m_wsa + self.m_s[i] * wdiff
-                        if self.m_pertubateColumn:
-                            self.m_w[i] += self.uniformRandom(-0.0001, 0.0001)
-                        self.m_w[i] = min(self.m_wmx, max(0.0, self.m_w[i]))
+                    # Generate new random values for this step if perturbation enabled
+                    if self.m_pertubateColumn:
+                        for i in range(self.m_nodes):
+                            random_vals[i] = self.uniformRandom(-0.0001, 0.0001)
+                    _update_moisture_continuous(
+                        self.m_nodes, self.m_wsa, wdiff, self.m_wmx,
+                        self.m_s, self.m_w, random_vals
+                    )
                 else:
-                    for i in range(1, self.m_nodes - 1):
-                        ae = self.m_To[i + 1] / self.m_dx
-                        aw = self.m_To[i - 1] / self.m_dx
-                        ar = self.m_x[i] * self.m_dx / self.m_mdt
-                        ap = ae + aw + ar
-                        self.m_w[i] = (ae * self.m_Twold[i + 1] + aw * self.m_Twold[i - 1] + ar * self.m_Twold[i]) / ap
-                        self.m_w[i] = min(self.m_wmx, max(0.0, self.m_w[i]))
-                self.m_w[self.m_nodes - 1] = self.m_w[self.m_nodes - 2]
+                    _update_moisture_diffusion(
+                        self.m_nodes, self.m_dx, self.m_mdt, self.m_wmx,
+                        self.m_x, self.m_To, self.m_Twold, self.m_w
+                    )
 
-            for i in range(1, self.m_nodes - 1):
-                ae = self.m_Tv[i + 1] / self.m_dx
-                aw = self.m_Tv[i - 1] / self.m_dx
-                ar = self.m_x[i] * self.m_dx / self.m_mdt
-                ap = ae + aw + ar
-                self.m_t[i] = (ae * self.m_Ttold[i + 1] + aw * self.m_Ttold[i - 1] + ar * self.m_Ttold[i]) / ap
-                self.m_t[i] = min(71.0, self.m_t[i])
-            self.m_t[self.m_nodes - 1] = self.m_t[self.m_nodes - 2]
+            # Update temperature using JIT kernel
+            _update_temperature(
+                self.m_nodes, self.m_dx, self.m_mdt,
+                self.m_x, self.m_Tv, self.m_Ttold, self.m_t
+            )
 
+            # Periodically recalculate diffusivity
             if (ddtNext - tt) < (0.5 * self.m_mdt):
                 self.diffusivity(bp)
                 ddtNext += self.m_ddt
 
+        # Set final state to most common state
         self.m_state = tstate.index(max(tstate))
         return True
 
     def zero(self):
+        """Reset all state to zero."""
         self.m_semTime = None
         self.m_density = 0.0
         self.m_dSteps = 0
@@ -563,8 +893,8 @@ class DeadFuelMoisture:
         self.m_wmx = 0.0
         self.m_dx = 0.0
         self.m_wmax = 0.0
-        self.m_x = []
-        self.m_v = []
+        self.m_x = np.array([])
+        self.m_v = np.array([])
         self.m_amlf = 0.0
         self.m_capf = 0.0
         self.m_hwf = 0.0
@@ -594,10 +924,10 @@ class DeadFuelMoisture:
         self.m_wsa = 0.0
         self.m_sem = 0.0
         self.m_wfilm = 0.0
-        self.m_t = []
-        self.m_s = []
-        self.m_d = []
-        self.m_w = []
+        self.m_t = np.array([])
+        self.m_s = np.array([])
+        self.m_d = np.array([])
+        self.m_w = np.array([])
         self.m_state = 0
 
     def __str__(self):
@@ -679,9 +1009,9 @@ class DeadFuelMoisture:
         r.m_dx = float(lines[16].split()[1])
         r.m_wmax = float(lines[17].split()[1])
         n = int(lines[18].split()[1])
-        r.m_x = [float(lines[19 + i]) for i in range(n)]
+        r.m_x = np.array([float(lines[19 + i]) for i in range(n)])
         n = int(lines[19 + n].split()[1])
-        r.m_v = [float(lines[20 + i]) for i in range(n)]
+        r.m_v = np.array([float(lines[20 + i]) for i in range(n)])
         r.m_amlf = float(lines[20 + n].split()[1])
         r.m_capf = float(lines[21 + n].split()[1])
         r.m_hwf = float(lines[22 + n].split()[1])
@@ -712,12 +1042,12 @@ class DeadFuelMoisture:
         r.m_sem = float(lines[47 + n].split()[1])
         r.m_wfilm = float(lines[48 + n].split()[1])
         n = int(lines[50 + n].split()[1])
-        r.m_t = [float(lines[51 + i + n]) for i in range(n)]
+        r.m_t = np.array([float(lines[51 + i + n]) for i in range(n)])
         n = int(lines[51 + n + n].split()[1])
-        r.m_s = [float(lines[52 + i + n]) for i in range(n)]
+        r.m_s = np.array([float(lines[52 + i + n]) for i in range(n)])
         n = int(lines[52 + n + n].split()[1])
-        r.m_d = [float(lines[53 + i + n]) for i in range(n)]
+        r.m_d = np.array([float(lines[53 + i + n]) for i in range(n)])
         n = int(lines[53 + n + n].split()[1])
-        r.m_w = [float(lines[54 + i + n]) for i in range(n)]
+        r.m_w = np.array([float(lines[54 + i + n]) for i in range(n)])
         r.m_state = int(lines[55 + n + n].split()[1])
         return r
