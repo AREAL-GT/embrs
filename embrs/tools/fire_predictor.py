@@ -1324,9 +1324,9 @@ class FirePredictor(BaseFireSim):
     def cleanup(self) -> None:
         """Release all predictor resources including forecast pools.
 
-        Clears all active forecast pools managed by ForecastPoolManager.
-        Should be called when the predictor is no longer needed to free
-        memory from cached wind forecasts.
+        Clears all active forecast pools managed by ForecastPoolManager
+        and all prediction output data. Should be called when the predictor
+        is no longer needed to free memory.
 
         This method is safe to call multiple times.
 
@@ -1339,6 +1339,44 @@ class FirePredictor(BaseFireSim):
         """
         from embrs.tools.forecast_pool import ForecastPoolManager
         ForecastPoolManager.clear_all()
+        self.clear_prediction_data()
+
+    def clear_prediction_data(self) -> None:
+        """Clear all prediction output data structures.
+
+        Frees memory used by spread tracking, flame lengths, fire line
+        intensities, and other per-timestep data accumulated during prediction.
+
+        This is called automatically by cleanup() but can also be called
+        separately to free memory while keeping the predictor usable.
+
+        Note:
+            The next call to predict() will re-initialize these data structures,
+            so this is safe to call between predictions.
+        """
+        # Clear spread tracking dictionaries
+        if hasattr(self, 'spread'):
+            self.spread.clear()
+        if hasattr(self, 'flame_len_m'):
+            self.flame_len_m.clear()
+        if hasattr(self, 'fli_kw_m'):
+            self.fli_kw_m.clear()
+        if hasattr(self, 'ros_ms'):
+            self.ros_ms.clear()
+        if hasattr(self, 'spread_dir'):
+            self.spread_dir.clear()
+        if hasattr(self, 'crown_fire'):
+            self.crown_fire.clear()
+        if hasattr(self, 'hold_probs'):
+            self.hold_probs.clear()
+        if hasattr(self, 'breaches'):
+            self.breaches.clear()
+
+        # Clear internal state tracking
+        if hasattr(self, '_updated_cells'):
+            self._updated_cells.clear()
+        if hasattr(self, '_scheduled_spot_fires'):
+            self._scheduled_spot_fires.clear()
 
     # =========================================================================
     # Visualization
