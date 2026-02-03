@@ -695,6 +695,10 @@ class FirePredictor(BaseFireSim):
 
             self._burning_cells = list(fires_still_burning)
 
+            # Clear updated cells to prevent unbounded memory growth
+            # (cells are tracked per-iteration, not across iterations)
+            self._updated_cells.clear()
+
             self._iters += 1
 
         self._finished = True
