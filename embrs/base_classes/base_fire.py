@@ -763,13 +763,17 @@ class BaseFireSim:
         Removes cells from active water drops when their moisture content
         falls below 50% of their fuel's extinction moisture.
         """
-        for cell in self._active_water_drops.copy():
+        def should_keep_water_drop(cell) -> bool:
+            """Check if water drop effect should continue."""
             if self.is_firesim():
                 cell._update_moisture(self._curr_weather_idx, self._weather_stream)
             dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
+            return dead_mf >= cell.fuel.dead_mx * 0.5
 
-            if dead_mf < cell.fuel.dead_mx * 0.5:
-                self._active_water_drops.remove(cell)
+        self._active_water_drops = [
+            cell for cell in self._active_water_drops
+            if should_keep_water_drop(cell)
+        ]
 
     def update_long_term_retardants(self):
         """Update long-term retardant effects and remove expired retardants.
@@ -923,19 +927,20 @@ class BaseFireSim:
         Returns:
             set: Cell IDs of cells at the fire frontier.
         """
-        frontier_copy = set(self._frontier)
-
-        # Loop over frontier to remove any cells completely surrounded by fire
-        for c in frontier_copy:
-            remove = True
-            for neighbor_id in self.cell_dict[c].burnable_neighbors:
+        def has_fuel_neighbor(cell_id: int) -> bool:
+            """Check if cell has at least one FUEL neighbor."""
+            cell = self.cell_dict[cell_id]
+            for neighbor_id in cell.burnable_neighbors:
                 neighbor = self.cell_dict[neighbor_id]
                 if neighbor.state == CellStates.FUEL:
-                    remove = False
-                    break
+                    return True
+            return False
 
-            if remove:
-                self._frontier.remove(c)
+        # Filter frontier to keep only cells with at least one FUEL neighbor
+        self._frontier = {
+            c for c in self._frontier
+            if has_fuel_neighbor(c)
+        }
 
         return self._frontier
 
@@ -1449,38 +1454,34 @@ class BaseFireSim:
 
         # Check if there are any instanteously constructed firelines
         if self._new_fire_break_cache:
-            to_remove = []
             for entry in self._new_fire_break_cache:
                 # Create an entry for each fire break
                 entries.append(ActionsEntry(
                     timestamp=entry["time"],
                     action_type="fireline_construction",
-                    x_coords= [coord[0] for coord in entry["line"].coords],
-                    y_coords= [coord[1] for coord in entry["line"].coords],
+                    x_coords=[coord[0] for coord in entry["line"].coords],
+                    y_coords=[coord[1] for coord in entry["line"].coords],
                     width=entry["width"]
                 ))
 
-                # Only remove it from cache if it has been registered by both logger 
+                # Only remove it from cache if it has been registered by both logger
                 # and the visualizer
                 if logger:
                     entry["logged"] = True
-
                     # Check if visualizer is being used
                     if not self._visualizer:
                         entry["visualized"] = True
-
                 else:
                     entry["visualized"] = True
-
                     # Check if logger is being used
                     if not self.logger:
                         entry["logged"] = True
 
-                if entry["logged"] and entry["visualized"]:
-                    to_remove.append(entry)
-
-            for entry in to_remove:
-                self._new_fire_break_cache.remove(entry)
+            # Filter cache to keep only entries not yet fully processed
+            self._new_fire_break_cache = [
+                entry for entry in self._new_fire_break_cache
+                if not (entry["logged"] and entry["visualized"])
+            ]
 
         return entries
     
