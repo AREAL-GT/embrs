@@ -26,6 +26,9 @@ from embrs.models.fuel_models import Anderson13, ScottBurgan40
 from embrs.utilities.fire_util import CellStates, CrownStatus
 from embrs.utilities.data_classes import SimParams, CellData
 from embrs.models.perryman_spot import PerrymanSpotting
+from embrs.base_classes.control_handler import ControlActionHandler
+from embrs.base_classes.weather_manager import WeatherManager
+from embrs.base_classes.grid_manager import GridManager
 from embrs.base_classes.agent_base import AgentBase
 from embrs.models.crown_model import crown_fire
 from embrs.models.weather import WeatherStream
@@ -75,13 +78,10 @@ class BaseFireSim:
         self.display_frequency = 300
         self._sim_params = sim_params
 
-        # Variables to keep track of current weather conditions
-        self.sim_start_w_idx = 0
-        self._curr_weather_idx = None
-        self._last_weather_update = 0
-        self.weather_changed = True
-        
-        # Store sim input values in class variables
+        # Weather manager placeholder (initialized in _parse_sim_params after weather data is loaded)
+        self._weather_manager = None
+
+        # Store sim input values in class variables (also initializes weather manager)
         self._parse_sim_params(sim_params)
         
         # Variables to keep track of sim progress
@@ -95,30 +95,60 @@ class BaseFireSim:
         # Track whether sim is finished or not
         self._finished = False
 
-        # Containers for keeping track of updates to cells 
+        # Containers for keeping track of updates to cells
         self._updated_cells = {}
 
-        # Containers for cells
-        self._cell_dict = {}
-        self._long_term_retardants = set()
-        self._active_water_drops = []
+        # Containers for fire spread tracking (note: _cell_dict is set up with grid manager below)
         self._burning_cells = []
         self._new_ignitions = []
         self._burnt_cells = set()
         self._frontier = set()
-        self._fire_break_cells = []
-        self._active_firelines = {}
-        self._new_fire_break_cache = []
         self.starting_ignitions = set()
         self._urban_cells = []
 
         # Crown fire containers
         self._scheduled_spot_fires = {}
 
-        # Set up backing array
-        self._cell_grid = np.empty(self._shape, dtype=Cell)
-        self._grid_width = self._cell_grid.shape[1] - 1
-        self._grid_height = self._cell_grid.shape[0] - 1
+        # Control action handler placeholder (initialized after grid manager)
+        self._control_handler = None
+
+        # Set up grid manager for cell storage and lookup
+        self._grid_manager = GridManager(
+            num_rows=self._shape[0],
+            num_cols=self._shape[1],
+            cell_size=self._cell_size
+        )
+        # Backward-compatible references (delegate to grid manager)
+        self._cell_grid = self._grid_manager.cell_grid
+        self._grid_width = self._grid_manager._grid_width
+        self._grid_height = self._grid_manager._grid_height
+        self._cell_dict = self._grid_manager.cell_dict
+
+        # Set up control action handler for fire suppression operations
+        self._control_handler = ControlActionHandler(
+            grid_manager=self._grid_manager,
+            cell_size=self._cell_size,
+            time_step=self._time_step,
+            fuel_class_factory=self.FuelClass
+        )
+        self._control_handler.set_updated_cells_ref(self._updated_cells)
+        self._control_handler.set_time_accessor(lambda: self._curr_time_s)
+        self._control_handler.logger = self.logger
+        self._control_handler._visualizer = self._visualizer
+
+        # Transfer scenario fire break data to control handler
+        for fire_break, width, id in self._fire_breaks:
+            self._control_handler._fire_breaks.append((fire_break, width, id))
+            self._control_handler._fire_break_dict[id] = (fire_break, width)
+
+        # Backward-compatible references (delegate to control handler)
+        self._long_term_retardants = self._control_handler.long_term_retardants
+        self._active_water_drops = self._control_handler.active_water_drops
+        self._fire_break_cells = self._control_handler.fire_break_cells
+        self._active_firelines = self._control_handler.active_firelines
+        self._new_fire_break_cache = self._control_handler.new_fire_break_cache
+        self._fire_breaks = self._control_handler.fire_breaks
+        self.fire_break_dict = self._control_handler.fire_break_dict
 
         if not prediction: # Regular FireSim
             if self._fms_has_live:
@@ -147,106 +177,21 @@ class BaseFireSim:
                 self.embers = PerrymanSpotting(self._spot_delay_s, limits)
 
 
-        # Populate cell_grid with cells
-        id = 0
+        # Store references needed by the cell factory
+        self._lcp_data = sim_params.map_params.lcp_data
+        self._live_h_mf = live_h_mf
+        self._live_w_mf = live_w_mf
+
+        # Populate cell_grid with cells using the grid manager
         total_cells = self._shape[0] * self._shape[1]
         with tqdm(total=total_cells, desc="Initializing cells") as pbar:
-            for i in range(self._shape[1]):
-                for j in range(self._shape[0]):
-                    # Initialize cell object
-                    new_cell = Cell(id, i, j, self._cell_size)
-
-                    # Set cell's parent reference to the current sim instance
-                    new_cell.set_parent(self)
-
-                    # Initialize cell data class
-                    cell_data = CellData()
-
-                    cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
-
-                    # Get row and col of data arrays corresponding to cell
-                    data_col = int(np.floor(cell_x/self._data_res))
-                    data_row = int(np.floor(cell_y/self._data_res))
-
-                    # Ensure data row and col in bounds
-                    data_col = min(data_col, sim_params.map_params.lcp_data.cols-1)
-                    data_row = min(data_row, sim_params.map_params.lcp_data.rows-1)
-
-                    # Get fuel type
-                    fuel_key = self._fuel_map[data_row, data_col]
-
-                    # Set initial moisture values (default)
-                    cell_data.init_dead_mf = self._init_mf
-                    cell_data.live_h_mf = live_h_mf
-                    cell_data.live_w_mf = live_w_mf
-                    if self._fuel_moisture_map.get(fuel_key) is not None:
-                        mf_vals = self._fuel_moisture_map[fuel_key]
-                        cell_data.init_dead_mf = mf_vals[:3]
-                        if self._fms_has_live and len(mf_vals) >= 5:
-                            cell_data.live_h_mf = mf_vals[3]
-                            cell_data.live_w_mf = mf_vals[4]
-
-                    fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
-                    cell_data.fuel_type = fuel
-
-                    # Get cell elevation from elevation map
-                    cell_data.elevation = self._elevation_map[data_row, data_col]
-                    self.coarse_elevation[j, i] = cell_data.elevation
-
-                    # Get cell aspect from aspect map
-                    cell_data.aspect = self._aspect_map[data_row, data_col]
-
-                    # Get cell slope from slope map
-                    cell_data.slope_deg = self._slope_map[data_row, data_col]
-
-                    # Get canopy cover from canopy cover map
-                    cell_data.canopy_cover = self._cc_map[data_row, data_col]
-
-                    # Get canopy height from canopy height map
-                    cell_data.canopy_height = self._ch_map[data_row, data_col]
-
-                    # Get canopy base height from cbh map
-                    cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
-
-                    # Get canopy bulk density from cbd map
-                    cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
-
-                    # Get data for cell
-                    new_cell._set_cell_data(cell_data)
-
-                    # If the fuel type is urban add it to urban cell list
-                    if fuel_key == 91:
-                        self._urban_cells.append(new_cell)
-
-                    # Set wind forecast in cell
-                    x_wind = max(cell_x - self.wind_xpad, 0)
-                    y_wind = max(cell_y - self.wind_ypad, 0)
-
-                    wind_col = int(np.floor(x_wind/self._wind_res))
-                    wind_row = int(np.floor(y_wind/self._wind_res))
-
-                    # Account for WindNinja differences in mesh_resolution
-                    if wind_row > self.wind_forecast.shape[1] - 1:
-                        wind_row = self.wind_forecast.shape[1] - 1
-
-                    if wind_col > self.wind_forecast.shape[2] - 1:
-                        wind_col = self.wind_forecast.shape[2] - 1
-                    
-                    # Collect wind speeds and directions for cell
-                    wind_speed = self.wind_forecast[:, wind_row, wind_col, 0]
-                    wind_dir = self.wind_forecast[:, wind_row, wind_col, 1]
-                    new_cell._set_wind_forecast(wind_speed, wind_dir)
-
-                    # Add cell to the backing array
-                    self._cell_grid[j,i] = new_cell
-                    self._cell_dict[id] = new_cell
-
-                    # Increment id counter
-                    id +=1
-                    pbar.update(1)
+            self._grid_manager.init_grid(
+                cell_factory=self._create_cell,
+                progress_callback=pbar.update
+            )
 
         # Populate neighbors field for each cell with pointers to each of its neighbors
-        self._add_cell_neighbors()
+        self._grid_manager.add_cell_neighbors()
 
         # Set initial ignitions
         self._set_initial_ignition(self.initial_ignition)
@@ -266,6 +211,91 @@ class BaseFireSim:
         self._set_roads()
         
         print("Base initialization complete...")
+
+    def _create_cell(self, cell_id: int, col: int, row: int) -> Cell:
+        """Factory method to create and initialize a cell.
+
+        Creates a Cell object and populates it with terrain data, fuel type,
+        moisture values, and wind forecast data from the simulation maps.
+
+        Args:
+            cell_id: Unique identifier for the cell.
+            col: Column index in the grid.
+            row: Row index in the grid.
+
+        Returns:
+            Fully initialized Cell object.
+        """
+        # Initialize cell object
+        new_cell = Cell(cell_id, col, row, self._cell_size)
+
+        # Set cell's parent reference to the current sim instance
+        new_cell.set_parent(self)
+
+        # Initialize cell data class
+        cell_data = CellData()
+
+        cell_x, cell_y = new_cell.x_pos, new_cell.y_pos
+
+        # Get row and col of data arrays corresponding to cell
+        data_col = int(np.floor(cell_x / self._data_res))
+        data_row = int(np.floor(cell_y / self._data_res))
+
+        # Ensure data row and col in bounds
+        data_col = min(data_col, self._lcp_data.cols - 1)
+        data_row = min(data_row, self._lcp_data.rows - 1)
+
+        # Get fuel type
+        fuel_key = self._fuel_map[data_row, data_col]
+
+        # Set initial moisture values (default)
+        cell_data.init_dead_mf = self._init_mf
+        cell_data.live_h_mf = self._live_h_mf
+        cell_data.live_w_mf = self._live_w_mf
+        if self._fuel_moisture_map.get(fuel_key) is not None:
+            mf_vals = self._fuel_moisture_map[fuel_key]
+            cell_data.init_dead_mf = mf_vals[:3]
+            if self._fms_has_live and len(mf_vals) >= 5:
+                cell_data.live_h_mf = mf_vals[3]
+                cell_data.live_w_mf = mf_vals[4]
+
+        fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
+        cell_data.fuel_type = fuel
+
+        # Get cell elevation from elevation map
+        cell_data.elevation = self._elevation_map[data_row, data_col]
+        self.coarse_elevation[row, col] = cell_data.elevation
+
+        # Get cell aspect from aspect map
+        cell_data.aspect = self._aspect_map[data_row, data_col]
+
+        # Get cell slope from slope map
+        cell_data.slope_deg = self._slope_map[data_row, data_col]
+
+        # Get canopy cover from canopy cover map
+        cell_data.canopy_cover = self._cc_map[data_row, data_col]
+
+        # Get canopy height from canopy height map
+        cell_data.canopy_height = self._ch_map[data_row, data_col]
+
+        # Get canopy base height from cbh map
+        cell_data.canopy_base_height = self._cbh_map[data_row, data_col]
+
+        # Get canopy bulk density from cbd map
+        cell_data.canopy_bulk_density = self._cbd_map[data_row, data_col]
+
+        # Get data for cell
+        new_cell._set_cell_data(cell_data)
+
+        # If the fuel type is urban add it to urban cell list
+        if fuel_key == 91:
+            self._urban_cells.append(new_cell)
+
+        # Set wind forecast in cell using weather manager
+        wind_speed, wind_dir = self._weather_manager.get_cell_wind(cell_x, cell_y)
+        new_cell._set_wind_forecast(wind_speed, wind_dir)
+
+        return new_cell
 
     def _parse_sim_params(self, sim_params: SimParams):
         """Parse simulation parameters and initialize internal state.
@@ -340,38 +370,46 @@ class BaseFireSim:
         self._aspect_map = (180 + self._aspect_map) % 360 
 
         if self.is_prediction():
-            # Set prediction wind forecast to zeros initially
-            self.wind_forecast = np.zeros((1, 1, 1, 2))
-            self.flipud_forecast = self.wind_forecast
+            # Prediction models use placeholder wind data initially
             self._wind_res = 10e10
-
-            self.wind_xpad = 0
-            self.wind_ypad = 0
-
-            self._curr_weather_idx = 0
-        # Generate a weather stream
+            self._weather_manager = WeatherManager(
+                weather_stream=None,
+                wind_res=self._wind_res,
+                sim_size=self._size
+            )
+            self._weather_manager.curr_weather_idx = 0
         else:
+            # Generate a weather stream
             self._weather_stream = WeatherStream(
                 sim_params.weather_input, sim_params.map_params.geo_info, use_gsi=not self._fms_has_live
             )
-            self.sim_start_w_idx = self._weather_stream.sim_start_idx
-            self._curr_weather_idx = self._weather_stream.sim_start_idx
-            self.weather_t_step = self._weather_stream.time_step * 60 # convert to seconds
-            
+
             # Get wind data
             self._wind_res = sim_params.weather_input.mesh_resolution
-            self.wind_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+            raw_forecast = run_windninja(self._weather_stream, sim_params.map_params)
 
-            self.wind_xpad, self.wind_ypad = self.calc_wind_padding(self.wind_forecast)
+            # Flip forecast layers
+            flipped_forecast = np.empty(raw_forecast.shape)
+            for layer in range(raw_forecast.shape[0]):
+                flipped_forecast[layer] = np.flipud(raw_forecast[layer])
 
-            self.flipud_forecast = np.empty(self.wind_forecast.shape)
+            # Create weather manager with the processed forecast
+            self._weather_manager = WeatherManager(
+                weather_stream=self._weather_stream,
+                wind_forecast=flipped_forecast,
+                wind_res=self._wind_res,
+                sim_size=self._size
+            )
 
-        # Iterate over each layer (time step or vertical level, depending on the dataset structure)
-        for layer in range(self.wind_forecast.shape[0]):
-            self.flipud_forecast[layer] = np.flipud(self.wind_forecast[layer])
-        
-        self.wind_forecast = self.flipud_forecast
-
+        # Backward-compatible references to weather manager state
+        self.sim_start_w_idx = self._weather_manager.sim_start_w_idx
+        self._curr_weather_idx = self._weather_manager.curr_weather_idx
+        self._last_weather_update = self._weather_manager.last_weather_update
+        self.weather_changed = self._weather_manager.weather_changed
+        self.weather_t_step = self._weather_manager.weather_t_step
+        self.wind_xpad = self._weather_manager.wind_xpad
+        self.wind_ypad = self._weather_manager.wind_ypad
+        self.wind_forecast = self._weather_manager.wind_forecast
 
         self.model_spotting = sim_params.model_spotting
         self._spot_ign_prob = 0.0
@@ -389,27 +427,10 @@ class BaseFireSim:
         For each cell, determines its neighbors based on hexagonal grid
         geometry (even/odd row offset) and stores neighbor IDs with their
         relative positions.
+
+        Note: This method delegates to GridManager.add_cell_neighbors().
         """
-        for j in range(self._shape[1]):
-            for i in range(self._shape[0]):
-                cell = self._cell_grid[i][j]
-
-                neighbors = {}
-                if cell.row % 2 == 0:
-                    neighborhood = hex.even_neighborhood
-                else:
-                    neighborhood = hex.odd_neighborhood
-
-                for dx, dy in neighborhood:
-                    row_n = int(cell.row + dy)
-                    col_n = int(cell.col + dx)
-
-                    if self._grid_height >= row_n >= 0 and self._grid_width >= col_n >= 0:
-                        neighbor_id = self._cell_grid[row_n, col_n].id
-                        neighbors[neighbor_id] = (dx, dy)
-
-                cell._neighbors = neighbors
-                cell._burnable_neighbors = dict(neighbors)
+        self._grid_manager.add_cell_neighbors()
 
     def remove_neighbors(self, cell: Cell):
         """Remove non-burnable neighbors from a cell's burnable neighbors list.
@@ -683,16 +704,10 @@ class BaseFireSim:
 
         Checks retardant expiration times and removes retardant effects
         from cells whose retardant has expired.
+
+        Note: This method delegates to ControlActionHandler.update_long_term_retardants().
         """
-        for cell in self._long_term_retardants.copy():
-            if cell.retardant_expiration_s <= self._curr_time_s:
-                cell._retardant = False
-                cell._retardant_factor = 1.0
-                cell.retardant_expiration_s = -1.0
-
-                self._updated_cells[cell.id] = cell
-
-                self._long_term_retardants.remove(cell)
+        self._control_handler.update_long_term_retardants(self._curr_time_s)
 
     def calc_wind_padding(self, forecast: np.ndarray) -> Tuple[float, float]:
         """Calculate padding offsets between wind forecast grid and simulation grid.
@@ -707,17 +722,10 @@ class BaseFireSim:
 
         Returns:
             Tuple[float, float]: (x_padding, y_padding) in meters.
+
+        Note: This method delegates to WeatherManager.calc_wind_padding().
         """
-        forecast_rows = forecast[0, :, :, 0].shape[0]
-        forecast_cols = forecast[0, :, :, 1].shape[1]
-
-        forecast_height = forecast_rows * self._wind_res
-        forecast_width = forecast_cols * self._wind_res
-
-        xpad = (self.size[0] - forecast_width)/2
-        ypad = (self.size[1] - forecast_height)/2
-        
-        return xpad, ypad
+        return self._weather_manager.calc_wind_padding(forecast)
 
     def _set_roads(self):
         """Apply road data to the simulation grid.
@@ -785,20 +793,10 @@ class BaseFireSim:
         Args:
             line (LineString): Shapely LineString defining the fire break path.
             break_width (float): Width of the fire break in meters.
+
+        Note: This method delegates to ControlActionHandler._apply_firebreak().
         """
-
-        cells = self.get_cells_at_geometry(line)
-
-        if not cells:
-            return
-        
-        for cell in cells:
-            if cell not in self._fire_break_cells:
-                self._fire_break_cells.append(cell)
-            
-            cell._break_width += break_width
-            if cell._break_width > self._cell_size:
-                cell._set_fuel_type(self.FuelClass(91))
+        self._control_handler._apply_firebreak(line, break_width)
 
 
     def _set_initial_ignition(self, geometries: list):
@@ -912,28 +910,15 @@ class BaseFireSim:
 
         Returns:
             tuple: (q, r) integer coordinates of the nearest hex cell
+
+        Note: This method delegates to GridManager.hex_round().
         """
-        s = -q - r
-        q_r = round(q)
-        r_r = round(r)
-        s_r = round(s)
-        q_diff = abs(q_r - q)
-        r_diff = abs(r_r - r)
-        s_diff = abs(s_r - s)
-
-        if q_diff > r_diff and q_diff > s_diff:
-            q_r = -r_r - s_r
-        elif r_diff > s_diff:
-            r_r = -q_r - s_r
-        else:
-            s_r = -q_r - r_r
-
-        return (int(q_r), int(r_r))
+        return self._grid_manager.hex_round(q, r)
 
     def get_cell_from_xy(self, x_m: float, y_m: float, oob_ok = False) -> Cell:
         """Returns the cell in the sim that contains the point (x_m, y_m) in the cartesian
         plane.
-        
+
         (0,0) is considered the lower left corner of the sim window, x increases to the
         right, y increases up.
 
@@ -948,39 +933,16 @@ class BaseFireSim:
 
         Returns:
             Cell: Cell at the requested point, returns `None` if the point is out of bounds and oob_ok is `True`
+
+        Note: This method delegates to GridManager.get_cell_from_xy().
         """
-        try:
-            if x_m < 0 or y_m < 0:
-                if not oob_ok:
-                    raise IndexError("x and y coordinates must be positive")
-
-                else:
-                    return None
-
-            q = (np.sqrt(3)/3 * x_m - 1/3 * y_m) / self._cell_size
-            r = (2/3 * y_m) / self._cell_size
-
-            q, r = self.hex_round(q, r)
-
-            row = r
-            col = q + row//2
-
-            # Check if the estimated cell contains the point
-            estimated_cell = self._cell_grid[row, col]
-
-            return estimated_cell
-
-        except IndexError:
-            if not oob_ok:
-                msg = f'Point ({x_m}, {y_m}) is outside the grid.'
-                self.logger.log_message(f"Following error occurred in 'FireSim.get_cell_from_xy()': {msg}")
-                raise ValueError(msg)
-
-            return None
+        # Ensure grid manager has current logger reference
+        self._grid_manager.logger = self.logger
+        return self._grid_manager.get_cell_from_xy(x_m, y_m, oob_ok)
 
     def get_cell_from_indices(self, row: int, col: int) -> Cell:
         """Returns the cell in the sim at the indices [row, col] in the cell_grid.
-        
+
         Columns increase left to right in the sim visualization window, rows increase bottom to
         top.
 
@@ -994,27 +956,12 @@ class BaseFireSim:
 
         Returns:
             Cell: Cell instance at the indices [row, col] in the cell_grid
+
+        Note: This method delegates to GridManager.get_cell_from_indices().
         """
-        if not isinstance(row, int) or not isinstance(col, int):
-            msg = (f"Row and column must be integer index values. "
-                f"Input was {type(row)}, {type(col)}")
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.get_cell_from_indices(): "
-                                        f"{msg} Program terminated.")
-            raise TypeError(msg)
-
-        if col < 0 or row < 0 or row >= self._grid_height or col >= self._grid_width:
-            msg = (f"Out of bounds error. {row}, {col} "
-                f"are out of bounds for grid of size "
-                f"{self._grid_height}, {self._grid_width}")
-
-            if self.logger:
-                self.logger.log_message(f"Following erorr occurred in 'FireSim.get_cell_from_indices(): "
-                                        f"{msg} Program terminated.")
-            raise ValueError(msg)
-
-        return self._cell_grid[row, col]
+        # Ensure grid manager has current logger reference
+        self._grid_manager.logger = self.logger
+        return self._grid_manager.get_cell_from_indices(row, col)
 
     # Functions for setting state of cells
     def set_state_at_xy(self, x_m: float, y_m: float, state: CellStates):
@@ -1137,12 +1084,10 @@ class BaseFireSim:
             y_m (float): Y position in meters.
             duration_hr (float): Duration of retardant effect in hours.
             effectiveness (float): Retardant effectiveness factor (0.0-1.0).
+
+        Note: This method delegates to ControlActionHandler.add_retardant_at_xy().
         """
-        # Get cell from specified x, y location
-        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
-        if cell is not None:
-            # Apply retardant at cell
-            self.add_retardant_at_cell(cell, duration_hr, effectiveness)
+        self._control_handler.add_retardant_at_xy(x_m, y_m, duration_hr, effectiveness)
 
     def add_retardant_at_indices(self, row: int, col: int, duration_hr: float, effectiveness: float):
         """Apply long-term fire retardant at the specified grid indices.
@@ -1152,12 +1097,10 @@ class BaseFireSim:
             col (int): Column index in the cell grid.
             duration_hr (float): Duration of retardant effect in hours.
             effectiveness (float): Retardant effectiveness factor (0.0-1.0).
+
+        Note: This method delegates to ControlActionHandler.add_retardant_at_indices().
         """
-        # Get cell from specified indices
-        cell = self.get_cell_from_indices(row, col)
-        
-        # Apply retardant at cell 
-        self.add_retardant_at_cell(cell, duration_hr, effectiveness)
+        self._control_handler.add_retardant_at_indices(row, col, duration_hr, effectiveness)
 
     def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float):
         """Apply long-term fire retardant to the specified cell.
@@ -1169,15 +1112,10 @@ class BaseFireSim:
             cell (Cell): Cell to apply retardant to.
             duration_hr (float): Duration of retardant effect in hours.
             effectiveness (float): Retardant effectiveness factor (0.0-1.0).
-        """
-        # Ensure that effectiveness is between 0 and 1
-        effectiveness = min(max(effectiveness, 0), 1)
 
-        if cell.fuel.burnable:
-            # Apply long-term retardant at specified cell
-            cell.add_retardant(duration_hr, effectiveness)
-            self._long_term_retardants.add(cell)
-            self._updated_cells[cell.id] = cell
+        Note: This method delegates to ControlActionHandler.add_retardant_at_cell().
+        """
+        self._control_handler.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
     def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
         """Apply water drop as equivalent rainfall at the specified coordinates.
@@ -1186,12 +1124,10 @@ class BaseFireSim:
             x_m (float): X position in meters.
             y_m (float): Y position in meters.
             water_depth_cm (float): Equivalent rainfall depth in centimeters.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_xy_as_rain().
         """
-        # Get cell from specified x, y location
-        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
-        if cell is not None:
-            # Apply water drop at cell
-            self.water_drop_at_cell_as_rain(cell, water_depth_cm)
+        self._control_handler.water_drop_at_xy_as_rain(x_m, y_m, water_depth_cm)
 
     def water_drop_at_indices_as_rain(self, row: int, col: int, water_depth_cm: float):
         """Apply water drop as equivalent rainfall at the specified grid indices.
@@ -1200,12 +1136,10 @@ class BaseFireSim:
             row (int): Row index in the cell grid.
             col (int): Column index in the cell grid.
             water_depth_cm (float): Equivalent rainfall depth in centimeters.
-        """
-        # Get cell from specified indices
-        cell = self.get_cell_from_indices(row, col)
 
-        # Apply water drop as rain at cell
-        self.water_drop_at_cell_as_rain(cell, water_depth_cm)
+        Note: This method delegates to ControlActionHandler.water_drop_at_indices_as_rain().
+        """
+        self._control_handler.water_drop_at_indices_as_rain(row, col, water_depth_cm)
 
     def water_drop_at_cell_as_rain(self, cell: Cell, water_depth_cm: float):
         """Apply water drop as equivalent rainfall to the specified cell.
@@ -1219,15 +1153,10 @@ class BaseFireSim:
 
         Raises:
             ValueError: If water_depth_cm is negative.
-        """
-        if water_depth_cm < 0:
-            raise ValueError(f"Water depth must be >=0, {water_depth_cm} passed in")
 
-        if cell.fuel.burnable:
-            # Apply water drop as rain at specified cell
-            cell.water_drop_as_rain(water_depth_cm)
-            self._active_water_drops.append(cell)
-            self._updated_cells[cell.id] = cell
+        Note: This method delegates to ControlActionHandler.water_drop_at_cell_as_rain().
+        """
+        self._control_handler.water_drop_at_cell_as_rain(cell, water_depth_cm)
 
     def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float):
         """Apply water drop as direct moisture increase at the specified coordinates.
@@ -1236,12 +1165,10 @@ class BaseFireSim:
             x_m (float): X position in meters.
             y_m (float): Y position in meters.
             moisture_inc (float): Moisture content increase as a fraction.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_xy_as_moisture_bump().
         """
-        # Get cell from specified x, y location
-        cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
-        if cell is not None:
-            # Apply water drop at cell
-            self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
+        self._control_handler.water_drop_at_xy_as_moisture_bump(x_m, y_m, moisture_inc)
 
     def water_drop_at_indices_as_moisture_bump(self, row: int, col: int, moisture_inc: float):
         """Apply water drop as direct moisture increase at the specified grid indices.
@@ -1250,12 +1177,10 @@ class BaseFireSim:
             row (int): Row index in the cell grid.
             col (int): Column index in the cell grid.
             moisture_inc (float): Moisture content increase as a fraction.
-        """
-        # Get cell from specified indices
-        cell = self.get_cell_from_indices(row, col)
 
-        # Apply water drop at cell
-        self.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
+        Note: This method delegates to ControlActionHandler.water_drop_at_indices_as_moisture_bump().
+        """
+        self._control_handler.water_drop_at_indices_as_moisture_bump(row, col, moisture_inc)
 
     def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float):
         """Apply water drop as direct moisture increase to the specified cell.
@@ -1269,16 +1194,10 @@ class BaseFireSim:
 
         Raises:
             ValueError: If moisture_inc is negative.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_cell_as_moisture_bump().
         """
-
-        if moisture_inc < 0:
-            raise ValueError(f"Moisture increase must be >0, {moisture_inc} passed in")
-
-        if cell.fuel.burnable:
-            # Apply water drop as moisture bump
-            cell.water_drop_as_moisture_bump(moisture_inc)
-            self._active_water_drops.append(cell)
-            self._updated_cells[cell.id] = cell
+        self._control_handler.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
     def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None, id: str = None) -> str:
         """Construct a fire break along a line geometry.
@@ -1296,45 +1215,16 @@ class BaseFireSim:
 
         Returns:
             str: Identifier of the constructed fire break.
+
+        Note: This method delegates to ControlActionHandler.construct_fireline().
         """
-
-        if construction_rate is None:
-            # Add fire break instantly
-            self._apply_firebreak(line, width_m)
-
-            if id is None:
-                id = str(len(self.fire_breaks) + 1)
-                
-            self._fire_breaks.append((line, width_m, id))
-            self.fire_break_dict[id] = (line, width_m)
-            
-            # Add to a cache for visualization and logging
-            cache_entry = {
-                "id": id,
-                "line": line,
-                "width": width_m,
-                "time": self.curr_time_s,
-                "logged": False,
-                "visualized": False
-            }
-
-            self._new_fire_break_cache.append(cache_entry)
-
-        else:
-            if id is None:
-                id = str(len(self.fire_breaks) + len(self._active_firelines) + 1)
-
-            # Create an active fireline to be updated over time
-            self._active_firelines[id] = {
-                "line": line,
-                "width": width_m,
-                "rate": construction_rate,
-                "progress": 0.0,
-                "partial_line": LineString([]),
-                "cells": set()
-            }
-
-        return id
+        return self._control_handler.construct_fireline(
+            line=line,
+            width_m=width_m,
+            construction_rate=construction_rate,
+            fireline_id=id,
+            curr_time_s=self.curr_time_s
+        )
 
     def stop_fireline_construction(self, fireline_id: str):
         """Stop construction of an active fireline.
@@ -1344,15 +1234,10 @@ class BaseFireSim:
 
         Args:
             fireline_id (str): Identifier of the fireline to stop constructing.
-        """
-        if self._active_firelines.get(fireline_id) is not None:
-            fireline = self._active_firelines[fireline_id]
-            partial_line = fireline["partial_line"]
-            self._fire_breaks.append((partial_line, fireline["width"], fireline_id))
-            self.fire_break_dict[fireline_id] = (partial_line, fireline["width"])
-            del self._active_firelines[fireline_id]
 
-        # TODO: do we want to throw an error here if an invalid id is passed in
+        Note: This method delegates to ControlActionHandler.stop_fireline_construction().
+        """
+        self._control_handler.stop_fireline_construction(fireline_id)
 
     def _update_active_firelines(self) -> None:
         """Update progress of active fireline construction.
@@ -1360,66 +1245,10 @@ class BaseFireSim:
         Extends partially constructed fire lines based on their
         construction rate. Completes fire lines that reach their
         full length.
+
+        Note: This method delegates to ControlActionHandler.update_active_firelines().
         """
-
-        step_size = self._cell_size / 4.0
-        firelines_to_remove = []
-
-        for id in list(self._active_firelines.keys()):
-            fireline = self._active_firelines[id]
-
-            full_line = fireline["line"]
-            length = full_line.length
-            
-            # Get the progress from previous update
-            prev_progress = fireline["progress"]
-
-            # Update progress based on line construction rate
-            fireline["progress"] += fireline["rate"] * self._time_step
-
-            # Cap progress at full length
-            fireline["progress"] = min(fireline["progress"], length)
-
-            # Interpolate new points between prev_progress and current progress
-            num_steps = int(fireline["progress"] / step_size)
-            prev_steps = int(prev_progress / step_size)
-
-            for i in range(prev_steps, num_steps):
-                # Get the interpolated point
-                point = fireline["line"].interpolate(i * step_size)
-
-                # Find the cell containing the new point
-                cell = self.get_cell_from_xy(point.x, point.y, oob_ok=True)
-
-                if cell is not None:
-                    # Add cell to fire break cell container
-                    if cell not in self._fire_break_cells:
-                        self._fire_break_cells.append(cell)
-
-                    # Add cell to the lines container
-                    if cell not in fireline["cells"]:
-                        cell._break_width += fireline["width"]
-                        fireline["cells"].add(cell)
-
-                        # Increment the cell's break width only once per line
-                        if cell._break_width > self._cell_size:
-                            cell._set_fuel_type(self.FuelClass(91))
-                    
-            # If line has met its full length we can add it to the permanent fire lines 
-            # and remove it from active
-            if fireline["progress"] == length:
-                fireline["partial_line"] = full_line
-                self._fire_breaks.append((full_line, fireline["width"], id))
-                self.fire_break_dict[id] = (full_line, fireline["width"])
-                firelines_to_remove.append(id)
-
-            else:
-                # Store the truncated line based on progress
-                fireline["partial_line"] = self.truncate_linestring(fireline["line"], fireline["progress"])
-
-        # Remove the lines marked for removal from active firelines
-        for fireline_id in firelines_to_remove:
-            del self._active_firelines[fireline_id]
+        self._control_handler.update_active_firelines()
 
     def truncate_linestring(self, line: LineString, length: float) -> LineString:
         """Truncate a LineString to the specified length.
@@ -1430,30 +1259,10 @@ class BaseFireSim:
 
         Returns:
             LineString: Truncated line, or original if length exceeds line length.
+
+        Note: This method delegates to ControlActionHandler._truncate_linestring().
         """
-        if length <= 0:
-            return LineString([line.coords[0]])
-        if length >= line.length:
-            return line
-
-        coords = list(line.coords)
-        accumulated = 0.0
-        new_coords = [coords[0]]
-
-        for i in range(1, len(coords)):
-            seg = LineString([coords[i - 1], coords[i]])
-            seg_len = seg.length
-            if accumulated + seg_len >= length:
-                ratio = (length - accumulated) / seg_len
-                x = coords[i - 1][0] + ratio * (coords[i][0] - coords[i - 1][0])
-                y = coords[i - 1][1] + ratio * (coords[i][1] - coords[i - 1][1])
-                new_coords.append((x, y))
-                break
-            else:
-                new_coords.append(coords[i])
-                accumulated += seg_len
-
-        return LineString(new_coords)
+        return self._control_handler._truncate_linestring(line, length)
 
     def get_cells_at_geometry(self, geom: Union[Polygon, LineString, Point]) -> List[Cell]:
         """Get all cells that intersect with the given geometry.
@@ -1467,50 +1276,10 @@ class BaseFireSim:
 
         Raises:
             ValueError: If geometry type is not Polygon, LineString, or Point.
+
+        Note: This method delegates to GridManager.get_cells_at_geometry().
         """
-        cells = set()
-        if isinstance(geom, Polygon):
-                minx, miny, maxx, maxy = geom.bounds
-                # Get row and col indices for bounding box
-                min_row = int(miny // (self.cell_size * 1.5))
-                max_row = int(maxy // (self.cell_size * 1.5))
-                min_col = int(minx // (self.cell_size * np.sqrt(3)))
-                max_col = int(maxx // (self.cell_size * np.sqrt(3)))
-                
-                for row in range(min_row - 1, max_row + 2):
-                    for col in range(min_col - 1, max_col + 2):
-                        # Check that row and col are in bounds
-                        if 0 <= row < self.shape[0] and 0 <= col < self.shape[1]:
-                            cell = self._cell_grid[row, col]
-
-                            # See if cell is within polygon
-                            if geom.intersection(cell.polygon).area > 1e-6:                                
-                                cells.add(cell)
-
-        elif isinstance(geom, LineString):
-                length = geom.length
-
-                step_size = self._cell_size / 4.0
-                num_steps = int(length/step_size) + 1
-
-                for i in range(num_steps):
-                    point = geom.interpolate(i * step_size)
-                    cell = self.get_cell_from_xy(point.x, point.y, oob_ok = True)
-
-                    if cell is not None:
-                        cells.add(cell)
-                        
-        elif isinstance(geom, Point):
-                x, y = geom.x, geom.y
-                cell = self.get_cell_from_xy(x, y, oob_ok=True)
-
-                if cell is not None:
-                    cells.add(cell)
-
-        else:
-            raise ValueError(f"Unknown geometry type: {type(geom)}")
-
-        return list(cells)
+        return self._grid_manager.get_cells_at_geometry(geom)
 
     def set_surface_accel_constant(self, cell: Cell):
         """Sets the surface acceleration constant for a burning cell based on the state of its neighbors.
@@ -1821,9 +1590,9 @@ class BaseFireSim:
     def _update_weather(self) -> bool:
         """Updates the current wind conditions based on the forecast.
 
-        This method checks whether the time elapsed since the last wind update exceeds 
-        the wind forecast time step. If so, it updates the wind index and retrieves 
-        the next forecasted wind condition. If the forecast has no remaining entries, 
+        This method checks whether the time elapsed since the last wind update exceeds
+        the wind forecast time step. If so, it updates the wind index and retrieves
+        the next forecasted wind condition. If the forecast has no remaining entries,
         it raises a ValueError.
 
         Returns:
@@ -1836,20 +1605,14 @@ class BaseFireSim:
             - Updates _last_wind_update to the current simulation time.
             - Increments _curr_weather_idx to the next wind forecast entry.
             - Resets _curr_weather_idx to 0 if out of bounds and raises an error.
+
+        Note: This method delegates to WeatherManager.update_weather().
         """
-        # Check if a wind forecast time step has elapsed since last update
-        weather_changed = self.curr_time_s - self._last_weather_update >= self.weather_t_step
+        weather_changed = self._weather_manager.update_weather(self.curr_time_s)
 
-        if weather_changed:
-            # Reset last wind update to current time
-            self._last_weather_update = self.curr_time_s
+        # Update backward-compatible references
+        self._curr_weather_idx = self._weather_manager.curr_weather_idx
+        self._last_weather_update = self._weather_manager.last_weather_update
+        self.weather_changed = self._weather_manager.weather_changed
 
-            # Increment wind index
-            self._curr_weather_idx += 1
-
-            # Check for out of bounds index
-            if self._curr_weather_idx >= len(self._weather_stream.stream):
-                self._curr_weather_idx = 0
-                raise ValueError("Weather forecast has no more entries!")
-        
         return weather_changed
