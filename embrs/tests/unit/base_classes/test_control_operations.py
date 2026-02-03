@@ -146,15 +146,19 @@ class MockControlActionHandler:
 
     def update_long_term_retardants(self):
         """Update long-term retardant effects and remove expired retardants."""
-        for cell in self._long_term_retardants.copy():
+        # First, clear retardant from expired cells and track them as updated
+        for cell in self._long_term_retardants:
             if cell.retardant_expiration_s <= self._curr_time_s:
                 cell._retardant = False
                 cell._retardant_factor = 1.0
                 cell.retardant_expiration_s = -1.0
-
                 self._updated_cells[cell.id] = cell
 
-                self._long_term_retardants.remove(cell)
+        # Then filter to keep only non-expired cells
+        self._long_term_retardants = {
+            cell for cell in self._long_term_retardants
+            if cell._retardant  # Still has retardant (wasn't cleared above)
+        }
 
     def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
         """Apply water drop as equivalent rainfall at the specified coordinates."""
