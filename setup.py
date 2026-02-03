@@ -24,6 +24,7 @@ setup(
         'timezonefinder',
         'pyarrow',
         'numba>=0.57.0',
+        'pvlib',
     ],
     extras_require={
         'dev': [
