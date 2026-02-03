@@ -327,7 +327,7 @@ class ForecastPool:
         """Get a forecast by index."""
         return self.forecasts[idx]
 
-    def sample(self, n: int, replace: bool = True, seed: int = None) -> List[int]:
+    def sample(self, n: int, replace: bool = True, seed: Optional[int] = None) -> List[int]:
         """Sample n indices from the pool.
 
         Args:

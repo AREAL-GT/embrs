@@ -18,6 +18,8 @@ Example:
     >>> raise ConfigurationError("Missing required parameter 'cell_size'")
 """
 
+from typing import Optional
+
 
 class EMBRSError(Exception):
     """Base exception for all EMBRS-related errors.
@@ -56,7 +58,7 @@ class ConfigurationError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, config_path: str = None, parameter: str = None):
+    def __init__(self, message: str, config_path: Optional[str] = None, parameter: Optional[str] = None):
         self.config_path = config_path
         self.parameter = parameter
 
@@ -94,7 +96,7 @@ class SimulationError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, sim_time_s: float = None):
+    def __init__(self, message: str, sim_time_s: Optional[float] = None):
         self.sim_time_s = sim_time_s
 
         if sim_time_s is not None:
@@ -126,7 +128,7 @@ class ValidationError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, field: str = None, value=None):
+    def __init__(self, message: str, field: Optional[str] = None, value=None):
         self.field = field
         self.value = value
 
@@ -164,7 +166,7 @@ class WeatherDataError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, source: str = None):
+    def __init__(self, message: str, source: Optional[str] = None):
         self.source = source
 
         if source:
@@ -196,7 +198,7 @@ class ExternalServiceError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, service: str = None, original_error: Exception = None):
+    def __init__(self, message: str, service: Optional[str] = None, original_error: Optional[Exception] = None):
         self.service = service
         self.original_error = original_error
 
@@ -236,7 +238,7 @@ class GridError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, row: int = None, col: int = None):
+    def __init__(self, message: str, row: Optional[int] = None, col: Optional[int] = None):
         self.row = row
         self.col = col
 
@@ -273,7 +275,7 @@ class FuelModelError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, fuel_model_id: int = None):
+    def __init__(self, message: str, fuel_model_id: Optional[int] = None):
         self.fuel_model_id = fuel_model_id
 
         if fuel_model_id is not None:
@@ -303,7 +305,7 @@ class PredictionError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, ensemble_member: int = None):
+    def __init__(self, message: str, ensemble_member: Optional[int] = None):
         self.ensemble_member = ensemble_member
 
         if ensemble_member is not None:

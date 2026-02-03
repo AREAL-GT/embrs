@@ -43,6 +43,11 @@ class BaseFireSim:
     and control interface elements. Subclassed by FireSim for real-time simulation
     and FirePredictor for forward prediction.
 
+    This class uses composition with several manager classes:
+        - GridManager: Handles cell grid storage, coordinate conversion, and neighbor lookups.
+        - WeatherManager: Handles weather stream and wind forecast management.
+        - ControlActionHandler: Handles fire suppression actions (retardant, water, firelines).
+
     Attributes:
         cell_grid (np.ndarray): 2D array of Cell objects backing the simulation.
         cell_dict (Dict[int, Cell]): Dictionary mapping cell IDs to Cell objects.
