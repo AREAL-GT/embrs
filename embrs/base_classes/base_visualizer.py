@@ -31,6 +31,9 @@ from shapely.geometry import LineString
 
 from datetime import timedelta
 
+# Target number of wind arrows per axis (total arrows = WIND_ARROWS_PER_AXIS^2)
+WIND_ARROWS_PER_AXIS = 20
+
 
 class BaseVisualizer:
     """Base class for fire simulation visualization.
@@ -78,7 +81,7 @@ class BaseVisualizer:
         self.wind_res = params.wind_resolution
         self.wind_t_step = params.wind_t_step
         self.wind_idx = -1
-        self.wind_grid = None
+        self.wind_quiver = None
         self.wind_xpad = params.wind_xpad
         self.wind_ypad = params.wind_ypad
 
@@ -92,8 +95,8 @@ class BaseVisualizer:
 
         self.scale_bar_km = params.scale_bar_km
         self.show_legend = params.show_legend
-        self.show_wind_cbar = False
-        self.show_wind_field = False
+        self.show_wind_cbar = params.show_wind_cbar
+        self.show_wind_field = params.show_wind_field
         self.show_weather_data = params.show_weather_data
         self.show_temp_in_F = params.show_temp_in_F
 
@@ -119,17 +122,163 @@ class BaseVisualizer:
     def _process_weather(self):
         """Process weather data for visualization.
 
-        Calculates global wind speed normalization and converts
-        temperature units if needed.
+        Calculates global wind speed normalization, wind grid coordinates,
+        and converts temperature units if needed.
         """
         if self.show_wind_field:
+            # Calculate global max speed across all time steps for consistent coloring
             all_speeds = [forecast[:, :, 0] for forecast in self.wind_forecast]
             self.global_max_speed = max(np.max(s) for s in all_speeds)
             self.wind_norm = mcolors.Normalize(vmin=0, vmax=self.global_max_speed)
 
+            # Pre-compute the downsampled grid coordinates
+            self._compute_wind_grid()
+
         if self.show_weather_data:
             if not self.show_temp_in_F:
                 self.temp_forecast = [np.round(F_to_C(temp), 1) for temp in self.temp_forecast]
+
+    def _compute_wind_grid(self):
+        """Compute the downsampled wind grid coordinates for quiver plot.
+
+        Creates a fixed-size grid of arrow positions regardless of domain size,
+        ensuring consistent arrow density across different map sizes.
+        """
+        # Get wind forecast dimensions (rows, cols) from first time step
+        wind_rows = self.wind_forecast[0].shape[0]
+        wind_cols = self.wind_forecast[0].shape[1]
+
+        # Calculate the actual extent of the wind forecast in the simulation domain
+        wind_width = wind_cols * self.wind_res
+        wind_height = wind_rows * self.wind_res
+
+        # Create coordinate arrays for the full wind grid
+        # Wind grid starts at (wind_xpad, wind_ypad) and has resolution wind_res
+        x_coords = np.linspace(
+            self.wind_xpad + self.wind_res / 2,
+            self.wind_xpad + wind_width - self.wind_res / 2,
+            wind_cols
+        )
+        y_coords = np.linspace(
+            self.wind_ypad + self.wind_res / 2,
+            self.wind_ypad + wind_height - self.wind_res / 2,
+            wind_rows
+        )
+
+        # Calculate downsampling step to achieve target arrow count
+        # We want approximately WIND_ARROWS_PER_AXIS arrows in each direction
+        x_step = max(1, wind_cols // WIND_ARROWS_PER_AXIS)
+        y_step = max(1, wind_rows // WIND_ARROWS_PER_AXIS)
+
+        # Downsample coordinates
+        self.wind_x_display = x_coords[::x_step]
+        self.wind_y_display = y_coords[::y_step]
+
+        # Store step sizes for extracting matching data
+        self.wind_x_step = x_step
+        self.wind_y_step = y_step
+
+        # Create meshgrid for quiver plot
+        self.wind_X, self.wind_Y = np.meshgrid(self.wind_x_display, self.wind_y_display)
+
+    def _init_wind_field(self):
+        """Initialize the wind field quiver plot.
+
+        Creates the initial quiver plot with arrows colored by wind speed.
+        Called during static element initialization if show_wind_field is True.
+        """
+        if not self.show_wind_field or self.wind_forecast is None:
+            return
+
+        # Get initial wind data (time index 0)
+        speed_grid, u_grid, v_grid = self._get_downsampled_wind_data(0)
+
+        # Get colors from colormap based on wind speed
+        cmap = plt.cm.turbo
+        colors = cmap(self.wind_norm(speed_grid.ravel()))
+
+        # Create quiver plot with color-coded arrows
+        self.wind_quiver = self.h_ax.quiver(
+            self.wind_X, self.wind_Y,
+            u_grid, v_grid,
+            color=colors,
+            scale=self.global_max_speed * 10,  # Scale arrows appropriately #TODO: This should be constant for all sims and weather settings
+            scale_units='width',
+            width=0.003,
+            headwidth=4,
+            headlength=5,
+            headaxislength=4,
+            zorder=2,
+            alpha=0.8
+        )
+
+        self.wind_idx = 0
+
+    def _get_downsampled_wind_data(self, time_idx: int):
+        """Extract downsampled wind speed and direction components.
+
+        Args:
+            time_idx: Time index into the wind forecast array.
+
+        Returns:
+            tuple: (speed_grid, u_grid, v_grid) - downsampled speed and
+                velocity components (u=east, v=north).
+        """
+        # Get full wind data for this time step
+        # wind_forecast shape: (time_steps, rows, cols, 2) where [.., 0]=speed, [.., 1]=direction
+        speed_full = self.wind_forecast[time_idx][:, :, 0]
+        direction_full = self.wind_forecast[time_idx][:, :, 1]
+
+        # Downsample to match display grid
+        speed_grid = speed_full[::self.wind_y_step, ::self.wind_x_step]
+        direction_grid = direction_full[::self.wind_y_step, ::self.wind_x_step]
+
+        # Wrap wind angle
+        direction_to = direction_grid % 360
+        math_angle_rad = np.deg2rad(direction_to)
+
+        # Calculate u (east) and v (north) components
+        # Normalize so arrow lengths are based on speed relative to max
+        u_grid = np.sin(math_angle_rad)
+        v_grid = np.cos(math_angle_rad)
+
+        return speed_grid, u_grid, v_grid
+
+    def _update_wind_field(self, sim_time_s: float):
+        """Update the wind field visualization for the current time step.
+
+        Args:
+            sim_time_s: Current simulation time in seconds.
+
+        Returns:
+            bool: True if the wind field was updated, False otherwise.
+        """
+        if not self.show_wind_field or self.wind_quiver is None:
+            return False
+
+        # Calculate current wind time index
+        new_wind_idx = int(np.floor(sim_time_s / self.wind_t_step))
+
+        # Clamp to available forecast range
+        new_wind_idx = min(new_wind_idx, len(self.wind_forecast) - 1)
+
+        if new_wind_idx == self.wind_idx:
+            return False
+
+        self.wind_idx = new_wind_idx
+
+        # Get updated wind data
+        speed_grid, u_grid, v_grid = self._get_downsampled_wind_data(new_wind_idx)
+
+        # Update quiver arrows
+        self.wind_quiver.set_UVC(u_grid, v_grid)
+
+        # Update colors based on new speeds
+        cmap = plt.cm.turbo
+        colors = cmap(self.wind_norm(speed_grid.ravel()))
+        self.wind_quiver.set_color(colors)
+
+        return True
 
     def _setup_figure(self):
         """Set up the matplotlib figure and axes."""
@@ -211,6 +360,9 @@ class BaseVisualizer:
             agents (list[AgentLogEntry], optional): Agent positions. Defaults to [].
             actions (list[ActionsEntry], optional): Active control actions. Defaults to [].
         """
+        # Update wind field if needed
+        self._update_wind_field(sim_time_s)
+
         # Update weather data if needed
         weather_idx = int(np.floor(sim_time_s / self.forecast_t_step))
         if self.show_weather_data and weather_idx != self.forecast_idx and weather_idx < len(self.temp_forecast):
@@ -294,8 +446,12 @@ class BaseVisualizer:
         """Initialize static visualization elements.
 
         Draws elevation contours, weather display, compass, time displays,
-        roads, fire breaks, legend, and scale bar.
+        roads, fire breaks, legend, scale bar, and wind field.
         """
+        # === Wind field (draw first so it's behind other elements) ===
+        if self.show_wind_field:
+            self._init_wind_field()
+
         # === Elevation contour ===
         x = np.arange(0, self.grid_width)
         y = np.arange(0, self.grid_height)
