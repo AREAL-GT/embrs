@@ -540,6 +540,8 @@ class PredictionOutput:
     crown_fire: dict
     hold_probs: dict
     breaches: dict
+    frontier_spread: dict
+    burnt_spread: dict
 
 
 @dataclass

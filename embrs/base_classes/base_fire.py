@@ -498,6 +498,13 @@ class BaseFireSim:
             self._min_spot_distance = sim_params.min_spot_dist
             self._spot_delay_s = sim_params.spot_delay_s
 
+        else:
+            self._canopy_species = None
+            self._dbh_cm = None
+            self._spot_ign_prob = None
+            self._min_spot_distance = None
+            self._spot_delay_s = None
+
     def _add_cell_neighbors(self):
         """Populate neighbor references for all cells in the grid.
 
@@ -948,6 +955,79 @@ class BaseFireSim:
         }
 
         return self._frontier
+
+    def get_frontier_cells(self) -> List['Cell']:
+        """Get list of cells at the fire frontier.
+
+        The frontier consists of FUEL cells adjacent to burning cells
+        that could potentially ignite. Cells completely surrounded by
+        fire are removed from the frontier.
+
+        This method is more efficient than get_frontier() when you need
+        to access cell properties, as it avoids a second round of
+        dictionary lookups.
+
+        Note:
+            This method has the side effect of pruning cells that are
+            completely surrounded by fire from the internal frontier set.
+
+        Returns:
+            list[Cell]: Cells at the fire frontier.
+        """
+        cell_dict = self.cell_dict
+        filtered_frontier = set()
+        frontier_cells = []
+
+        for cell_id in self._frontier:
+            cell = cell_dict[cell_id]
+            # Check if cell has at least one FUEL neighbor
+            has_fuel_neighbor = False
+            for neighbor_id in cell.burnable_neighbors:
+                if cell_dict[neighbor_id].state == CellStates.FUEL:
+                    has_fuel_neighbor = True
+                    break
+            if has_fuel_neighbor:
+                filtered_frontier.add(cell_id)
+                frontier_cells.append(cell)
+
+        self._frontier = filtered_frontier
+        return frontier_cells
+
+    def get_frontier_positions(self) -> List[Tuple[float, float]]:
+        """Get list of (x, y) positions of cells at the fire frontier.
+
+        The frontier consists of FUEL cells adjacent to burning cells
+        that could potentially ignite. Cells completely surrounded by
+        fire are removed from the frontier.
+
+        This method is optimized for collecting frontier positions,
+        performing filtering and coordinate extraction in a single pass.
+
+        Note:
+            This method has the side effect of pruning cells that are
+            completely surrounded by fire from the internal frontier set.
+
+        Returns:
+            list[tuple[float, float]]: (x_pos, y_pos) for each frontier cell.
+        """
+        cell_dict = self.cell_dict
+        filtered_frontier = set()
+        positions = []
+
+        for cell_id in self._frontier:
+            cell = cell_dict[cell_id]
+            # Check if cell has at least one FUEL neighbor
+            has_fuel_neighbor = False
+            for neighbor_id in cell.burnable_neighbors:
+                if cell_dict[neighbor_id].state == CellStates.FUEL:
+                    has_fuel_neighbor = True
+                    break
+            if has_fuel_neighbor:
+                filtered_frontier.add(cell_id)
+                positions.append((cell.x_pos, cell.y_pos))
+
+        self._frontier = filtered_frontier
+        return positions
 
     @property
     def frontier(self) -> set:

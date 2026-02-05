@@ -356,6 +356,9 @@ class FirePredictor(BaseFireSim):
         self.crown_fire = {}
         self.hold_probs = {}
         self.breaches = {}
+        self.frontier_spread = {}
+        self.burnt_spread = {}
+        self.burnt_locs = []
 
         # Perform the prediction
         self._prediction_loop()
@@ -371,7 +374,9 @@ class FirePredictor(BaseFireSim):
             spread_dir=self.spread_dir,
             crown_fire=self.crown_fire,
             hold_probs=self.hold_probs,
-            breaches=self.breaches
+            breaches=self.breaches,
+            frontier_spread=self.frontier_spread,
+            burnt_spread=self.burnt_spread
         )
 
         return output
@@ -683,6 +688,7 @@ class FirePredictor(BaseFireSim):
 
                 if cell.fully_burning or len(cell.burnable_neighbors) == 0:
                     self.set_state_at_cell(cell, CellStates.BURNT)
+                    self.burnt_locs.append((cell.x_pos, cell.y_pos))
                 else:
                     fires_still_burning.append(cell)
 
@@ -694,6 +700,9 @@ class FirePredictor(BaseFireSim):
             self.update_control_interface_elements()
 
             self._burning_cells = list(fires_still_burning)
+
+            self.frontier_spread[self._curr_time_s] = self.get_frontier_positions()
+            self.burnt_spread[self._curr_time_s] = self.burnt_locs
 
             # Clear updated cells to prevent unbounded memory growth
             # (cells are tracked per-iteration, not across iterations)
@@ -1371,6 +1380,11 @@ class FirePredictor(BaseFireSim):
             self.hold_probs.clear()
         if hasattr(self, 'breaches'):
             self.breaches.clear()
+        if hasattr(self, 'frontier_spread'):
+            self.frontier_spread.clear()
+        if hasattr(self, 'burnt_spread'):
+            self.burnt_spread.clear()
+        
 
         # Clear internal state tracking
         if hasattr(self, '_updated_cells'):
