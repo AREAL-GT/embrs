@@ -594,7 +594,7 @@ class BaseFireSim:
         # Add new intersections to tracked intersections
         cell.intersections.update(intersections)
 
-        if len(cell.burnable_neighbors) == 0 or len(cell.intersections) == len(cell.directions):
+        if len(cell.intersections) == len(cell.directions):
             cell.fully_burning = True
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
