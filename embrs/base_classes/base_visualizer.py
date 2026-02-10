@@ -34,6 +34,10 @@ from datetime import timedelta
 # Target number of wind arrows per axis (total arrows = WIND_ARROWS_PER_AXIS^2)
 WIND_ARROWS_PER_AXIS = 20
 
+# Fixed quiver sizing (inches) — constant across all simulations
+WIND_ARROW_SCALE = 4.0       # data units per inch (arrow length = 1/SCALE inches)
+WIND_ARROW_WIDTH = 0.002     # shaft width in inches
+
 
 class BaseVisualizer:
     """Base class for fire simulation visualization.
@@ -198,13 +202,15 @@ class BaseVisualizer:
         colors = cmap(self.wind_norm(speed_grid.ravel()))
 
         # Create quiver plot with color-coded arrows
+        # scale_units='inches' makes arrow size constant in screen space,
+        # independent of domain size or weather conditions
         self.wind_quiver = self.h_ax.quiver(
             self.wind_X, self.wind_Y,
             u_grid, v_grid,
             color=colors,
-            scale=self.global_max_speed * 10,  # Scale arrows appropriately #TODO: This should be constant for all sims and weather settings
-            scale_units='width',
-            width=0.003,
+            scale=WIND_ARROW_SCALE,
+            scale_units='inches',
+            width=WIND_ARROW_WIDTH,
             headwidth=4,
             headlength=5,
             headaxislength=4,
