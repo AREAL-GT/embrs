@@ -94,7 +94,7 @@ def crown_fire(cell: Cell, fmc: float):
 
 def set_accel_constant(cell, cfb):
     # Set the acceleration constant for the cell
-    a = (0.3 / 60) - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)
+    a = (0.3 - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)) / 60
 
     cell.a_a = a
 
