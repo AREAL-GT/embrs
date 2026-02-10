@@ -356,7 +356,7 @@ class FirePredictor(BaseFireSim):
         self.crown_fire = {}
         self.hold_probs = {}
         self.breaches = {}
-        self.frontier_spread = {}
+        self.active_fire_front = {}
         self.burnt_spread = {}
         self.burnt_locs = []
 
@@ -375,7 +375,7 @@ class FirePredictor(BaseFireSim):
             crown_fire=self.crown_fire,
             hold_probs=self.hold_probs,
             breaches=self.breaches,
-            frontier_spread=self.frontier_spread,
+            active_fire_front=self.active_fire_front,
             burnt_spread=self.burnt_spread
         )
 
@@ -564,6 +564,7 @@ class FirePredictor(BaseFireSim):
                 futures[future] = i  # Track member index
 
             # Collect results with progress bar
+            collected_forecast_indices = []
             for future in tqdm(as_completed(futures),
                               total=n_ensemble,
                               desc="Ensemble predictions",
@@ -571,6 +572,9 @@ class FirePredictor(BaseFireSim):
                 member_idx = futures[future]
                 try:
                     result = future.result()
+                    if forecast_indices is not None:
+                        result.forecast_index = forecast_indices[member_idx]
+                        collected_forecast_indices.append(forecast_indices[member_idx])
                     predictions.append(result)
                 except Exception as e:
                     failed_count += 1
@@ -594,6 +598,10 @@ class FirePredictor(BaseFireSim):
         print("Aggregating ensemble predictions...")
         ensemble_output = _aggregate_ensemble_predictions(predictions)
         ensemble_output.n_ensemble = len(predictions)
+
+        # Stamp forecast indices on ensemble output
+        if collected_forecast_indices:
+            ensemble_output.forecast_indices = collected_forecast_indices
 
         # Optionally include individual predictions
         if return_individual:
@@ -700,10 +708,7 @@ class FirePredictor(BaseFireSim):
             self.update_control_interface_elements()
 
             self._burning_cells = list(fires_still_burning)
-
-            self.frontier_spread[self._curr_time_s] = self.get_frontier_positions()
-            self.burnt_spread[self._curr_time_s] = self.burnt_locs
-
+            
             # Clear updated cells to prevent unbounded memory growth
             # (cells are tracked per-iteration, not across iterations)
             self._updated_cells.clear()
@@ -752,6 +757,9 @@ class FirePredictor(BaseFireSim):
                 self._updated_cells[cell.id] = cell
                 self._new_ignitions.append(cell)
 
+                for neighbor in list(cell.burnable_neighbors.keys()):
+                    self._frontier.add(neighbor)
+
                 if self.spread.get(self._curr_time_s) is None:
                     self.spread[self._curr_time_s] = [(cell.x_pos, cell.y_pos)]
                 else:
@@ -780,6 +788,9 @@ class FirePredictor(BaseFireSim):
 
                 cell.has_steady_state = True
 
+                for neighbor in list(cell.burnable_neighbors.keys()):
+                    self._frontier.add(neighbor)
+
                 if self.model_spotting:
                     if not cell.lofted and cell._crown_status != CrownStatus.NONE and self.nom_ign_prob > 0:
                         self.embers.loft(cell)
@@ -800,6 +811,12 @@ class FirePredictor(BaseFireSim):
                 self.fli_kw_m[(cell.x_pos, cell.y_pos)] = BTU_ft_min_to_kW_m(np.max(cell.I_ss))
                 self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
                 self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
+
+        # Store all the burnt cells at this time step
+        self.burnt_spread[self._curr_time_s] = list(self.burnt_locs)
+
+        # Store the cells actively burning at this time step
+        self.active_fire_front[self._curr_time_s] = [(cell.x_pos, cell.y_pos) for cell in self._burning_cells]
 
         if self._curr_time_s >= self._end_time:
             return False
@@ -1380,8 +1397,8 @@ class FirePredictor(BaseFireSim):
             self.hold_probs.clear()
         if hasattr(self, 'breaches'):
             self.breaches.clear()
-        if hasattr(self, 'frontier_spread'):
-            self.frontier_spread.clear()
+        if hasattr(self, 'active_fire_front'):
+            self.active_fire_front.clear()
         if hasattr(self, 'burnt_spread'):
             self.burnt_spread.clear()
         

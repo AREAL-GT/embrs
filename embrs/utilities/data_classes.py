@@ -530,6 +530,12 @@ class PredictionOutput:
         crown_fire (dict): Maps (x, y) to crown fire status ('active' or 'passive').
         hold_probs (dict): Maps (x, y) to hold probability (0-1).
         breaches (dict): Maps (x, y) to breach status (bool).
+        active_fire_front (dict): Maps time in seconds to list of (x, y) positions
+            where fire is predicted to be currently burning at that time.
+        burnt_spread (dict): Maps time in seconds to list of (x, y) positions where
+            cells are predicted to already be fully burnt.
+        forecast_index (Optional[int]): Indicates the index of the forecast_pool that was used to
+            generate the prediction.
     """
 
     spread: dict
@@ -540,8 +546,9 @@ class PredictionOutput:
     crown_fire: dict
     hold_probs: dict
     breaches: dict
-    frontier_spread: dict
+    active_fire_front: dict
     burnt_spread: dict
+    forecast_index: Optional[int] = None
 
 
 @dataclass
@@ -599,6 +606,8 @@ class EnsemblePredictionOutput:
         breach_frequency (dict): Maps (x, y) to breach probability (0-1).
         individual_predictions (List[PredictionOutput]): Individual prediction
             outputs for inspection. Optional.
+        forecast_indices (Optional[List[int]]): List of ints indicating the indices of 
+            the forecast_pool used for each of the predictions in the ensemble.
     """
 
     n_ensemble: int
@@ -611,6 +620,7 @@ class EnsemblePredictionOutput:
     hold_prob_stats: dict
     breach_frequency: dict
     individual_predictions: Optional[List[PredictionOutput]] = None
+    forecast_indices: Optional[List[int]] = None
 
 
 # =============================================================================
