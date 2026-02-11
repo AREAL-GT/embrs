@@ -11,6 +11,7 @@ Classes:
 from typing import Optional, List, Tuple, Union, Dict, Callable, TYPE_CHECKING
 import numpy as np
 from shapely.geometry import Point, Polygon, LineString
+from shapely.strtree import STRtree
 
 from embrs.utilities.fire_util import HexGridMath
 
@@ -59,6 +60,10 @@ class GridManager:
 
         # Reference to logger for error messages (set by parent)
         self.logger = None
+
+        # Spatial index (built lazily or after init_grid)
+        self._strtree = None
+        self._strtree_cells = None
 
     @property
     def cell_grid(self) -> np.ndarray:
@@ -140,6 +145,28 @@ class GridManager:
 
                 if progress_callback is not None:
                     progress_callback(1)
+
+        self._build_spatial_index()
+
+    def _build_spatial_index(self) -> None:
+        """Build R-tree spatial index over all cell polygons.
+
+        Creates a Shapely STRtree from all cell polygons for efficient
+        spatial queries. Must be called after all cells have been created
+        and have valid polygon attributes.
+
+        Side Effects:
+            Sets self._strtree and self._strtree_cells.
+        """
+        cells = []
+        polygons = []
+        for row in range(self._shape[0]):
+            for col in range(self._shape[1]):
+                cell = self._cell_grid[row, col]
+                cells.append(cell)
+                polygons.append(cell.polygon)
+        self._strtree_cells = cells
+        self._strtree = STRtree(polygons)
 
     def hex_round(self, q: float, r: float) -> Tuple[int, int]:
         """Round floating point hex coordinates to their nearest integer hex coordinates.
@@ -271,18 +298,17 @@ class GridManager:
         cells = set()
 
         if isinstance(geom, Polygon):
-            minx, miny, maxx, maxy = geom.bounds
-            min_row = int(miny // (self._cell_size * 1.5))
-            max_row = int(maxy // (self._cell_size * 1.5))
-            min_col = int(minx // (self._cell_size * np.sqrt(3)))
-            max_col = int(maxx // (self._cell_size * np.sqrt(3)))
+            # Lazily build spatial index if not yet constructed
+            if self._strtree is None:
+                self._build_spatial_index()
 
-            for row in range(min_row - 1, max_row + 2):
-                for col in range(min_col - 1, max_col + 2):
-                    if 0 <= row < self._shape[0] and 0 <= col < self._shape[1]:
-                        cell = self._cell_grid[row, col]
-                        if geom.intersection(cell.polygon).area > 1e-6:
-                            cells.add(cell)
+            # STRtree query returns indices of candidate cells
+            indices = self._strtree.query(geom, predicate='intersects')
+            # Post-filter to exclude edge-only touches (zero-area intersection)
+            for i in indices:
+                cell = self._strtree_cells[i]
+                if geom.intersection(cell.polygon).area > 1e-6:
+                    cells.add(cell)
 
         elif isinstance(geom, LineString):
             length = geom.length
