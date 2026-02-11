@@ -1,17 +1,24 @@
 """Fuel model definitions for fire spread simulation.
 
-This module defines fuel models used in fire behavior modeling, including the 
-Anderson 13 Fire Behavior Fuel Models (FBFMs). It provides structured data for 
-different fuel types, including their physical properties and combustion characteristics.
+Define fuel model classes used in Rothermel fire behavior calculations. Each
+fuel model encapsulates physical properties (loading, surface-area-to-volume
+ratios, moisture of extinction, fuel depth) and precomputes derived constants
+needed by the Rothermel equations.
+
+Supports Anderson 13 and Scott-Burgan 40 fuel model classification systems.
 
 Classes:
-    - Fuel: Base class representing a generic fuel type with physical properties.
-    - Anderson13: Subclass representing the 13 standard Anderson fuel models.
+    - Fuel: Base class representing a generic fuel model with physical properties.
+    - Anderson13: Anderson 13 standard fire behavior fuel models.
+    - ScottBurgan40: Scott and Burgan 40 fuel models with dynamic herbaceous transfer.
+    - FuelConstants: Lookup tables mapping fuel model numbers to names and colors.
 
 References:
-    - Anderson, H. E. (1982). Aids to Determining Fuel Models for Estimating Fire Behavior.
-      USDA Forest Service General Technical Report INT-122.
+    Anderson, H. E. (1982). Aids to Determining Fuel Models for Estimating
+    Fire Behavior. USDA Forest Service General Technical Report INT-122.
 
+    Scott, J. H. & Burgan, R. E. (2005). Standard Fire Behavior Fuel Models.
+    USDA Forest Service General Technical Report RMRS-GTR-153.
 """
 import numpy as np
 import os
@@ -19,9 +26,49 @@ import json
 from embrs.utilities.unit_conversions import *
 
 class Fuel:
+    """Base fuel model for Rothermel fire spread calculations.
+
+    Encapsulate the physical properties of a fuel type and precompute
+    derived constants used in the Rothermel (1972) equations. Non-burnable
+    fuel types (e.g., water, urban) store only name and model number.
+
+    All internal units follow the Rothermel convention:
+    loading in lb/ft², surface-area-to-volume ratio in 1/ft, fuel depth in
+    ft, heat content in BTU/lb.
+
+    Attributes:
+        name (str): Human-readable fuel model name.
+        model_num (int): Numeric fuel model identifier.
+        burnable (bool): Whether this fuel can sustain fire.
+        dynamic (bool): Whether herbaceous fuel transfer is applied.
+        load (np.ndarray): Fuel loading per class (tons/acre), shape (6,).
+            Order: [1h, 10h, 100h, dead herb, live herb, live woody].
+        s (np.ndarray): Surface-area-to-volume ratio per class (1/ft),
+            shape (6,).
+        sav_ratio (int): Characteristic SAV ratio (1/ft).
+        dead_mx (float): Dead fuel moisture of extinction (fraction).
+        fuel_depth_ft (float): Fuel bed depth (feet).
+        heat_content (float): Heat content (BTU/lb), default 8000.
+        rho_p (float): Particle density (lb/ft³), default 32.
+    """
+
     def __init__(self, name: str, model_num: int, burnable: bool, dynamic: bool, w_0: np.ndarray,
                  s: np.ndarray, s_total: int, dead_mx: float, fuel_depth: float):
-        
+        """Initialize a fuel model.
+
+        Args:
+            name (str): Human-readable fuel model name.
+            model_num (int): Numeric identifier for the fuel model.
+            burnable (bool): Whether this fuel can sustain fire.
+            dynamic (bool): Whether herbaceous transfer applies.
+            w_0 (np.ndarray): Fuel loading per class (tons/acre), shape (6,).
+                None for non-burnable models.
+            s (np.ndarray): SAV ratio per class (1/ft), shape (6,).
+                None for non-burnable models.
+            s_total (int): Characteristic SAV ratio (1/ft).
+            dead_mx (float): Dead fuel moisture of extinction (fraction).
+            fuel_depth (float): Fuel bed depth (feet).
+        """
         self.name = name
         self.model_num = model_num
         self.burnable = burnable
@@ -81,20 +128,26 @@ class Fuel:
             self.rel_indices = np.array(self.rel_indices)
             self.num_classes = len(self.rel_indices)
 
-    def calc_flux_ratio(self):
+    def calc_flux_ratio(self) -> float:
+        """Compute propagating flux ratio for the Rothermel equation.
+
+        Returns:
+            float: Propagating flux ratio (dimensionless).
+        """
         packing_ratio = self.rho_b / self.rho_p
         flux_ratio = (192 + 0.2595*self.sav_ratio)**(-1) * np.exp((0.792 + 0.681*np.sqrt(self.sav_ratio))*(packing_ratio + 0.1))
 
         return flux_ratio
 
-    def calc_E_B_C(self):
-        """_summary_
+    def calc_E_B_C(self) -> tuple:
+        """Compute wind factor coefficients E, B, and C.
 
-        Args:
-            fuel (Fuel): _description_
+        These coefficients parameterize the wind factor equation in the
+        Rothermel model as a function of the characteristic SAV ratio.
 
         Returns:
-            Tuple[float, float, float]: _description_
+            Tuple[float, float, float]: ``(E, B, C)`` wind factor
+                coefficients (dimensionless).
         """
 
         sav_ratio = self.sav_ratio
@@ -106,9 +159,16 @@ class Fuel:
         return E, B, C
 
     def compute_f_and_g_weights(self):
-        """
-        Compute f_ij and g_ij values from self.w_0 and self.s (6×1), keeping native format.
-        Updates self.f_ij and self.g_ij directly.
+        """Compute fuel class weighting factors f_ij, g_ij, and category fractions f_i.
+
+        Derive weighting arrays from fuel loading and SAV ratios. ``f_ij``
+        gives fractional area weights within dead/live categories. ``g_ij``
+        gives SAV-bin-based moisture weighting factors. ``f_i`` gives the
+        dead vs. live category fractions.
+
+        Side Effects:
+            Sets ``self.f_ij`` (2×6), ``self.g_ij`` (2×6), and
+            ``self.f_i`` (2,) arrays.
         """
         f_ij = np.zeros((2, 6))
         g_ij = np.zeros((2, 6))
@@ -173,12 +233,33 @@ class Fuel:
         self.g_ij = g_ij
         self.f_i = f_i
 
-    def set_fuel_loading(self, w_n):
+    def set_fuel_loading(self, w_n: np.ndarray):
+        """Set net fuel loading and recompute weighted dead/live net loadings.
+
+        Args:
+            w_n (np.ndarray): Net fuel loading per class (lb/ft²), shape (6,).
+
+        Side Effects:
+            Updates ``self.w_n``, ``self.w_n_dead``, and ``self.w_n_live``.
+        """
         self.w_n = w_n
         self.w_n_dead = np.dot(self.g_dead_arr, self.w_n[0:4])
         self.w_n_live = np.dot(self.g_live_arr, self.w_n[4:])
 
-    def calc_W(self, w_0_tpa):
+    def calc_W(self, w_0_tpa: np.ndarray) -> float:
+        """Compute dead-to-live fuel loading ratio W.
+
+        W is used to determine live fuel moisture of extinction. Returns
+        ``np.inf`` when there is no live fuel loading (denominator is zero).
+
+        Args:
+            w_0_tpa (np.ndarray): Fuel loading per class (tons/acre),
+                shape (6,).
+
+        Returns:
+            float: Dead-to-live loading ratio (dimensionless), or ``np.inf``
+                if no live fuel is present.
+        """
         w = w_0_tpa
         s = self.s
 
@@ -202,16 +283,40 @@ class Fuel:
         return W
 
 class Anderson13(Fuel):
-    _fuel_models = None # class-level cache
+    """Anderson 13 standard fire behavior fuel models.
+
+    Load fuel properties from the bundled ``Anderson13.json`` data file.
+    Model numbers 1-13 are burnable; higher numbers (91, 92, 93, 98, 99)
+    represent non-burnable types.
+
+    The JSON data is cached at the class level and loaded only once.
+    """
+
+    _fuel_models = None  # class-level cache
 
     @classmethod
     def load_fuel_models(cls):
+        """Load Anderson 13 fuel model data from the bundled JSON file.
+
+        Data is cached at the class level after the first call.
+        """
         if cls._fuel_models is None:
             json_path = os.path.join(os.path.dirname(__file__), "Anderson13.json")
             with open(json_path, "r") as f:
                 cls._fuel_models = json.load(f)
 
     def __init__(self, model_number: int, live_h_mf: float = 0):
+        """Initialize an Anderson 13 fuel model by model number.
+
+        Args:
+            model_number (int): Anderson fuel model number (1-13 for
+                burnable, 91/92/93/98/99 for non-burnable).
+            live_h_mf (float): Live herbaceous fuel moisture (fraction).
+                Unused for Anderson 13 (not dynamic). Defaults to 0.
+
+        Raises:
+            ValueError: If ``model_number`` is not a valid Anderson 13 model.
+        """
         self.load_fuel_models()
 
         model_number = int(model_number)
@@ -241,16 +346,46 @@ class Anderson13(Fuel):
         super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
 
 class ScottBurgan40(Fuel):
-    _fuel_models = None # class-level cache
+    """Scott-Burgan 40 fire behavior fuel models.
+
+    Load fuel properties from the bundled ``ScottBurgan40.json`` data file.
+    Model numbers >= 101 are burnable. Dynamic models transfer herbaceous
+    fuel loading between live and dead categories based on a curing level
+    computed from live herbaceous moisture content.
+
+    The JSON data is cached at the class level and loaded only once.
+    """
+    _fuel_models = None  # class-level cache
 
     @classmethod
     def load_fuel_models(cls):
+        """Load Scott-Burgan 40 fuel model data from the bundled JSON file.
+
+        Data is cached at the class level after the first call.
+        """
         if cls._fuel_models is None:
             json_path = os.path.join(os.path.dirname(__file__), "ScottBurgan40.json")
             with open(json_path, "r") as f:
                 cls._fuel_models = json.load(f)
 
     def __init__(self, model_number: int, live_h_mf: float = 0):
+        """Initialize a Scott-Burgan 40 fuel model by model number.
+
+        For dynamic models, the herbaceous fuel loading is transferred
+        between live and dead categories based on the curing level derived
+        from ``live_h_mf``.
+
+        Args:
+            model_number (int): Scott-Burgan fuel model number
+                (e.g., 101 for GR1, 201 for SB1).
+            live_h_mf (float): Live herbaceous fuel moisture (fraction).
+                Used to compute curing level for dynamic models. Defaults
+                to 0.
+
+        Raises:
+            ValueError: If ``model_number`` is not a valid Scott-Burgan 40
+                model.
+        """
         self.load_fuel_models()
 
         model_number = int(model_number)
@@ -291,15 +426,32 @@ class ScottBurgan40(Fuel):
 
         super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
 
-    def calc_curing_level(self, live_h_mf: float):
+    def calc_curing_level(self, live_h_mf: float) -> float:
+        """Compute herbaceous curing level from live herbaceous moisture.
+
+        The curing level T determines the fraction of live herbaceous
+        loading transferred to the dead herbaceous class. Clamped to [0, 1].
+
+        Args:
+            live_h_mf (float): Live herbaceous fuel moisture (fraction).
+
+        Returns:
+            float: Curing level in [0, 1] where 1 = fully cured (all
+                herbaceous loading treated as dead).
+        """
         T = -1.11 * live_h_mf + 1.33
         T = min(max(T, 0), 1)
         return T
 
 class FuelConstants:
-    """_summary_
-    """
+    """Lookup tables mapping fuel model numbers to names and display colors.
 
+    Attributes:
+        fuel_names (dict): Maps fuel model number (int) to human-readable name.
+        fuel_type_reverse_lookup (dict): Maps fuel model name to number.
+        fuel_color_mapping (dict): Maps fuel model number to hex color string
+            for visualization.
+    """
     # Dictionary of fuel number to name
     fuel_names = {1: "Short grass", 2: "Timber grass", 3: "Tall grass", 4: "Chaparral",
                 5: "Brush", 6: "Hardwood slash", 7: "Southern rough", 8: "Closed timber litter",

@@ -350,25 +350,31 @@ class DeadFuelMoisture:
         self.m_rdur = 0.0
         self.initializeStick()
 
-    def deriveDiffusivitySteps(self, radius):
+    def deriveDiffusivitySteps(self, radius: float) -> int:
+        """Derive number of diffusivity sub-steps from stick radius."""
         return int(4.777 + 2.496 / radius ** 1.3)
 
-    def derivePlanarHeatTransferRate(self, radius):
+    def derivePlanarHeatTransferRate(self, radius: float) -> float:
+        """Derive planar heat transfer rate from stick radius."""
         return 0.2195 + 0.05260 / radius ** 2.5
 
-    def deriveStickNodes(self, radius):
+    def deriveStickNodes(self, radius: float) -> int:
+        """Derive number of radial nodes from stick radius (always odd)."""
         nodes = int(10.727 + 0.1746 / radius)
         if nodes % 2 == 0:
             nodes += 1
         return nodes
 
-    def deriveRainfallRunoffFactor(self, radius):
+    def deriveRainfallRunoffFactor(self, radius: float) -> float:
+        """Derive rainfall runoff factor from stick radius."""
         return 0.02822 + 0.1056 / radius ** 2.2
 
-    def deriveAdsorptionRate(self, radius):
+    def deriveAdsorptionRate(self, radius: float) -> float:
+        """Derive adsorption rate constant from stick radius."""
         return 0.0004509 + 0.006126 / radius ** 2.6
 
-    def deriveMoistureSteps(self, radius):
+    def deriveMoistureSteps(self, radius: float) -> int:
+        """Derive number of moisture sub-steps from stick radius."""
         return int(9.8202 + 26.865 / radius ** 1.4)
 
     def initializeStick(self):
@@ -987,7 +993,16 @@ class DeadFuelMoisture:
         output.append(f"m_state {self.m_state}")
         return '\n'.join(output)
 
-    def from_string(input_str):
+    @staticmethod
+    def from_string(input_str: str) -> 'DeadFuelMoisture':
+        """Deserialize a DeadFuelMoisture instance from its string representation.
+
+        Args:
+            input_str (str): String produced by ``__str__``.
+
+        Returns:
+            DeadFuelMoisture: Reconstructed model instance.
+        """
         lines = input_str.strip().split('\n')
         r = DeadFuelMoisture(0, "")
         r.m_semTime = datetime.datetime.strptime(lines[0].split()[1], "%Y/%m/%d %H:%M:%S.%f")

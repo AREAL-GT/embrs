@@ -1,45 +1,27 @@
-"""Wind forecast processing using WindNinja.
+"""Wind forecast generation and processing using WindNinja.
 
-This module provides functions for generating and processing wind forecasts using WindNinja. 
-It supports different initialization methods, handles WindNinja CLI execution, and structures 
-wind data into NumPy arrays for use in wildfire simulations.
+Generate spatially-resolved wind fields by running the WindNinja CLI with
+domain-average initialization, then load the outputs into structured NumPy
+arrays for use in fire simulations.
 
-Features:
-    - **Wind Forecast Generation**:
-        - `gen_forecast()`: Runs WindNinja with domain-average, point-based, or weather model initialization.
-        - `run_domain_avg_windninja()`: Executes WindNinja using domain-average wind initialization.
-        - `run_point_windninja()`: Placeholder for point-based wind initialization.
+Functions:
+    - run_windninja: Parallel WindNinja execution across all time steps.
+    - run_windninja_single: Execute WindNinja for a single time step.
+    - rename_windninja_outputs: Standardize WindNinja output file names.
+    - create_forecast_array: Load WindNinja outputs into a NumPy array.
+    - convert_to_cartesian: Convert meteorological to Cartesian wind direction.
 
-    - **Wind Data Processing**:
-        - `rename_windninja_outputs()`: Renames WindNinja-generated files to a standardized format.
-        - `create_forecast_array()`: Loads WindNinja outputs into a structured NumPy array.
-        - `convert_to_cartesian()`: Converts wind direction data from meteorological to Cartesian convention.
-
-Dependencies:
-    - **External Software**: WindNinja CLI must be installed and accessible at `cli_path`.
-    - **Python Libraries**: Requires `subprocess`, `os`, `json`, `numpy`, and `typing`.
-
-Paths:
-    - `cli_path`: Path to the WindNinja CLI executable. 
-    - `temp_file_path`: Path for storing temporary WindNinja outputs. 
-
-Usage:
-    To generate a wind forecast using a domain-average wind:
-    ```python
-    forecast, time_step = gen_forecast(
-        elevation_path="path/to/elevation.asc",
-        vegetation_path="path/to/vegetation.asc",
-        forecast_seed_path="path/to/wind_seed.json",
-        forecast_seed_type="Domain Average Wind"
-    )
-    ```
+Module Attributes:
+    cli_path (str): Path to the WindNinja CLI executable. Configurable via
+        the ``WINDNINJA_CLI_PATH`` environment variable.
+    temp_file_path (str): Path for storing temporary WindNinja outputs.
+        Configurable via the ``WINDNINJA_TEMP_PATH`` environment variable.
 """
 
 import subprocess
 import os
 import shutil
 import numpy as np
-from typing import Tuple
 from multiprocessing import cpu_count, Pool
 from tqdm import tqdm
 from embrs.utilities.data_classes import MapParams, WindNinjaTask
@@ -58,7 +40,16 @@ fallback_temp_file_path = os.path.abspath(os.path.join(PACKAGE_DIR, "../../../wi
 temp_file_path = os.getenv("WINDNINJA_TEMP_PATH", fallback_temp_file_path)
 
 def run_windninja_single(task: WindNinjaTask):
-    """Runs WindNinja for a single time step in parallel."""
+    """Run WindNinja CLI for a single time step.
+
+    Execute the WindNinja domain-average initialization for one weather
+    entry and rename outputs to a standardized format.
+
+    Args:
+        task (WindNinjaTask): Task descriptor with all parameters needed
+            for a single WindNinja invocation (index, weather entry,
+            elevation path, etc.).
+    """
     output_path = os.path.join(task.temp_file_path, f"{task.index}")
     os.makedirs(output_path, exist_ok=True)
 
@@ -108,25 +99,33 @@ def run_windninja_single(task: WindNinjaTask):
     except subprocess.CalledProcessError as e:
         print(f"Error running WindNinja CLI at step {task.index}: {e}")
 
-def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str = None, num_workers: int = None) -> Tuple[np.ndarray, float]:
-    """Runs WindNinja with domain-average initialization in parallel.
+def run_windninja(weather: WeatherStream, map: MapParams,
+                   custom_temp_dir: str = None,
+                   num_workers: int = None) -> np.ndarray:
+    """Run WindNinja with domain-average initialization in parallel.
+
+    Execute WindNinja for each time step in the weather stream (from
+    ``sim_start_idx`` onward) using a multiprocessing pool, then merge
+    outputs into a single forecast array.
 
     Args:
-        weather: Weather stream with wind data
-        map: Map parameters
-        custom_temp_dir: Optional custom temporary directory for this run.
-                        If provided, uses this instead of the global temp_file_path.
-                        This is essential for parallel ensemble predictions to avoid
-                        race conditions between workers.
-        num_workers: Number of worker processes for parallel WindNinja execution.
-                    If None (default), uses min(cpu_count(), num_tasks).
-                    Set to 1 for sequential execution (useful when caller is
-                    already parallelizing at a higher level).
+        weather (WeatherStream): Weather stream with wind data and
+            metadata (time step, input units, etc.).
+        map (MapParams): Map parameters including the cropped LCP path
+            and geographic info.
+        custom_temp_dir (str, optional): Custom temporary directory for
+            this run. Essential for parallel ensemble predictions to
+            avoid race conditions. Uses module-level ``temp_file_path``
+            if None.
+        num_workers (int, optional): Number of worker processes. Defaults
+            to ``min(cpu_count(), num_tasks)``. Set to 1 for sequential
+            execution.
 
     Returns:
-        Tuple of (forecast array, time_step)
+        np.ndarray: Wind forecast array of shape
+            ``(num_steps, height, width, 2)`` where channel 0 is wind
+            speed (m/s) and channel 1 is wind direction (Cartesian degrees).
     """
-
     # Use custom temp dir if provided (for ensemble workers), otherwise use global
     work_temp_path = custom_temp_dir if custom_temp_dir is not None else temp_file_path
 
@@ -196,9 +195,6 @@ def run_windninja(weather: WeatherStream, map: MapParams, custom_temp_dir: str =
     forecast = create_forecast_array(num_tasks, work_temp_path)
 
     return forecast
-
-def run_point_windninja():
-    raise NotImplementedError("Point initialization not yet implemented")
 
 def rename_windninja_outputs(output_path: str, time_step_index: int):
     """Renames WindNinja output files in a specified directory to a standardized format.
@@ -317,23 +313,19 @@ def create_forecast_array(num_files: int, work_temp_path: str = None) -> np.ndar
     return forecast
 
 def convert_to_cartesian(direction_data: np.ndarray) -> np.ndarray:
-    """Converts wind direction data to a Cartesian-compatible format.
+    """Convert wind direction from "blowing from" to "blowing toward" convention.
 
-    Wind direction in WindNinja outputs is typically measured in meteorological degrees 
-    (0° = North-South, 90° = East-West, 180° = South-North, 270° = West-East). This function adjusts the values 
-    to align with a Cartesian coordinate system.
+    WindNinja outputs wind direction as the compass direction the wind is
+    blowing *from* (meteorological convention). This function adds 180° to
+    convert to the direction the wind is blowing *toward*, which is what
+    the fire spread model expects.
 
     Args:
-        direction_data (np.ndarray): A NumPy array containing wind direction values in degrees.
+        direction_data (np.ndarray): Wind direction array in degrees
+            (meteorological "from" convention, 0-360).
 
     Returns:
-        np.ndarray: The transformed wind direction data, where:
-
-            direction_cartesian = (180 + direction_data) % 360
-
-    Notes:
-        - This transformation ensures compatibility with fire spread models that 
-          use Cartesian angle conventions.
-        - Assumes wind direction values are given in degrees (0-360).
+        np.ndarray: Transformed wind direction in degrees (0-360,
+            "toward" convention).
     """
     return (180 + direction_data) % 360

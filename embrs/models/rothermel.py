@@ -1,3 +1,23 @@
+"""Rothermel fire spread model implementation.
+
+Compute surface fire rate of spread (ROS), fireline intensity, and related
+quantities using Rothermel's (1972) equations. All internal calculations use
+imperial units (ft/min, BTU/ft²·min); public outputs are converted to metric
+(m/s) unless noted otherwise.
+
+Functions:
+    - surface_fire: Compute steady-state ROS and fireline intensity for a cell.
+    - accelerate: Apply fire acceleration from rest toward steady-state ROS.
+    - calc_r_h: Compute head-fire ROS combining wind and slope effects.
+    - calc_r_0: Compute no-wind, no-slope base ROS and reaction intensity.
+    - calc_eccentricity: Compute fire ellipse eccentricity from effective wind speed.
+    - calc_flame_len: Estimate flame length from fireline intensity.
+
+References:
+    Rothermel, R. C. (1972). A mathematical model for predicting fire spread
+    in wildland fuels. USDA Forest Service Research Paper INT-115.
+"""
+
 from embrs.models.fuel_models import Fuel
 from embrs.utilities.fire_util import CrownStatus
 from embrs.utilities.unit_conversions import *
@@ -5,17 +25,21 @@ from embrs.fire_simulator.cell import Cell
 import numpy as np
 from typing import Tuple
 
-# TODO: fill in docstrings
-
 def surface_fire(cell: Cell):
-    """_summary_
+    """Compute steady-state surface fire ROS and fireline intensity for a cell.
+
+    Calculate the head-fire rate of spread (R_h), then resolve spread rates and
+    fireline intensities along all 12 spread directions using fire ellipse
+    geometry. Results are stored directly on the cell object.
 
     Args:
-        cell (Cell): _description_
-        R_h_in (float, optional): _description_. Defaults to None.
+        cell (Cell): Cell to evaluate. Must have fuel, moisture, wind, slope,
+            and direction attributes populated.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: _description_
+    Side Effects:
+        Sets ``cell.r_ss`` (m/s), ``cell.I_ss`` (BTU/ft/min),
+        ``cell.r_h_ss`` (m/s), ``cell.reaction_intensity`` (BTU/ft²/min),
+        ``cell.alpha`` (radians), and ``cell.e`` (eccentricity) on the cell.
     """
     R_h, R_0, I_r, alpha = calc_r_h(cell)
     cell.alpha = alpha
@@ -40,6 +64,20 @@ def surface_fire(cell: Cell):
     cell.r_h_ss = np.max(r_list)
 
 def accelerate(cell: Cell, time_step: float):
+    """Apply fire acceleration toward steady-state ROS.
+
+    Update the transient rate of spread (``cell.r_t``) and average ROS
+    (``cell.avg_ros``) for each spread direction using the exponential
+    acceleration model (McAlpine 1989). Directions already at or above
+    steady-state are clamped.
+
+    Args:
+        cell (Cell): Burning cell with ``r_ss``, ``r_t``, ``a_a`` set.
+        time_step (float): Simulation time step in seconds.
+
+    Side Effects:
+        Updates ``cell.r_t``, ``cell.avg_ros``, and ``cell.I_t`` in-place.
+    """
     # Mask where acceleration is needed
     mask_accel = cell.r_t < cell.r_ss
 
@@ -92,8 +130,32 @@ def accelerate(cell: Cell, time_step: float):
         cell.r_t[mask_steady] = cell.r_ss[mask_steady]
         cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
 
+def calc_vals_for_all_directions(cell: Cell, R_h: float, I_r: float, alpha: float,
+                                 e: float, I_h: float = None):
+    """Compute ROS and fireline intensity along all spread directions.
 
-def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e, I_h: float = None):
+    Use the fire ellipse (eccentricity ``e``) and the combined wind/slope
+    heading ``alpha`` to resolve the head-fire ROS into each of the cell's
+    spread directions.
+
+    Args:
+        cell (Cell): Cell providing directions and fuel properties.
+        R_h (float): Head-fire rate of spread (ft/min for surface, m/min
+            for crown fire).
+        I_r (float): Reaction intensity (BTU/ft²/min). Ignored when
+            ``I_h`` is provided.
+        alpha (float): Combined wind/slope heading in radians, relative to
+            the cell's aspect (upslope direction).
+        e (float): Fire ellipse eccentricity in [0, 1).
+        I_h (float, optional): Head-fire fireline intensity (BTU/ft/min).
+            When provided, directional intensities are scaled from this
+            value instead of being computed from ``I_r``.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: ``(r_list, I_list)`` where
+            ``r_list`` is ROS in m/s per direction and ``I_list`` is
+            fireline intensity in BTU/ft/min per direction.
+    """
     spread_directions = np.deg2rad(cell.directions)
 
     gamma = np.abs(((alpha + np.deg2rad(cell.aspect)) - spread_directions) % (2*np.pi))
@@ -112,7 +174,29 @@ def calc_vals_for_all_directions(cell, R_h, I_r, alpha, e, I_h: float = None):
     r_list = ft_min_to_m_s(R_gamma)
     return r_list, I_gamma
 
-def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
+def calc_r_h(cell: Cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, float, float]:
+    """Compute head-fire rate of spread combining wind and slope effects.
+
+    Resolve the wind and slope vectors to determine the maximum spread
+    direction (``alpha``) and head-fire ROS (``R_h``). Wind speed is capped
+    at 0.9 × reaction intensity per Rothermel's wind limit.
+
+    Args:
+        cell (Cell): Cell with wind, slope, fuel, and moisture data.
+        R_0 (float, optional): Pre-computed no-wind, no-slope ROS (ft/min).
+            Computed internally if None.
+        I_r (float, optional): Pre-computed reaction intensity
+            (BTU/ft²/min). Computed internally if None.
+
+    Returns:
+        Tuple[float, float, float, float]: ``(R_h, R_0, I_r, alpha)`` where
+            ``R_h`` is head-fire ROS (ft/min), ``R_0`` is base ROS (ft/min),
+            ``I_r`` is reaction intensity (BTU/ft²/min), and ``alpha`` is the
+            combined wind/slope heading (radians).
+
+    Side Effects:
+        May update ``cell.aspect`` when slope is zero (set to wind direction).
+    """
     wind_speed_m_s, wind_dir_deg = cell.curr_wind()
     
     wind_speed_ft_min = m_s_to_ft_min(wind_speed_m_s)
@@ -162,15 +246,21 @@ def calc_r_h(cell, R_0: float = None, I_r: float = None) -> Tuple[float, float, 
     return R_h, R_0, I_r, alpha
 
 def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) -> Tuple[float, float]:
-    """_summary_
+    """Compute the combined wind and slope vector magnitude and direction.
+
+    Resolve wind and slope spread factors into a single resultant vector
+    using Rothermel's vector addition method.
 
     Args:
-        R_0 (float): _description_
-        phi_w (float): _description_
-        phi_s (float): _description_
+        R_0 (float): No-wind, no-slope ROS (ft/min).
+        phi_w (float): Wind factor (dimensionless).
+        phi_s (float): Slope factor (dimensionless).
+        angle (float): Angle between wind and upslope directions (radians).
 
     Returns:
-        Tuple[float, float]: _description_
+        Tuple[float, float]: ``(vec_mag, vec_dir)`` where ``vec_mag`` is the
+            combined wind/slope spread increment (ft/min) and ``vec_dir`` is
+            the direction of the resultant vector (radians).
     """
     d_w = R_0 * phi_w
     d_s = R_0 * phi_s
@@ -188,16 +278,22 @@ def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) ->
     return vec_mag, vec_dir
 
 def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
-    """_summary_
+    """Compute no-wind, no-slope base rate of spread and reaction intensity.
+
+    Evaluate the Rothermel (1972) equations for base ROS using fuel
+    properties and moisture content. This is the fundamental spread rate
+    before wind and slope adjustments.
 
     Args:
-        fuel (Fuel): _description_
-        m_f (float): _description_
+        fuel (Fuel): Fuel model with precomputed constants.
+        m_f (np.ndarray): Fuel moisture content array of shape (6,) with
+            entries [1h, 10h, 100h, dead herb, live herb, live woody] as
+            fractions (g water / g fuel).
 
     Returns:
-        Tuple[float, float]: _description_
+        Tuple[float, float]: ``(R_0, I_r)`` where ``R_0`` is base ROS
+            (ft/min) and ``I_r`` is reaction intensity (BTU/ft²/min).
     """
-
     # Calculate moisture damping constants
     dead_mf, live_mf = get_characteristic_moistures(fuel, m_f)
     live_mx = calc_live_mx(fuel, dead_mf)
@@ -212,15 +308,40 @@ def calc_r_0(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
     return R_0, I_r # ft/min, BTU/ft^2-min
 
 
-def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray):
+def get_characteristic_moistures(fuel: Fuel, m_f: np.ndarray) -> Tuple[float, float]:
+    """Compute weighted characteristic dead and live fuel moisture contents.
 
+    Use fuel weighting factors (``f_dead_arr``, ``f_live_arr``) to collapse
+    the per-class moisture array into single dead and live values.
+
+    Args:
+        fuel (Fuel): Fuel model providing weighting arrays.
+        m_f (np.ndarray): Moisture content array of shape (6,) as fractions.
+
+    Returns:
+        Tuple[float, float]: ``(dead_mf, live_mf)`` weighted characteristic
+            moisture contents for dead and live fuel categories.
+    """
     dead_mf = np.dot(fuel.f_dead_arr, m_f[0:4])
     live_mf = np.dot(fuel.f_live_arr, m_f[4:])
 
     return dead_mf, live_mf
 
-def calc_live_mx(fuel: Fuel, m_f: float):
+def calc_live_mx(fuel: Fuel, m_f: float) -> float:
+    """Compute live fuel moisture of extinction.
 
+    Determine the threshold moisture content above which live fuels will
+    not sustain combustion, based on the ratio of dead-to-live fuel loading
+    (``fuel.W``) and the dead characteristic moisture.
+
+    Args:
+        fuel (Fuel): Fuel model with loading ratio ``W`` and ``dead_mx``.
+        m_f (float): Weighted characteristic dead fuel moisture (fraction).
+
+    Returns:
+        float: Live fuel moisture of extinction (fraction). Clamped to be
+            at least ``fuel.dead_mx``.
+    """
     W = fuel.W
 
     if W == np.inf:
@@ -240,16 +361,22 @@ def calc_live_mx(fuel: Fuel, m_f: float):
     return max(mx, fuel.dead_mx)
 
 def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -> float:
-    """_summary_
+    """Compute reaction intensity from fuel properties and moisture damping.
+
+    Reaction intensity is the rate of heat release per unit area of the
+    flaming front (Rothermel 1972, Eq. 27).
 
     Args:
-        fuel (Fuel): _description_
-        m_f (float): _description_
+        fuel (Fuel): Fuel model with net fuel loadings, heat content, and
+            optimum reaction velocity (``gamma``).
+        dead_moist_damping (float): Dead fuel moisture damping coefficient
+            in [0, 1].
+        live_moist_damping (float): Live fuel moisture damping coefficient
+            in [0, 1].
 
     Returns:
-        float: _description_
+        float: Reaction intensity (BTU/ft²/min).
     """
-
     mineral_damping = calc_mineral_damping()
 
     dead_calc = fuel.w_n_dead * fuel.heat_content * dead_moist_damping * mineral_damping
@@ -260,16 +387,21 @@ def calc_I_r(fuel: Fuel, dead_moist_damping: float, live_moist_damping: float) -
     return I_r
 
 def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
-    """_summary_
+    """Compute heat sink term for the Rothermel spread equation.
+
+    The heat sink represents the energy required to raise the fuel ahead
+    of the fire front to ignition temperature, weighted by fuel class
+    properties and moisture contents.
 
     Args:
-        fuel (Fuel): _description_
-        m_f (float): _description_
+        fuel (Fuel): Fuel model with bulk density, weighting factors, and
+            surface-area-to-volume ratios.
+        m_f (np.ndarray): Fuel moisture content array of shape (6,) as
+            fractions.
 
     Returns:
-        float: _description_
+        float: Heat sink (BTU/ft³).
     """
-
     Q_ig = 250 + 1116 * m_f
 
 
@@ -294,29 +426,31 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
     return heat_sink
 
 
-def calc_wind_factor(fuel:Fuel , wind_speed: float) -> float:
-    """_summary_
+def calc_wind_factor(fuel: Fuel, wind_speed: float) -> float:
+    """Compute the wind factor (phi_w) for the Rothermel spread equation.
 
     Args:
-        fuel (Fuel): _description_
-        wind_speed (float): _description_
+        fuel (Fuel): Fuel model with precomputed wind coefficients
+            ``B``, ``C``, ``E``, and packing ratio ``rat``.
+        wind_speed (float): Midflame wind speed (ft/min).
 
     Returns:
-        float: _description_
+        float: Dimensionless wind factor (phi_w).
     """
     phi_w = fuel.C * (wind_speed ** fuel.B) * fuel.rat ** (-fuel.E)
 
     return phi_w
 
 def calc_slope_factor(fuel: Fuel, phi: float) -> float:
-    """_summary_
+    """Compute the slope factor (phi_s) for the Rothermel spread equation.
 
     Args:
-        fuel (Fuel): _description_
-        phi (float): _description_
+        fuel (Fuel): Fuel model with bulk density ``rho_b`` and particle
+            density ``rho_p``.
+        phi (float): Slope angle (radians).
 
     Returns:
-        float: _description_
+        float: Dimensionless slope factor (phi_s).
     """
     packing_ratio = fuel.rho_b / fuel.rho_p
 
@@ -326,14 +460,18 @@ def calc_slope_factor(fuel: Fuel, phi: float) -> float:
 
 
 def calc_moisture_damping(m_f: float, m_x: float) -> float:
-    """_summary_
+    """Compute moisture damping coefficient for dead or live fuel.
+
+    Evaluates a cubic polynomial in the moisture ratio ``m_f / m_x``
+    (Rothermel 1972, Eq. 29). Returns 0 when moisture of extinction is
+    zero or when the polynomial evaluates to a negative value.
 
     Args:
-        m_f (float): _description_
-        m_x (float): _description_
+        m_f (float): Characteristic fuel moisture content (fraction).
+        m_x (float): Moisture of extinction (fraction).
 
     Returns:
-        float: _description_
+        float: Moisture damping coefficient in [0, 1].
     """
     if m_x == 0:
         return 0
@@ -345,14 +483,15 @@ def calc_moisture_damping(m_f: float, m_x: float) -> float:
 
     return max(0, moist_damping)
 
-def calc_mineral_damping(s_e:float = 0.010) -> float:
-    """_summary_
+def calc_mineral_damping(s_e: float = 0.010) -> float:
+    """Compute mineral damping coefficient.
 
     Args:
-        s_e (float, optional): _description_. Defaults to 0.010.
+        s_e (float): Effective mineral content (fraction). Defaults to
+            0.010 (standard value for wildland fuels).
 
     Returns:
-        float: _description_
+        float: Mineral damping coefficient (dimensionless).
     """
 
     mineral_damping = 0.174 * s_e ** (-0.19)
@@ -361,30 +500,36 @@ def calc_mineral_damping(s_e:float = 0.010) -> float:
 
 
 def calc_effective_wind_factor(R_h: float, R_0: float) -> float:
-    """_summary_
+    """Compute the effective wind factor from head-fire and base ROS.
+
+    The effective wind factor (phi_e) represents the combined influence of
+    wind and slope as if it were a single wind-only factor.
 
     Args:
-        R_h (float): _description_
-        R_0 (float): _description_
+        R_h (float): Head-fire rate of spread (ft/min).
+        R_0 (float): No-wind, no-slope base ROS (ft/min).
 
     Returns:
-        float: _description_
+        float: Effective wind factor (dimensionless).
     """
-
     phi_e = (R_h / R_0) - 1
 
     return phi_e
 
 def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
-    """_summary_
+    """Compute the effective wind speed from the effective wind factor.
+
+    Invert the wind factor equation to recover the equivalent wind speed
+    that produces the same effect as the combined wind and slope.
 
     Args:
-        fuel (Fuel): _description_
-        R_h (float): _description_
-        R_0 (float): _description_
+        fuel (Fuel): Fuel model with wind coefficients ``B``, ``C``, ``E``,
+            and packing ratio ``rat``.
+        R_h (float): Head-fire rate of spread (ft/min).
+        R_0 (float): No-wind, no-slope base ROS (ft/min).
 
     Returns:
-        float: _description_
+        float: Effective wind speed (ft/min). Returns 0 when ``R_h <= R_0``.
     """
 
 
@@ -398,18 +543,21 @@ def calc_effective_wind_speed(fuel: Fuel, R_h: float, R_0: float) -> float:
 
     return u_e
 
-def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
-    """_summary_
+def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float) -> float:
+    """Compute fire ellipse eccentricity from effective wind speed.
+
+    Convert the effective wind speed to m/s, then compute the length-to-
+    breadth ratio ``z`` and derive eccentricity. Capped at ``z = 8.0``
+    following Anderson (1983).
 
     Args:
-        fuel (Fuel): _description_
-        R_h (float): _description_
-        R_0 (float): _description_
+        fuel (Fuel): Fuel model for effective wind speed calculation.
+        R_h (float): Head-fire rate of spread (ft/min).
+        R_0 (float): No-wind, no-slope base ROS (ft/min).
 
     Returns:
-        _type_: _description_
+        float: Fire ellipse eccentricity in [0, 1).
     """
-
     u_e = calc_effective_wind_speed(fuel, R_h, R_0)
     u_e_ms = ft_min_to_m_s(u_e)
     z = 0.936 * np.exp(0.2566 * u_e_ms) + 0.461 * np.exp(-0.1548 * u_e_ms) - 0.397
@@ -418,7 +566,18 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float):
 
     return e
 
-def calc_flame_len(cell: Cell):
+def calc_flame_len(cell: Cell) -> float:
+    """Estimate flame length from maximum fireline intensity.
+
+    For surface fires, uses Brown and Davis (1973) correlation. For crown
+    fires, uses Thomas (1963) correlation.
+
+    Args:
+        cell (Cell): Cell with ``I_ss`` (BTU/ft/min) and ``_crown_status``.
+
+    Returns:
+        float: Flame length in feet.
+    """
     # Fireline intensity in Btu/ft/min
     fli = np.max(cell.I_ss)
     fli /= 60 # convert to Btu/ft/s

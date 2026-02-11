@@ -1,16 +1,61 @@
+"""Ember lofting, transport, and spot fire ignition model.
 
+Simulate the generation of firebrands (embers) from torching trees, their
+ballistic transport through the atmosphere, and potential spot fire ignition
+upon landing. Based on the Albini (1979) torching-tree firebrand model.
 
-from embrs.utilities.fire_util import CrownStatus, CanopySpecies, CellStates, UtilFuncs
+Classes:
+    - Embers: Manage firebrand lofting, flight, and landing for a simulation.
+
+References:
+    Albini, F. A. (1979). Spot fire distance from burning trees — a
+    predictive model. USDA Forest Service General Technical Report INT-56.
+"""
+
+from embrs.utilities.fire_util import CrownStatus, CanopySpecies, CellStates
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Set
 
 import numpy as np
-import copy
 
 class Embers:
-    def __init__(self, ign_prob: float, species: int, dbh: float, min_spot_dist: float, limits: Tuple[float, float], get_cell_from_xy: Callable[[float, float], Cell]):
-        
+    """Firebrand lofting, atmospheric transport, and spot fire ignition.
+
+    Manage a collection of airborne embers, lofting them from torching
+    cells, transporting them through the wind field, and igniting spot
+    fires where they land on fuel cells.
+
+    Attributes:
+        ign_prob (float): Probability of spot fire ignition per firebrand
+            (0 to 1).
+        min_spot_dist_m (float): Minimum horizontal distance (meters) a
+            firebrand must travel before it can ignite a spot fire.
+        embers (list[dict]): Currently airborne firebrands, each a dict
+            with keys 'x', 'y', 'diam', 'height', 'start_elev',
+            'curr_time', 'elapsed'.
+    """
+
+    def __init__(self, ign_prob: float, species: int, dbh: float,
+                 min_spot_dist: float, limits: Tuple[float, float],
+                 get_cell_from_xy: Callable[[float, float], Cell]):
+        """Initialize the ember model.
+
+        Args:
+            ign_prob (float): Spot fire ignition probability per firebrand
+                (0 to 1).
+            species (int): Canopy species ID (see ``CanopySpecies``).
+            dbh (float): Diameter at breast height of representative trees
+                (centimeters).
+            min_spot_dist (float): Minimum spotting distance (meters).
+            limits (Tuple[float, float]): ``(x_lim, y_lim)`` simulation
+                domain bounds (meters).
+            get_cell_from_xy (Callable): Callback to retrieve a Cell from
+                spatial coordinates.
+
+        Raises:
+            ValueError: If ``species`` is not in ``CanopySpecies``.
+        """
         # Call back injection
         self.get_cell_from_xy = get_cell_from_xy
 
@@ -34,6 +79,21 @@ class Embers:
         self.embers = []
 
     def loft(self, cell: Cell, sim_time_m: float):
+        """Loft firebrands from a torching cell.
+
+        Compute plume characteristics, then attempt to loft up to 16
+        embers of increasing diameter. Each passes a probabilistic check
+        against ``ign_prob``. Successfully lofted embers are appended to
+        ``self.embers``.
+
+        Args:
+            cell (Cell): The burning cell that is torching.
+            sim_time_m (float): Current simulation time (minutes).
+
+        Side Effects:
+            Sets ``cell.lofted = True``. Appends ember dicts to
+            ``self.embers``.
+        """
         cell.lofted = True
         
         self.plume(cell)
@@ -66,7 +126,21 @@ class Embers:
             else:
                 break
 
-    def partcalc(self, vowf: float, z: float):
+    def partcalc(self, vowf: float, z: float) -> float:
+        """Compute time residual for iterating maximum particle height.
+
+        Used by ``torchheight`` to solve for the maximum lofting height of
+        a firebrand as a function of particle diameter and flame height
+        (Albini 1979).
+
+        Args:
+            vowf (float): Normalized terminal velocity ratio (dimensionless).
+            z (float): Candidate particle height (feet).
+
+        Returns:
+            float: Time residual (dimensionless). Converges to zero at the
+                correct maximum height.
+        """
         # Calculates tT for iterating max particle height z as a function of particle diameter and flameheight (steady_height)
         # for torching trees only, function used by torcheight
         a = 5.963
@@ -79,7 +153,21 @@ class Embers:
         tp = a / (pt8vowf**3) * (np.log(Temp) - pt8vowf * (r - 1.0) - 0.5 * pt8vowf**2 * (r2 - 1.0))
         return tp - tT1
 
-    def torchheight(self, diameter: float, z_0: float):
+    def torchheight(self, diameter: float, z_0: float) -> float:
+        """Compute maximum lofting height for a firebrand (Albini 1979).
+
+        Iteratively solve for the height a firebrand of given diameter
+        can reach from a torching tree, accounting for plume buoyancy and
+        particle terminal velocity.
+
+        Args:
+            diameter (float): Firebrand diameter (feet).
+            z_0 (float): Crown height / initial release height (feet).
+
+        Returns:
+            float: Maximum lofting height (feet), or -1.0 if the firebrand
+                cannot be lofted.
+        """
         # Albini 1979 torching trees model
         vowf = 40.0 * np.sqrt(diameter / self.steady_height)
         if vowf < 1.0:
@@ -109,9 +197,18 @@ class Embers:
                     return z
         return -1.0
 
-    def calc_front_dist(self, cell: Cell):
-        # Calculate the length of the fire front
-        # approximated as the length of the cell's edges that are adjacent to burnable neighbors
+    def calc_front_dist(self, cell: Cell) -> float:
+        """Estimate the fire front length at a cell.
+
+        Approximate the frontal distance as the cell side length times the
+        number of burnable neighbors.
+
+        Args:
+            cell (Cell): Cell to evaluate.
+
+        Returns:
+            float: Estimated fire front length (meters).
+        """
         a = cell.cell_size
         num_neighbors = len(cell.burnable_neighbors)
 
@@ -119,6 +216,20 @@ class Embers:
         return dist
 
     def plume(self, cell: Cell):
+        """Compute plume steady-state height and flame duration for a cell.
+
+        Determine the plume characteristics based on crown fire status,
+        crown fraction burned, canopy cover, and species properties. The
+        number of torching trees is estimated from fire front length and
+        canopy conditions.
+
+        Args:
+            cell (Cell): Cell providing crown status, CFB, and canopy data.
+
+        Side Effects:
+            Sets ``self.steady_height`` (feet) and ``self.duration``
+            (dimensionless time).
+        """
         treespecies = self.treespecies
         tnum = 1
 
@@ -151,8 +262,22 @@ class Embers:
         self.duration = part3 * DBH**(-part4) * tnum**(-0.2)
 
 
-    def vert_wind_speed(self, height_above_ground: float, canopy_ht: float, wind_speed: float, wind_adj_factor: float):
+    def vert_wind_speed(self, height_above_ground: float, canopy_ht: float,
+                        wind_speed: float, wind_adj_factor: float) -> float:
+        """Compute wind speed at a given height above ground.
 
+        Below the canopy, return the midflame wind speed. Above the canopy,
+        use the logarithmic wind profile (Albini & Baughman 1979).
+
+        Args:
+            height_above_ground (float): Height above ground (feet).
+            canopy_ht (float): Canopy height (feet).
+            wind_speed (float): 20-ft or reference wind speed (m/s).
+            wind_adj_factor (float): Wind adjustment factor for sub-canopy.
+
+        Returns:
+            float: Wind speed at the specified height (ft/s).
+        """
         if height_above_ground < canopy_ht:
             # Compute midflame wind speed
             midflame_wind  = wind_adj_factor * wind_speed
@@ -163,7 +288,25 @@ class Embers:
 
         return u
 
-    def flight(self, end_curr_time_step: float):
+    def flight(self, end_curr_time_step: float) -> Set[Cell]:
+        """Transport all airborne embers and ignite spot fires.
+
+        Advance each ember through the wind field using a ballistic
+        trajectory model until it either lands, exits the domain, or
+        reaches the end of the current time step. Embers that land on
+        fuel cells ignite spot fires.
+
+        Args:
+            end_curr_time_step (float): End time of the current simulation
+                step (minutes).
+
+        Returns:
+            Set[Cell]: Set of cells where spot fires were ignited.
+
+        Side Effects:
+            Updates ``self.embers`` to retain only still-airborne embers.
+            Sets ignited cells to ``CellStates.FIRE``.
+        """
         spots = set()
 
         sstep = 0.25 # minutes
