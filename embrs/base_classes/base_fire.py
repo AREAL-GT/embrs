@@ -575,7 +575,7 @@ class BaseFireSim:
         Args:
             cell (Cell): Burning cell from which to propagate fire.
         """
-        if np.all(cell.r_t == 0) and np.all(cell.r_ss == 0) and self._iters != 0:
+        if (cell.r_t == 0).all() and (cell.r_ss == 0).all() and self._iters != 0:
             cell.fully_burning = True
             return
 

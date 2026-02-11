@@ -50,7 +50,7 @@ def accelerate(cell: Cell, time_step: float):
     mask_zero = mask_accel & (cell.r_t == 0)
 
     # --- Handle nonzero r_t ---
-    if np.any(mask_nonzero):
+    if mask_nonzero.any():
         r_t = cell.r_t[mask_nonzero]
         r_ss = cell.r_ss[mask_nonzero]
         a_a = cell.a_a
@@ -71,7 +71,7 @@ def accelerate(cell: Cell, time_step: float):
         cell.I_t[mask_nonzero] = (r_t1 / (r_ss + 1e-7)) * cell.I_ss[mask_nonzero]
 
     # --- Handle zero r_t ---
-    if np.any(mask_zero):
+    if mask_zero.any():
         r_ss = cell.r_ss[mask_zero]
         a_a = cell.a_a if np.isscalar(cell.a_a) else cell.a_a[mask_zero]
 
@@ -88,7 +88,7 @@ def accelerate(cell: Cell, time_step: float):
 
     # --- Handle steady state ---
     mask_steady = ~mask_accel
-    if np.any(mask_steady):
+    if mask_steady.any():
         cell.r_t[mask_steady] = cell.r_ss[mask_steady]
         cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
 

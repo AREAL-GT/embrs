@@ -302,13 +302,11 @@ class GridManager:
             if self._strtree is None:
                 self._build_spatial_index()
 
-            # STRtree query returns indices of candidate cells
+            # STRtree query with predicate='intersects' returns cells that
+            # overlap the geometry (not just bounding-box hits)
             indices = self._strtree.query(geom, predicate='intersects')
-            # Post-filter to exclude edge-only touches (zero-area intersection)
             for i in indices:
-                cell = self._strtree_cells[i]
-                if geom.intersection(cell.polygon).area > 1e-6:
-                    cells.add(cell)
+                cells.add(self._strtree_cells[i])
 
         elif isinstance(geom, LineString):
             length = geom.length

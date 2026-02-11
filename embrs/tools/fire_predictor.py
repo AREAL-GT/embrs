@@ -1526,24 +1526,24 @@ def _aggregate_ensemble_predictions(
         time_s for pred in predictions for time_s in pred.spread.keys()
     ))
 
+    # Incremental O(n) approach: advance through sorted timesteps once,
+    # accumulating burn counts as new burns appear at each timestep.
+    burn_counts = {}  # {loc: number of ensemble members that burned it}
+    member_burned = [set() for _ in range(n_ensemble)]  # per-member cumulative
+
     burn_probability = {}
     for time_s in all_time_steps:
-        # Track which ensemble members have burned each location by this time
-        burned_by_time = {}  # {(x,y): set of ensemble indices}
-
+        # Only process NEW burns at this timestep
         for ensemble_idx, pred in enumerate(predictions):
-            # Check all time steps up to and including current time_s
-            for t in pred.spread.keys():
-                if t <= time_s:
-                    for loc in pred.spread[t]:
-                        if loc not in burned_by_time:
-                            burned_by_time[loc] = set()
-                        burned_by_time[loc].add(ensemble_idx)
+            if time_s in pred.spread:
+                for loc in pred.spread[time_s]:
+                    if loc not in member_burned[ensemble_idx]:
+                        member_burned[ensemble_idx].add(loc)
+                        burn_counts[loc] = burn_counts.get(loc, 0) + 1
 
-        # Convert to probabilities
+        # Snapshot current cumulative probabilities
         burn_probability[time_s] = {
-            loc: len(ensemble_set) / n_ensemble
-            for loc, ensemble_set in burned_by_time.items()
+            loc: count / n_ensemble for loc, count in burn_counts.items()
         }
 
     # -------------------------------------------------------------------------
