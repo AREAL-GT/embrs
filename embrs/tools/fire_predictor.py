@@ -155,8 +155,10 @@ class FirePredictor(BaseFireSim):
 
         if generate_cell_grid:
             super().__init__(sim_params, burnt_region=burnt_region)
-            # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
-            self.orig_grid, self.orig_dict = copy.deepcopy((self._cell_grid, self._cell_dict))
+            # orig_grid/orig_dict reference the same cell objects as _cell_grid/_cell_dict.
+            # _set_states() will reset all cells in-place before each prediction.
+            self.orig_grid = self._cell_grid
+            self.orig_dict = self._cell_dict
 
     def _apply_member_params(self, params: PredictorParams) -> None:
         """Apply member-specific parameters without regenerating cell grid.
@@ -844,28 +846,30 @@ class FirePredictor(BaseFireSim):
                 worker processes where fire is None).
 
         Side Effects:
-            - Deep copies orig_grid and orig_dict to _cell_grid and _cell_dict
+            - Resets all cells in-place to FUEL state via reset_to_fuel()
+            - Points _cell_grid and _cell_dict to orig_grid and orig_dict
             - Resets _burnt_cells, _burning_cells, _updated_cells, and
               _scheduled_spot_fires
-            - Fixes weak references in copied cells to point to self
+            - Fixes weak references in cells to point to self
             - Sets starting_ignitions based on burning regions
         """
-        # Reset all data structures to the original
-        # CRITICAL: Deepcopy grid and dict TOGETHER so they share the same Cell objects
-        # If we deepcopy them separately, we get two different sets of Cell objects!
-        self._cell_grid, self._cell_dict = copy.deepcopy((self.orig_grid, self.orig_dict))
+        # Reset cell grid in-place: point to the original grid objects and
+        # reset all cells to initial FUEL state. This avoids expensive deepcopy
+        # while providing the same semantics — each call starts from clean state.
+        self._cell_grid = self.orig_grid
+        self._cell_dict = self.orig_dict
+
+        # Reset all cells to initial FUEL state and fix weak references
+        for cell in self._cell_dict.values():
+            cell.reset_to_fuel()
+            cell.set_parent(self)
+
         self._burnt_cells = []
         self._burning_cells = []
         self._updated_cells = {}
         self._scheduled_spot_fires = {}
 
-        # CRITICAL: Fix weak references after deepcopy
-        # deepcopy creates new Cell objects but doesn't update weak references
-        for cell in self._cell_dict.values():
-            cell.set_parent(self)
-
-        # Sync grid manager with the freshly copied cell grid
-        # This ensures get_cells_at_geometry returns the correct cell objects
+        # Sync grid manager with the cell grid
         if hasattr(self, '_grid_manager') and self._grid_manager is not None:
             self._grid_manager._cell_grid = self._cell_grid
             self._grid_manager._cell_dict = self._cell_dict

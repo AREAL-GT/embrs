@@ -108,11 +108,87 @@ class Cell:
 
     def set_parent(self, parent):
         """Sets the parent BaseFire object for this cell.
-        
+
         Args:
             parent: The BaseFire object that owns this cell
         """
         self._parent = weakref.ref(parent)
+
+    def reset_to_fuel(self):
+        """Reset cell to initial FUEL state, preserving terrain/fuel/geometry data.
+
+        Resets all mutable fire-state attributes to their initial values as set
+        by ``__init__`` and ``_set_cell_data``. Immutable properties such as
+        position, fuel model, elevation, slope, aspect, canopy attributes,
+        polygon, wind adjustment factor, and neighbor topology are preserved.
+
+        This is used by FirePredictor to efficiently restore cells to a clean
+        state between predictions, avoiding expensive deepcopy operations.
+
+        Side Effects:
+            - Resets fire state to CellStates.FUEL
+            - Clears all spread tracking arrays
+            - Resets suppression effects (retardant, rain, firebreaks)
+            - Resets fuel moisture to initial values
+            - Restores full neighbor set to _burnable_neighbors
+        """
+        # Fire state
+        self._state = CellStates.FUEL
+        self.fully_burning = False
+        self._crown_status = CrownStatus.NONE
+        self.cfb = 0
+        self.reaction_intensity = 0
+
+        # Spread arrays — back to empty/zero defaults from _set_cell_data
+        self.distances = None
+        self.directions = None
+        self.end_pts = None
+        self.r_h_ss = None
+        self.I_h_ss = None
+        self.r_t = np.array([0])
+        self.fire_spread = np.array([])
+        self.avg_ros = np.array([])
+        self.r_ss = np.array([])
+        self.I_ss = np.array([0])
+        self.I_t = np.array([0])
+        self.intersections = set()
+        self.e = 0
+        self.alpha = None
+        self.has_steady_state = False
+
+        # Suppression effects — back to __init__ defaults
+        self._retardant = False
+        self._retardant_factor = 1.0
+        self.retardant_expiration_s = -1.0
+        self.local_rain = 0.0
+        self._break_width = 0
+        self.breached = True
+        self.lofted = False
+        self._arrival_time = -999
+
+        # Wind forecast
+        self.forecast_wind_speeds = []
+        self.forecast_wind_dirs = []
+
+        # Moisture — reset to initial values
+        self.moist_update_time_s = 0
+        if self._fuel.burnable:
+            # Reset DFM objects in-place (avoids recreating them)
+            for dfm in self.dfms:
+                dfm.initializeStick()
+            # Reset moisture array to initial values
+            indices = self._fuel.rel_indices
+            fmois = np.zeros(6)
+            if 0 in indices: fmois[0] = self.init_dead_mf[0]
+            if 1 in indices: fmois[1] = self.init_dead_mf[1]
+            if 2 in indices: fmois[2] = self.init_dead_mf[2]
+            if 3 in indices: fmois[3] = self.init_dead_mf[0]
+            if 4 in indices: fmois[4] = self.init_live_h_mf
+            if 5 in indices: fmois[5] = self.init_live_w_mf
+            self.fmois = np.array(fmois)
+
+        # Restore full neighbor set (remove_neighbors modifies _burnable_neighbors during sim)
+        self._burnable_neighbors = dict(self._neighbors)
 
     def _set_cell_data(self, cell_data: CellData):
         """Configure cell properties from terrain and fuel data.
@@ -456,7 +532,7 @@ class Cell:
         parent = self._parent()
         w_idx = parent._curr_weather_idx - parent.sim_start_w_idx
 
-        if parent.is_prediction() and len(self.forecast_wind_speeds) == 1: # TODO: need better check
+        if parent.is_prediction() and len(self.forecast_wind_speeds) <= w_idx:
             parent._set_prediction_forecast(self)
         
         curr_wind = (self.forecast_wind_speeds[w_idx], self.forecast_wind_dirs[w_idx])
