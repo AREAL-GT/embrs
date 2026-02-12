@@ -11,7 +11,9 @@ Exception Hierarchy:
     ├── ValidationError - Input validation failures
     ├── WeatherDataError - Weather data issues
     ├── ExternalServiceError - External service failures (WindNinja, OpenMeteo)
-    └── GridError - Grid operations failures
+    ├── GridError - Grid operations failures
+    ├── FuelModelError - Fuel model lookup or calculation failures
+    └── PredictionError - Fire prediction / ensemble failures
 
 Example:
     >>> from embrs.exceptions import ConfigurationError
@@ -128,7 +130,7 @@ class ValidationError(EMBRSError):
         ... )
     """
 
-    def __init__(self, message: str, field: Optional[str] = None, value=None):
+    def __init__(self, message: str, field: Optional[str] = None, value: object = None):
         self.field = field
         self.value = value
 

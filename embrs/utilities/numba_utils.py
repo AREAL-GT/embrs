@@ -54,7 +54,7 @@ except ImportError:
     prange = range  # Fallback to regular range
 
 
-def jit_if_enabled(**jit_kwargs) -> Callable:
+def jit_if_enabled(**jit_kwargs: Any) -> Callable:
     """Decorator that applies Numba JIT if available and enabled.
 
     This decorator wraps functions with Numba's @jit decorator when Numba
@@ -89,7 +89,7 @@ def jit_if_enabled(**jit_kwargs) -> Callable:
     return decorator
 
 
-def njit_if_enabled(**jit_kwargs) -> Callable:
+def njit_if_enabled(**jit_kwargs: Any) -> Callable:
     """Decorator that applies Numba njit if available and enabled.
 
     Equivalent to jit_if_enabled(nopython=True, **jit_kwargs).
@@ -149,11 +149,11 @@ def warmup_jit_cache() -> None:
 
 
 # Parallel range helper
-def get_prange():
+def get_prange() -> type:
     """Get the appropriate parallel range function.
 
     Returns:
-        Callable: numba.prange if available and JIT enabled, else range.
+        type: numba.prange if available and JIT enabled, else range.
     """
     if NUMBA_AVAILABLE and not DISABLE_JIT:
         return prange

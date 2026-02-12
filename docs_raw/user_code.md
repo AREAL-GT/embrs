@@ -5,7 +5,7 @@ One of the core features of EMBRS is the ability to import custom control classe
 
 ### Base Class Implementation
 
-- Custom classes must implement the provided abstract base class called [`ControlClass`](./_autosummary/embrs.base_classes.control_base.rst) in `embrs/base_classes/control_base.py`.
+- Custom classes must implement the provided abstract base class called [ControlClass](./base_class_documentation.md) in `embrs/base_classes/control_base.py`.
 - The base class requires the implementation of the `process_state` method. This is the method that is called after each iteration of an EMBRS simulation. It must take only a `FireSim` object as an input and shouldn't return anything.
 - The implementation of the body of this method is completely up to the user, but it acts as the 'bridge' between the custom control class and the EMBRS simulation.
 
@@ -35,37 +35,35 @@ class ExampleCustomClass(ControlClass):
         ...
 ```
 
-(user_code:agents)=
 ## Agents
 - EMBRS provides basic functionality for 'registering' agents with the simulation. This allows the simulation to automatically log the locations of agents during the course of a simulation so they can be visualized during real-time visualization and visualization in post.
 - If you wish to have the simulation track your agents you must do the following:
 
     - **Implement AgentBase Class**
-        - Your agent class must be a subclass of the provided [`AgentBase`](./_autosummary/embrs.base_classes.agent_base.rst) class located in 'base_classes/agent_base.py'. 
-        - The base class just contains a constructor and a function `to_log_format()` that is called by the sim to log data about the agent as the simulation progression.
-        - Sample code for implementing a custom agent class can be found [here.](examples:sample_agent)
+        - Your agent class must be a subclass of the provided [AgentBase](./base_class_documentation.md) class located in `embrs/base_classes/agent_base.py`.
+        - The base class just contains a constructor and a function `to_log_entry(timestamp)` that is called by the sim to log data about the agent as the simulation progresses.
+        - Sample code for using agents can be found in `examples/v_burnout_demo.py`.
 
         ```python
         # AgentBase Class:
 
         class AgentBase:
-            def __init__(self, id:any, x: float, y: float, label:str=None,
-                         marker:str='*', color:str='magenta'):
+            def __init__(self, id, x: float, y: float, label: str = None,
+                         marker: str = '*', color: str = 'magenta'):
                 self.id = id         # unique identifier for the agent
                 self.x = x           # x position of the agent in meters
                 self.y = y           # y position of the agent in meters
                 self.label = label   # label for the agent in visualizations
                 self.marker = marker # matplotlib marker for agent in visualizations
                 self.color = color   # color of the marker in visualizations
-            
-            def to_log_format(self):
+
+            def to_log_entry(self, timestamp):
                 ...
 
         ```
         
-        ```{note}
-      When updating the position of your agent in your code, change the value of x and y to do so.
-        ```
+        !!! note
+            When updating the position of your agent in your code, change the value of x and y to do so.
 
     - **Add Agents to Sim**
         - Once your agent is constructed you must add your agent to the simulation
@@ -80,8 +78,8 @@ class ExampleCustomClass(ControlClass):
             a_x = np.random.random() * fire.x_lim
             a_y = np.random.random() * fire.y_lim
             
-            # SampleAgent would be replaced with your custom agent class
-            agent = SampleAgent(0, a_x, a_y, fire, label = 'agent_0')
+            from embrs.base_classes.agent_base import AgentBase
+            agent = AgentBase(0, a_x, a_y, label='agent_0')
 
             fire.add_agent(agent) # Add agent to the sim
 
@@ -93,13 +91,21 @@ class ExampleCustomClass(ControlClass):
 - Refer to ['Fire Interface'](./interface_reference.md) to see all the operations custom classes can carry out on a `FireSim` instance.
 
 ## Sample Custom Classes
-Two sample custom class implementations are provided with EMBRS. These are simple custom classes developed for the purpose of demonstrating the ability to perform suppression operations in response to the state of the fire in real-time.
+Several sample custom class implementations are provided with EMBRS. These are simple custom classes developed for the purpose of demonstrating the ability to perform suppression operations in response to the state of the fire in real-time.
 
 
-### Prescribed Burning
-- In the prescribed burning sample class, ten agents work with one another to carry out prescribed burns in order to reduce the fuel ahead of the fire. The agents leverage knowledge of the wind and the locations of control lines to determine the best places to start prescribed burns.
-- This example can be found in ['examples/vi_controlled_burning.py'](examples:controlled_burning).
+### Burnout Strategy
+- In the burnout sample class, two agents work together to carry out ignitions in order to reduce the fuel ahead of the fire. The agents leverage knowledge of the wind and the locations of fire breaks to determine the best places to start ignitions.
+- This example can be found in `examples/v_burnout_demo.py`.
 
-### Fuel Soaking
-- In the fuel soaking sample class, ten agents work with one another to divide the fire front and increase the fuel moisture along the front as it evolves. This simulates dropping water ahead of a fire front in an attempt to suppress it.
-- This example can be found in ['examples/vii_suppression.py'](examples:suppression).
+### Fireline Construction
+- In the fireline construction sample class, one agent constructs a fireline along a planned path between fire breaks. The agent uses fire prediction to adapt the fireline placement as the fire evolves.
+- This example can be found in `examples/vi_fireline_construction_demo.py`.
+
+### Water Suppression
+- In the water suppression sample class, water drops are applied in an expanding pattern around the fire center to increase the fuel moisture along the frontier. This simulates dropping water ahead of the frontier in an attempt to suppress it.
+- This example can be found in `examples/vii_water_suppression_demo.py`.
+
+### Retardant Suppression
+- In the retardant suppression sample class, fire retardant is periodically applied to all cells along the frontier to slow the spread of fire.
+- This example can be found in `examples/viii_retardant_suppression_demo.py`.

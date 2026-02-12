@@ -8,7 +8,7 @@ time of day, and month).
 Classes:
     - FuelMoisturePriors: Prior probability distributions for site conditions.
     - IRPGMoistureModel: FDFM estimation combining RFM lookup and stochastic
-      correction factors.
+        correction factors.
 
 References:
     National Wildfire Coordinating Group. (2014). Incident Response Pocket

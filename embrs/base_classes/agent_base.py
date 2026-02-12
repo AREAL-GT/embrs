@@ -10,6 +10,8 @@ Classes:
     :members:
 """
 
+from typing import Any
+
 from embrs.utilities.logger_schemas import AgentLogEntry
 
 class AgentBase:
@@ -27,7 +29,7 @@ class AgentBase:
         color (str): Matplotlib color for display.
     """
 
-    def __init__(self, id, x: float, y: float, label: str = None, marker: str = '*',
+    def __init__(self, id: Any, x: float, y: float, label: str = None, marker: str = '*',
                  color: str = 'magenta'):
         """Initialize an agent with position and display properties.
 
@@ -46,7 +48,7 @@ class AgentBase:
         self.marker = marker
         self.color = color
 
-    def to_log_entry(self, timestamp) -> AgentLogEntry:
+    def to_log_entry(self, timestamp: float) -> AgentLogEntry:
         """Convert agent state to a log entry for recording.
 
         Args:

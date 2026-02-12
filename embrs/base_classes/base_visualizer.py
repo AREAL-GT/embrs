@@ -600,7 +600,7 @@ class BaseVisualizer:
             self.wind_cbar.ax.tick_params(labelsize=8)
 
 
-    def meters_to_points(self, meters):
+    def meters_to_points(self, meters: float) -> float:
         """Convert meters to matplotlib points for sizing elements.
 
         Args:

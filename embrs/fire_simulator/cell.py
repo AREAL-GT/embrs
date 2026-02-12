@@ -10,9 +10,17 @@ Classes:
 .. autoclass:: Cell
     :members:
 """
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
 import numpy as np
 from shapely.geometry import Polygon
 import weakref
+
+if TYPE_CHECKING:
+    from embrs.base_classes.base_fire import BaseFireSim
 
 from embrs.utilities.fire_util import CellStates, CrownStatus, UtilFuncs
 from embrs.utilities.data_classes import CellData
@@ -106,11 +114,11 @@ class Cell:
 
         self._arrival_time = -999
 
-    def set_parent(self, parent):
+    def set_parent(self, parent: BaseFireSim) -> None:
         """Sets the parent BaseFire object for this cell.
 
         Args:
-            parent: The BaseFire object that owns this cell
+            parent (BaseFireSim): The BaseFire object that owns this cell.
         """
         self._parent = weakref.ref(parent)
 
@@ -816,7 +824,7 @@ class Cell:
             self.fmois[3] = self.fmois[0]
 
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Returns a formatted string representation of the cell.
 
         The string includes the cell's ID, coordinates, elevation, fuel type, and state.
@@ -869,7 +877,7 @@ class Cell:
 
         return prob
 
-    def calc_cell_area(self):
+    def calc_cell_area(self) -> float:
         """Calculates the area of the hexagonal cell in square meters.
 
         The formula for the area of a regular hexagon is:
@@ -882,10 +890,10 @@ class Cell:
         area_m2 = (3 * np.sqrt(3) * self.cell_size ** 2) / 2
         return area_m2
 
-    def to_polygon(self):
+    def to_polygon(self) -> Polygon:
         """Generates a Shapely polygon representation of the hexagonal cell.
 
-        The polygon is created in a point-up orientation using the center (`x_pos`, `y_pos`) 
+        The polygon is created in a point-up orientation using the center (`x_pos`, `y_pos`)
         and the hexagon's side length.
 
         Returns:
@@ -968,7 +976,7 @@ class Cell:
 
         return entry
 
-    def iter_neighbor_cells(self):
+    def iter_neighbor_cells(self) -> Iterator[Cell]:
         """Iterate over neighboring Cell objects.
 
         Yields each adjacent cell by looking up neighbor IDs in the parent
@@ -1026,7 +1034,7 @@ class Cell:
             raise TypeError("Comparison must be between two Cell instances.")
         return self.id > other.id
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict:
         """Prepare cell state for pickling.
 
         Excludes the weak reference to parent which cannot be pickled.

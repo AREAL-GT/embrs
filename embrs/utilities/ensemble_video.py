@@ -15,10 +15,13 @@ from matplotlib.animation import FFMpegWriter
 from matplotlib.cm import ScalarMappable
 from shapely.geometry import Polygon
 from datetime import timedelta
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, TYPE_CHECKING
 import os
 
 from embrs.utilities.data_classes import EnsemblePredictionOutput
+
+if TYPE_CHECKING:
+    from embrs.tools.fire_predictor import FirePredictor
 
 
 def create_hexagon_polygon(x: float, y: float, cell_size: float) -> Polygon:
@@ -295,22 +298,21 @@ def create_ensemble_video(
 
 
 def create_ensemble_video_from_predictor(
-    predictor,
+    predictor: 'FirePredictor',
     ensemble_output: EnsemblePredictionOutput,
     output_path: str = "ensemble_prediction.mp4",
-    **kwargs
+    **kwargs: Any
 ) -> str:
-    """
-    Convenience function to create ensemble video using predictor's cell size and map info.
+    """Convenience function to create ensemble video using predictor's cell size and map info.
 
     Args:
-        predictor: FirePredictor instance
-        ensemble_output: EnsemblePredictionOutput from run_ensemble()
-        output_path: Path to save the video
-        **kwargs: Additional arguments passed to create_ensemble_video()
+        predictor (FirePredictor): FirePredictor instance.
+        ensemble_output (EnsemblePredictionOutput): Output from run_ensemble().
+        output_path (str): Path to save the video.
+        **kwargs (Any): Additional arguments passed to create_ensemble_video().
 
     Returns:
-        Path to the saved video file
+        str: Path to the saved video file.
     """
     # Get cell size from predictor
     cell_size = predictor.c_size

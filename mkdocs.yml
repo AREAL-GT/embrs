@@ -34,14 +34,26 @@ nav:
       - Running a Simulation: running_sim.md
       - Log Files: log_files.md
       - Visualization: visualization.md
-  - User Reference:
-      - User Code: user_code.md
-      - Interface Reference: interface_reference.md
+  - User Guide:
+      - Custom Control Classes: user_code.md
+      - Fire Interface: interface_reference.md
       - Fire Prediction: fire_prediction.md
-      - Simulation Documentation: sim_documentation.md
-      - Base Class Documentation: base_class_documentation.md
-      - Other Documentation: other_documentation.md
       - Example Index: example_index.md
+  - API Reference:
+      - Fire Simulator: sim_documentation.md
+      - Base Classes: base_class_documentation.md
+      - Models:
+          - Rothermel Spread: models_rothermel.md
+          - Fuel Models: models_fuel.md
+          - Crown Fire: models_crown.md
+          - Weather: models_weather.md
+          - Wind Forecast: models_wind.md
+          - Spotting: models_spotting.md
+          - Fuel Moisture: models_moisture.md
+      - Tools: tools_documentation.md
+      - Utilities: utilities_documentation.md
+      - Data Classes: data_classes_documentation.md
+      - Exceptions: exceptions_documentation.md
   - Theory and Background:
       - Fire Modelling: fire_modelling.md
       - Interpreting Visualizations: interpreting_visualizations.md

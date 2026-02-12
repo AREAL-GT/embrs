@@ -131,7 +131,7 @@ def accelerate(cell: Cell, time_step: float):
         cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
 
 def calc_vals_for_all_directions(cell: Cell, R_h: float, I_r: float, alpha: float,
-                                 e: float, I_h: float = None):
+                                 e: float, I_h: float = None) -> Tuple[np.ndarray, np.ndarray]:
     """Compute ROS and fireline intensity along all spread directions.
 
     Use the fire ellipse (eccentricity ``e``) and the combined wind/slope

@@ -17,10 +17,12 @@ Classes:
 Functions:
     - filter_hourly_data: Subset hourly data by datetime range.
     - apply_site_specific_correction: Elevation-lapse adjustment for
-      temperature and humidity.
+        temperature and humidity.
     - calc_local_solar_radiation: Slope- and canopy-adjusted irradiance.
     - datetime_to_julian_date: Convert a datetime to Julian date.
 """
+
+from __future__ import annotations
 
 from retry_requests import retry
 from datetime import timedelta, datetime
@@ -30,7 +32,10 @@ import pandas as pd
 import numpy as np
 import pytz
 import pvlib
-from typing import Iterator
+from typing import Iterator, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.data_classes import *
 from embrs.utilities.unit_conversions import *
@@ -492,7 +497,7 @@ class WeatherStream:
 
         return live_h_mf, live_w_mf
 
-    def calc_GSI(self, hourly_data: dict, data_start, sim_start) -> float:
+    def calc_GSI(self, hourly_data: dict, data_start: datetime, sim_start: datetime) -> float:
         """Compute the Growing Season Index (GSI) for the pre-simulation period.
 
         Average daily sub-indices for photoperiod, minimum temperature,
@@ -628,7 +633,7 @@ class WeatherStream:
 
         return fmc
 
-def filter_hourly_data(hourly_data: dict, start_datetime, end_datetime) -> dict:
+def filter_hourly_data(hourly_data: dict, start_datetime: datetime, end_datetime: datetime) -> dict:
     """Filter hourly weather data to a datetime range (inclusive).
 
     Args:
@@ -647,8 +652,8 @@ def filter_hourly_data(hourly_data: dict, start_datetime, end_datetime) -> dict:
     filtered_data = {key: np.array(value)[mask] for key, value in hourly_data.items()}
     return filtered_data
 
-def apply_site_specific_correction(cell, elev_ref: float,
-                                   curr_weather: WeatherEntry) -> tuple:
+def apply_site_specific_correction(cell: Cell, elev_ref: float,
+                                   curr_weather: WeatherEntry) -> Tuple[float, float]:
     """Apply elevation lapse-rate correction for temperature and humidity.
 
     Adjust the reference-station temperature and relative humidity to the
@@ -685,7 +690,7 @@ def apply_site_specific_correction(cell, elev_ref: float,
 
     return temp, rh
 
-def calc_local_solar_radiation(cell, curr_weather: WeatherEntry) -> float:
+def calc_local_solar_radiation(cell: Cell, curr_weather: WeatherEntry) -> float:
     """Compute slope- and canopy-adjusted solar irradiance at a cell.
 
     Use pvlib to compute plane-of-array irradiance for the cell's slope
@@ -717,7 +722,7 @@ def calc_local_solar_radiation(cell, curr_weather: WeatherEntry) -> float:
 
     return I
 
-def datetime_to_julian_date(dt) -> float:
+def datetime_to_julian_date(dt: datetime) -> float:
     """Convert a datetime to Julian date.
 
     Args:
