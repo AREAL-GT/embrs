@@ -619,6 +619,8 @@ class EnsemblePredictionOutput:
     crown_fire_frequency: dict
     hold_prob_stats: dict
     breach_frequency: dict
+    active_fire_probability: Optional[dict] = None
+    burnt_probability: Optional[dict] = None
     individual_predictions: Optional[List[PredictionOutput]] = None
     forecast_indices: Optional[List[int]] = None
 

@@ -314,6 +314,8 @@ class ForecastPool:
     predictor_params: 'PredictorParams'
     created_at_time_s: float
     forecast_start_datetime: 'datetime'
+    effective_horizon_hr: float = 0.0
+    pool_start_weather_idx: int = 0
 
     def __post_init__(self):
         """Register this pool with the manager after creation."""
@@ -492,6 +494,19 @@ class ForecastPool:
         weather_t_step = base_weather_stream.time_step * 60  # seconds
         num_indices = int(np.ceil((time_horizon_hr * 3600) / weather_t_step))
 
+        # Cap num_indices to available weather entries
+        available_entries = len(base_weather_stream.stream) - curr_weather_idx
+        if num_indices + 1 > available_entries:
+            warnings.warn(
+                f"ForecastPool.generate: requested {num_indices + 1} weather entries "
+                f"(num_indices={num_indices} + 1) but only {available_entries} available "
+                f"from idx {curr_weather_idx}. Capping num_indices to "
+                f"{max(0, available_entries - 1)}."
+            )
+            num_indices = max(0, available_entries - 1)
+
+        effective_horizon_hr = num_indices * weather_t_step / 3600
+
         # Prepare tasks
         tasks = []
         for i, (speed_seed, dir_seed) in enumerate(seeds):
@@ -556,7 +571,9 @@ class ForecastPool:
             map_params=copy.deepcopy(map_params),
             predictor_params=copy.deepcopy(predictor_params),
             created_at_time_s=fire._curr_time_s,
-            forecast_start_datetime=forecast_start_datetime
+            forecast_start_datetime=forecast_start_datetime,
+            effective_horizon_hr=effective_horizon_hr,
+            pool_start_weather_idx=curr_weather_idx
         )
 
     @staticmethod
@@ -597,6 +614,15 @@ class ForecastPool:
         new_weather_stream = copy.deepcopy(weather_stream)
 
         end_idx = num_indices + start_idx + 1  # +1 for inclusive end
+
+        # Clamp end_idx to stream length
+        stream_len = len(weather_stream.stream)
+        if end_idx > stream_len:
+            warnings.warn(
+                f"ForecastPool._perturb_weather_stream: end_idx ({end_idx}) exceeds "
+                f"stream length ({stream_len}). Clamping to {stream_len}."
+            )
+            end_idx = stream_len
 
         # Generate seeds if not provided
         if speed_seed is None:

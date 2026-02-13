@@ -942,6 +942,8 @@ class FirePredictor(BaseFireSim):
             # Only generate wind if not pre-assigned from pool
             if not getattr(self, '_wind_forecast_assigned', False):
                 self._predict_wind()
+            else:
+                self._cap_horizon_to_pool_forecast()
 
         elif self.fire is not None:
             # In main process: get current state from fire
@@ -953,6 +955,8 @@ class FirePredictor(BaseFireSim):
             # Only generate wind if not pre-assigned from pool
             if not getattr(self, '_wind_forecast_assigned', False):
                 self._predict_wind()
+            else:
+                self._cap_horizon_to_pool_forecast()
         else:
             # In worker process: use serialized state
             self.start_time_s = self._curr_time_s  # Already set in __setstate__
@@ -961,6 +965,7 @@ class FirePredictor(BaseFireSim):
 
             # Skip wind generation if forecast assigned from pool
             if getattr(self, '_wind_forecast_assigned', False):
+                self._cap_horizon_to_pool_forecast()
                 return
 
             # Generate perturbed wind forecast in worker if varying per member
@@ -1016,6 +1021,22 @@ class FirePredictor(BaseFireSim):
         # else: _last_weather_update already set in __setstate__
 
         end_idx = num_indices + curr_idx
+
+        # Clamp end_idx to stream length (defensive check)
+        stream_len = len(source_stream.stream)
+        if end_idx + 1 > stream_len:
+            import warnings
+            old_end_idx = end_idx
+            end_idx = stream_len - 1
+            # Update time horizon and end time to match capped range
+            capped_num_indices = end_idx - curr_idx
+            self.time_horizon_hr = capped_num_indices * self.weather_t_step / 3600
+            self._end_time = self.start_time_s + self.time_horizon_hr * 3600
+            warnings.warn(
+                f"FirePredictor._predict_wind: end_idx ({old_end_idx} + 1) exceeds "
+                f"stream length ({stream_len}). Capped to {end_idx}, "
+                f"time_horizon_hr now {self.time_horizon_hr:.2f}."
+            )
 
         speed_error = 0
         dir_error = 0
@@ -1271,6 +1292,31 @@ class FirePredictor(BaseFireSim):
             )
 
         return (start_weather_idx, start_time_s)
+
+    def _cap_horizon_to_pool_forecast(self) -> None:
+        """Cap prediction horizon to the pool forecast's time axis length.
+
+        When using a pre-assigned forecast pool, ensure that time_horizon_hr
+        does not exceed the number of time steps available in wind_forecast.
+        If it does, warn and cap both time_horizon_hr and _end_time.
+
+        Side Effects:
+            - May reduce self.time_horizon_hr and self._end_time.
+        """
+        if self.wind_forecast is None:
+            return
+        n_steps = self.wind_forecast.shape[0]
+        max_horizon_hr = (n_steps - 1) * self.weather_t_step / 3600
+        if self.time_horizon_hr > max_horizon_hr:
+            import warnings
+            warnings.warn(
+                f"FirePredictor._cap_horizon_to_pool_forecast: "
+                f"time_horizon_hr ({self.time_horizon_hr:.2f}) exceeds pool forecast "
+                f"coverage ({max_horizon_hr:.2f} hr, {n_steps} steps). "
+                f"Capping to {max_horizon_hr:.2f} hr."
+            )
+            self.time_horizon_hr = max_horizon_hr
+            self._end_time = self.start_time_s + self.time_horizon_hr * 3600
 
     # =========================================================================
     # Serialization (for parallel execution)
@@ -1547,6 +1593,41 @@ def _aggregate_ensemble_predictions(
         }
 
     # -------------------------------------------------------------------------
+    # 1b. Build active fire probability and burnt probability maps
+    # -------------------------------------------------------------------------
+    # Collect all time keys from active_fire_front across members (union)
+    all_active_times = sorted(set(
+        time_s for pred in predictions for time_s in pred.active_fire_front.keys()
+    ))
+
+    active_fire_probability = {}
+    for time_s in all_active_times:
+        cell_counts = {}
+        for pred in predictions:
+            if time_s in pred.active_fire_front:
+                for loc in pred.active_fire_front[time_s]:
+                    cell_counts[loc] = cell_counts.get(loc, 0) + 1
+        active_fire_probability[time_s] = {
+            loc: count / n_ensemble for loc, count in cell_counts.items()
+        }
+
+    # Collect all time keys from burnt_spread across members (union)
+    all_burnt_times = sorted(set(
+        time_s for pred in predictions for time_s in pred.burnt_spread.keys()
+    ))
+
+    burnt_probability = {}
+    for time_s in all_burnt_times:
+        cell_counts = {}
+        for pred in predictions:
+            if time_s in pred.burnt_spread:
+                for loc in pred.burnt_spread[time_s]:
+                    cell_counts[loc] = cell_counts.get(loc, 0) + 1
+        burnt_probability[time_s] = {
+            loc: count / n_ensemble for loc, count in cell_counts.items()
+        }
+
+    # -------------------------------------------------------------------------
     # 2. Collect all unique cell locations that burned in any prediction
     # -------------------------------------------------------------------------
     all_burned_cells = set()
@@ -1681,5 +1762,7 @@ def _aggregate_ensemble_predictions(
         spread_dir_stats=spread_dir_stats,
         crown_fire_frequency=crown_frequency,
         hold_prob_stats=hold_prob_stats,
-        breach_frequency=breach_frequency
+        breach_frequency=breach_frequency,
+        active_fire_probability=active_fire_probability,
+        burnt_probability=burnt_probability
     )

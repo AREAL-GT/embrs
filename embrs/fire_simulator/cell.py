@@ -534,7 +534,17 @@ class Cell:
 
         if parent.is_prediction() and len(self.forecast_wind_speeds) <= w_idx:
             parent._set_prediction_forecast(self)
-        
+
+        # Defensive clamp: prevent index-out-of-bounds on forecast arrays
+        if w_idx >= len(self.forecast_wind_speeds):
+            import warnings
+            warnings.warn(
+                f"Cell.curr_wind: w_idx ({w_idx}) >= forecast length "
+                f"({len(self.forecast_wind_speeds)}) for cell {self.id}. "
+                f"Clamping to last available index."
+            )
+            w_idx = len(self.forecast_wind_speeds) - 1
+
         curr_wind = (self.forecast_wind_speeds[w_idx], self.forecast_wind_dirs[w_idx])
 
         return curr_wind
