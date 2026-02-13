@@ -1,22 +1,84 @@
+"""Weather data ingestion and processing for fire simulation.
+
+Fetch, parse, and package hourly weather observations into a stream of
+``WeatherEntry`` records for use by the fire simulation. Supports two
+input sources:
+
+- **OpenMeteo**: Historical reanalysis data fetched via the Open-Meteo API.
+- **File**: RAWS-format weather station files (``.wxs``).
+
+Also computes derived quantities: site-specific temperature/humidity
+corrections, local solar radiation, foliar moisture content (FMC), and
+the Growing Season Index (GSI) for estimating live fuel moisture.
+
+Classes:
+    - WeatherStream: Build a weather stream from config parameters.
+
+Functions:
+    - filter_hourly_data: Subset hourly data by datetime range.
+    - apply_site_specific_correction: Elevation-lapse adjustment for
+        temperature and humidity.
+    - calc_local_solar_radiation: Slope- and canopy-adjusted irradiance.
+    - datetime_to_julian_date: Convert a datetime to Julian date.
+"""
+
+from __future__ import annotations
+
 from retry_requests import retry
-from datetime import timedelta
+from datetime import timedelta, datetime
 import openmeteo_requests
 import requests_cache
 import pandas as pd
 import numpy as np
 import pytz
-import json
 import pvlib
-from typing import Iterator
+from typing import Iterator, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.data_classes import *
 from embrs.utilities.unit_conversions import *
 
-# TODO: Document this file
-
-
 class WeatherStream:
+    """Build and manage a weather stream for fire simulation.
+
+    Ingest weather data from either the Open-Meteo API or a RAWS-format
+    ``.wxs`` file, compute derived quantities (solar geometry, GSI, live
+    fuel moisture, foliar moisture content), and produce a list of
+    ``WeatherEntry`` records indexed by time.
+
+    Attributes:
+        stream (list[WeatherEntry]): Ordered weather entries for the
+            simulation period (including conditioning lead-in).
+        stream_times (pd.DatetimeIndex): Timestamps corresponding to
+            each entry in ``stream``.
+        sim_start_idx (int): Index into ``stream`` where the actual
+            simulation begins (after conditioning period).
+        fmc (float): Foliar moisture content (percent).
+        live_h_mf (float | None): Live herbaceous fuel moisture (fraction),
+            or None if GSI is disabled.
+        live_w_mf (float | None): Live woody fuel moisture (fraction),
+            or None if GSI is disabled.
+        time_step (int): Weather observation interval (minutes).
+        ref_elev (float): Reference elevation of the weather source (meters).
+    """
+
     def __init__(self, params: WeatherParams, geo: GeoInfo, use_gsi: bool = True):
+        """Initialize a weather stream from configuration parameters.
+
+        Args:
+            params (WeatherParams): Weather configuration specifying input
+                type, date range, and optional file path.
+            geo (GeoInfo): Geographic information (lat, lon, timezone,
+                center coordinates).
+            use_gsi (bool): Whether to compute the Growing Season Index for
+                live fuel moisture estimation. Defaults to True.
+
+        Raises:
+            ValueError: If ``params.input_type`` is not 'OpenMeteo' or
+                'File', or if 'File' is used without ``geo``.
+        """
         self.params = params
         self.geo = geo
         self.use_gsi = use_gsi
@@ -33,6 +95,18 @@ class WeatherStream:
             raise ValueError("Invalid weather input_type, must be either 'OpenMeteo' or 'File'")
 
     def get_stream_from_openmeteo(self):
+        """Fetch weather data from the Open-Meteo historical archive API.
+
+        Retrieves hourly wind, temperature, humidity, cloud cover, solar
+        radiation, and precipitation. Computes GSI-based live fuel moisture
+        if enabled, then builds the weather stream with a conditioning
+        lead-in period.
+
+        Side Effects:
+            Sets ``self.stream``, ``self.stream_times``, ``self.sim_start_idx``,
+            ``self.fmc``, ``self.live_h_mf``, ``self.live_w_mf``,
+            ``self.ref_elev``, ``self.time_step``, and input unit attributes.
+        """
         # Setup the Open-Meteo API client with cache and retry on error
         cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
         retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
@@ -134,6 +208,21 @@ class WeatherStream:
         self.input_temp_units = "F"
 
     def get_stream_from_wxs(self):
+        """Parse a RAWS-format ``.wxs`` weather file and build the stream.
+
+        Read weather observations from the file, apply unit conversions
+        (English or Metric to internal units), fetch solar irradiance from
+        Open-Meteo to supplement the file data, compute GSI, and assemble
+        the final weather stream.
+
+        Side Effects:
+            Sets ``self.stream``, ``self.stream_times``, ``self.sim_start_idx``,
+            ``self.fmc``, ``self.live_h_mf``, ``self.live_w_mf``,
+            ``self.ref_elev``, ``self.time_step``, and input unit attributes.
+
+        Raises:
+            ValueError: If the file has insufficient data or unknown units.
+        """
         file = self.params.file
 
         weather_data = {
@@ -326,106 +415,22 @@ class WeatherStream:
         self.input_wind_ht_units = "m"
         self.input_wind_vel_units = "mps"
         self.input_temp_units = "F"
-
-    def get_uniform_stream(self):
-        file = self.params.file
-        weather_data = {
-            "datetime": [],
-            "wind_speed": [],
-            "wind_direction": [],
-        }
-
-        units = "english"
-
-        # ── Step 1: Parse WXS line-by-line ───────────────────────────
-        with open(file, "r") as f:
-            header_found = False
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("RAWS_UNITS:"):
-                    units = line.split(":")[1].strip().lower()
-                    continue
-                elif line.startswith("RAWS_ELEVATION:"):
-                    continue
-                elif line.startswith("RAWS:"):
-                    continue
-                elif line.startswith("Year") and not header_found:
-                    header_found = True
-                    continue
-                if not header_found:
-                    continue
-
-                parts = line.split()
-                if len(parts) != 10:
-                    continue
-                try:
-                    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
-                    hour = int(parts[3].zfill(4)[:2])
-                    dt = datetime(year, month, day, hour)
-                    weather_data["datetime"].append(dt)
-                    weather_data["wind_speed"].append(float(parts[7]))
-                    weather_data["wind_direction"].append(float(parts[8]))
-                except Exception as e:
-                    print(f"Skipping malformed line: {line} ({e})")
-                    continue
-
-        df = pd.DataFrame(weather_data).set_index("datetime")
-
-        if len(df.index) < 2:
-            raise ValueError("WXS file does not contain enough data to determine time step.")
-
-        # ── Step 2: Infer time step and apply unit conversions ───────
-        time_step_min = int((df.index[1] - df.index[0]).total_seconds() / 60)
-        if units == "english":
-            df["wind_speed"] *= 0.44704
-        elif units == "metric":
-            df["temperature"] = df["temperature"] * 9 / 5 + 32
-        else:
-            raise ValueError(f"Unknown units: {units}")
-
-        # Set live moisture values
-        if self.use_gsi:
-            self.live_h_mf = 1.4
-            self.live_w_mf = 1.25
-        else:
-            self.live_h_mf = None
-            self.live_w_mf = None
-
-        # Set Foliar moisture content to 100
-        self.fmc = 100
-
-        # Generate stream with final data
-        self.stream = list(self.generate_uniform_stream(weather_data))
-
-        # Set units and time step based on OpenMeteo params
-        self.time_step = time_step_min
-        self.input_wind_ht = 6.1
-        self.input_wind_ht_units = 'm'
-        self.input_wind_vel_units = 'mps'
-        self.input_temp_units = 'F'
-
-    def generate_uniform_stream(self, weather_data: dict) -> Iterator[WeatherEntry]:
-        for wind_speed, wind_dir in zip(
-            weather_data["wind_speed"],
-            weather_data["wind_direction"]
-        ):
-            yield WeatherEntry(
-                wind_speed=wind_speed,
-                wind_dir_deg=wind_dir,
-                temp=None,
-                rel_humidity=None,
-                cloud_cover=None,
-                rain=None,
-                dni=None,
-                dhi=None,
-                ghi=None,
-                solar_zenith=None,
-                solar_azimuth=None
-            )
  
     def generate_stream(self, hourly_data: dict) -> Iterator[WeatherEntry]:
+        """Yield full WeatherEntry records from hourly data arrays.
+
+        Rainfall is accumulated across entries (cumulative sum).
+
+        Args:
+            hourly_data (dict): Dictionary with keys 'wind_speed',
+                'wind_direction', 'temperature', 'rel_humidity',
+                'cloud_cover', 'ghi', 'dhi', 'dni', 'rain',
+                'solar_zenith', 'solar_azimuth'.
+
+        Yields:
+            WeatherEntry: Fully populated weather entry with cumulative
+                rainfall.
+        """
         cum_rain = 0
         for wind_speed, wind_dir, temp, rel_humidity, cloud_cover, ghi, dhi, dni, rain, solar_zenith, solar_azimuth in zip(
             hourly_data["wind_speed"],
@@ -455,9 +460,20 @@ class WeatherStream:
                 solar_azimuth=solar_azimuth
             )
 
-    def set_live_moistures(self, gsi: float):
-        # TODO: should we incldue max GSI scaling?
+    def set_live_moistures(self, gsi: float) -> tuple:
+        """Compute live fuel moisture fractions from the Growing Season Index.
 
+        Map GSI to live herbaceous and woody moisture using linear
+        interpolation between dormant and green-up values. Below the
+        green-up threshold (GSI < 0.2), dormant values are returned.
+
+        Args:
+            gsi (float): Growing Season Index in [0, 1].
+
+        Returns:
+            Tuple[float, float]: ``(live_h_mf, live_w_mf)`` live herbaceous
+                and live woody moisture content (fractions).
+        """
         # Dormant values
         h_min = 0.3
         w_min = 0.6
@@ -481,10 +497,23 @@ class WeatherStream:
 
         return live_h_mf, live_w_mf
 
-    def calc_GSI(self, hourly_data, data_start, sim_start) -> float:
-        """
-        Calculate the Growing Season Index (GSI) over the period leading up to sim_start.
-        Adjusts to use as much data as available if less than 28 or 56 days exists.
+    def calc_GSI(self, hourly_data: dict, data_start: datetime, sim_start: datetime) -> float:
+        """Compute the Growing Season Index (GSI) for the pre-simulation period.
+
+        Average daily sub-indices for photoperiod, minimum temperature,
+        vapor pressure deficit, and precipitation over the available
+        pre-simulation window (ideally 28 days for non-rain metrics, 56
+        days for rain).
+
+        Args:
+            hourly_data (dict): Hourly weather data with keys 'date',
+                'temperature' (Fahrenheit), 'rel_humidity' (%), 'rain' (cm).
+            data_start: Start of the data window (datetime-like).
+            sim_start: Simulation start datetime (datetime-like).
+
+        Returns:
+            float: GSI value in [0, 1], or -1 if insufficient data is
+                available (fewer than 2 days).
         """
         # Determine the maximum available pre-simulation range
         min_available_date = pd.to_datetime(hourly_data["date"]).min()
@@ -567,10 +596,16 @@ class WeatherStream:
         gsi /= len(dates)
         return gsi
 
+    def calc_fmc(self) -> float:
+        """Compute foliar moisture content based on latitude and date.
 
-    def calc_fmc(self):
-        # Calcualte the foliar moisture content
-        # Based on Forestry Canada Fire Danger Group 1992
+        Uses the Forestry Canada Fire Danger Group (1992) method, which
+        estimates the day of minimum FMC from latitude, longitude, and
+        elevation, then applies a polynomial fit.
+
+        Returns:
+            float: Foliar moisture content (percent).
+        """
         lat = self.geo.center_lat
         lon = -self.geo.center_lon
 
@@ -598,15 +633,43 @@ class WeatherStream:
 
         return fmc
 
-def filter_hourly_data(hourly_data, start_datetime, end_datetime):
+def filter_hourly_data(hourly_data: dict, start_datetime: datetime, end_datetime: datetime) -> dict:
+    """Filter hourly weather data to a datetime range (inclusive).
+
+    Args:
+        hourly_data (dict): Dictionary with a 'date' key and parallel
+            value arrays.
+        start_datetime: Start of desired range (datetime-like).
+        end_datetime: End of desired range (datetime-like).
+
+    Returns:
+        dict: Filtered copy with the same keys, values trimmed to the
+            matching datetime window.
+    """
     hourly_data["date"] = pd.to_datetime(hourly_data["date"])
 
     mask = (hourly_data["date"] >= start_datetime) & (hourly_data["date"] <= end_datetime)
     filtered_data = {key: np.array(value)[mask] for key, value in hourly_data.items()}
     return filtered_data
 
-def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherEntry):
-    ## elev_ref is in meters, temp_air is in Fahrenheit, rh_air is %
+def apply_site_specific_correction(cell: Cell, elev_ref: float,
+                                   curr_weather: WeatherEntry) -> Tuple[float, float]:
+    """Apply elevation lapse-rate correction for temperature and humidity.
+
+    Adjust the reference-station temperature and relative humidity to the
+    cell's elevation using standard lapse rates (Stephenson 1988).
+
+    Args:
+        cell: Cell with ``elevation_m`` attribute (meters).
+        elev_ref (float): Reference weather station elevation (meters).
+        curr_weather (WeatherEntry): Current weather entry with ``temp``
+            (Fahrenheit) and ``rel_humidity`` (percent).
+
+    Returns:
+        Tuple[float, float]: ``(temp_c, rh)`` where ``temp_c`` is the
+            corrected temperature (Celsius) and ``rh`` is the corrected
+            relative humidity (fraction, capped at 0.99).
+    """
     elev_diff = elev_ref - cell.elevation_m 
     elev_diff *= 3.2808 # convert to ft
 
@@ -627,7 +690,20 @@ def apply_site_specific_correction(cell, elev_ref: float, curr_weather: WeatherE
 
     return temp, rh
 
-def calc_local_solar_radiation(cell, curr_weather: WeatherEntry):
+def calc_local_solar_radiation(cell: Cell, curr_weather: WeatherEntry) -> float:
+    """Compute slope- and canopy-adjusted solar irradiance at a cell.
+
+    Use pvlib to compute plane-of-array irradiance for the cell's slope
+    and aspect, then reduce by canopy transmittance.
+
+    Args:
+        cell: Cell with ``slope_deg``, ``aspect``, ``canopy_cover`` (percent).
+        curr_weather (WeatherEntry): Entry with ``solar_zenith``,
+            ``solar_azimuth``, ``dni``, ``ghi``, ``dhi``.
+
+    Returns:
+        float: Total irradiance at the cell surface (W/m²).
+    """
     # Calculate total irradiance using pvlib
     total_irradiance = pvlib.irradiance.get_total_irradiance(
         surface_tilt=cell.slope_deg,
@@ -646,7 +722,16 @@ def calc_local_solar_radiation(cell, curr_weather: WeatherEntry):
 
     return I
 
-def datetime_to_julian_date(dt):
+def datetime_to_julian_date(dt: datetime) -> float:
+    """Convert a datetime to Julian date.
+
+    Args:
+        dt: A datetime-like object with year, month, day, hour, minute,
+            and second attributes.
+
+    Returns:
+        float: Julian date (fractional day number).
+    """
     year = dt.year
     month = dt.month
     day = dt.day

@@ -20,8 +20,11 @@ Classes:
     - StateEstimate: Estimated fire state from observations.
     - CellStatistics: Statistics for ensemble cell metrics.
     - EnsemblePredictionOutput: Output from ensemble predictions.
-    - ForecastData: Container for a single wind forecast.
-    - ForecastPool: Collection of pre-computed wind forecasts for ensemble use.
+
+Note:
+    ForecastData, ForecastPool, and ForecastPoolManager have been moved to
+    ``embrs.tools.forecast_pool``. Importing them from this module still works
+    but is deprecated.
 """
 
 from __future__ import annotations
@@ -76,11 +79,11 @@ class GeoInfo:
     timezone: Optional[str] = None
     north_angle_deg: Optional[float] = None
 
-    def calc_center_coords(self, source_crs) -> None:
+    def calc_center_coords(self, source_crs: 'pyproj.CRS') -> None:
         """Calculate center lat/lon from bounds and source CRS.
 
         Args:
-            source_crs: Coordinate reference system of the bounds.
+            source_crs (pyproj.CRS): Coordinate reference system of the bounds.
 
         Raises:
             ValueError: If bounds is None.
@@ -499,7 +502,7 @@ class CellData:
         canopy_height (float): Canopy height in meters.
         canopy_base_height (float): Canopy base height in meters.
         canopy_bulk_density (float): Canopy bulk density in kg/m^3.
-        init_dead_mf (float): Initial dead fuel moisture fraction.
+        init_dead_mf (List[float]): Initial dead fuel moisture fractions [1hr, 10hr, 100hr].
         live_h_mf (float): Live herbaceous moisture fraction.
         live_w_mf (float): Live woody moisture fraction.
     """
@@ -562,8 +565,8 @@ class StateEstimate:
             If None, uses current fire simulation time.
     """
 
-    burnt_polys: List[Polygon] = None
-    burning_polys: List[Polygon] = None
+    burnt_polys: List[Polygon]
+    burning_polys: List[Polygon]
     start_time_s: Optional[float] = None
 
 @dataclass

@@ -1,26 +1,71 @@
+"""Statistical firebrand spotting model based on Perryman et al.
 
+Generate firebrand landing locations using lognormal and normal
+distributions parameterized by fireline intensity and wind speed. The
+parallel (downwind) distribution depends on the Froude number regime;
+the perpendicular distribution is scaled by cell width.
+
+Classes:
+    - PerrymanSpotting: Sample firebrand landing positions from a burning cell.
+
+References:
+    Perryman, H. A., et al. (2013). A mathematical model of spot fire
+    transport. International Journal of Wildland Fire, 22, 350-358.
+"""
 
 from embrs.fire_simulator.cell import Cell
 from embrs.utilities.unit_conversions import *
 
 import numpy as np
 
-# --- Define Model Constants (from Table 2 and text) ---
+# Model constants (Perryman et al. 2013, Table 2)
 num_firebrands = 50
-g = 9.8  # Acceleration due to gravity (m s-2) [4]
-rN = 1.1 # Ambient gas density (kg m-3) [4]
-cpg = 1121 # Specific heat of gas (kJ kg-1 K-1) [4] - Note: Source uses kJ, need J for energy calculations
-TN = 300 # Ambient temperature (K) [4]
+g = 9.8       # Acceleration due to gravity (m/s²)
+rN = 1.1      # Ambient gas density (kg/m³)
+cpg = 1121    # Specific heat of gas (kJ/(kg·K))
+TN = 300      # Ambient temperature (K)
 
 class PerrymanSpotting:
+    """Statistical firebrand landing model.
 
-    def __init__(self, spot_delay_s, limits):
+    Sample firebrand landing coordinates from probability distributions
+    parameterized by wind speed and fireline intensity. Firebrands that
+    land within 50 meters of the source cell are filtered out.
+
+    Attributes:
+        embers (list[dict]): Accumulated firebrand landing positions,
+            each with keys 'x', 'y', 'd' (distance in meters).
+        spot_delay_s (float): Delay before spotted fires can ignite
+            (seconds).
+    """
+
+    def __init__(self, spot_delay_s: float, limits: tuple):
+        """Initialize the Perryman spotting model.
+
+        Args:
+            spot_delay_s (float): Spot fire ignition delay (seconds).
+            limits (tuple): ``(x_lim, y_lim)`` simulation domain bounds
+                (meters).
+        """
         self.embers = []
         self.spot_delay_s = spot_delay_s
 
         self.x_lim, self.y_lim = limits
 
     def loft(self, cell: Cell):
+        """Sample firebrand landing locations from a burning cell.
+
+        Compute downwind (parallel) and crosswind (perpendicular) landing
+        distances, combine them into absolute coordinates, and store
+        firebrands that land beyond 50 meters from the source.
+
+        Args:
+            cell (Cell): Burning cell to generate firebrands from.
+
+        Side Effects:
+            Sets ``cell.lofted = True``. Appends ember dicts to
+            ``self.embers``.
+        """
         cell.lofted = True
 
         wind_speed, wind_dir_deg = cell.curr_wind()
@@ -74,9 +119,20 @@ class PerrymanSpotting:
 
             self.embers.append(ember)
 
-    def compute_parallel_distances(self, cell: Cell):
-        # Convert 20 ft wind speed to wind at canopy height
-        # Albini & Baughman 1979 Res. Pap. INT-221
+    def compute_parallel_distances(self, cell: Cell) -> np.ndarray:
+        """Sample downwind (parallel) firebrand distances.
+
+        Compute the canopy-height wind speed, fireline intensity, and
+        Froude number, then sample distances from a lognormal distribution
+        whose parameters depend on the Froude number regime.
+
+        Args:
+            cell (Cell): Burning cell providing wind, canopy, and intensity.
+
+        Returns:
+            np.ndarray: Downwind distances for each firebrand (meters),
+                shape ``(num_firebrands,)``.
+        """
         wind_spd_ft_s = m_to_ft(cell.curr_wind()[0])
         canopy_ht = m_to_ft(cell.canopy_height)
         u_h_ft_s = wind_spd_ft_s / (np.log((20 + 0.36 * canopy_ht)/(0.1313 * canopy_ht)))
@@ -108,7 +164,19 @@ class PerrymanSpotting:
         
         return parallel_distances
 
-    def compute_perp_distances(self, cell: Cell):
+    def compute_perp_distances(self, cell: Cell) -> np.ndarray:
+        """Sample crosswind (perpendicular) firebrand distances.
+
+        Use a normal distribution centered at zero with standard deviation
+        equal to half the cell's flat-to-flat width.
+
+        Args:
+            cell (Cell): Cell providing ``cell_size`` for scale computation.
+
+        Returns:
+            np.ndarray: Crosswind distances for each firebrand (meters),
+                shape ``(num_firebrands,)``.
+        """
         # Horizontal standard dev. is half of cell width
         flat_to_flat = cell.cell_size * (np.sqrt(3)/2)
         sv = flat_to_flat / 2

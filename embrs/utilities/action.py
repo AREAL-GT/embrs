@@ -60,7 +60,7 @@ class Action:
         self.time = time
         self.loc = (x, y)
 
-    def __lt__(self, other):
+    def __lt__(self, other) -> bool:
         """Compare actions for sorting by time, then location.
 
         Args:

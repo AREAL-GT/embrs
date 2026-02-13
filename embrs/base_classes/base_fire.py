@@ -1063,7 +1063,7 @@ class BaseFireSim:
 
         return np.mean(x_coords), np.mean(y_coords)
 
-    def hex_round(self, q, r):
+    def hex_round(self, q: float, r: float) -> Tuple[int, int]:
         """Rounds floating point hex coordinates to their nearest integer hex coordinates.
 
         Args:
@@ -1071,13 +1071,13 @@ class BaseFireSim:
             r (float): r coordinate in hex coordinate system
 
         Returns:
-            tuple: (q, r) integer coordinates of the nearest hex cell
+            Tuple[int, int]: (q, r) integer coordinates of the nearest hex cell
 
         Note: This method delegates to GridManager.hex_round().
         """
         return self._grid_manager.hex_round(q, r)
 
-    def get_cell_from_xy(self, x_m: float, y_m: float, oob_ok = False) -> Cell:
+    def get_cell_from_xy(self, x_m: float, y_m: float, oob_ok: bool = False) -> Cell:
         """Returns the cell in the sim that contains the point (x_m, y_m) in the cartesian
         plane.
 
@@ -1126,7 +1126,7 @@ class BaseFireSim:
         return self._grid_manager.get_cell_from_indices(row, col)
 
     # Functions for setting state of cells
-    def set_state_at_xy(self, x_m: float, y_m: float, state: CellStates):
+    def set_state_at_xy(self, x_m: float, y_m: float, state: CellStates) -> None:
         """Set the state of the cell at the point (x_m, y_m) in the Cartesian plane.
 
         Args:
@@ -1138,7 +1138,7 @@ class BaseFireSim:
         cell = self.get_cell_from_xy(x_m, y_m, oob_ok=True)
         self.set_state_at_cell(cell, state)
 
-    def set_state_at_indices(self, row: int, col: int, state: CellStates):
+    def set_state_at_indices(self, row: int, col: int, state: CellStates) -> None:
         """Set the state of the cell at the indices [row, col] in the cell_grid.
 
         Args:
@@ -1150,7 +1150,7 @@ class BaseFireSim:
         cell = self.get_cell_from_indices(row, col)
         self.set_state_at_cell(cell, state)
 
-    def set_state_at_cell(self, cell: Cell, state: CellStates):
+    def set_state_at_cell(self, cell: Cell, state: CellStates) -> None:
         """Set the state of the specified cell
 
         Args:
@@ -1197,7 +1197,7 @@ class BaseFireSim:
         # Set new state
         cell._set_state(state)
 
-    def set_ignition_at_xy(self, x_m: float, y_m: float):
+    def set_ignition_at_xy(self, x_m: float, y_m: float) -> None:
         """Ignite the cell at the specified coordinates.
 
         Args:
@@ -1211,7 +1211,7 @@ class BaseFireSim:
             # Set ignition at cell
             self.set_ignition_at_cell(cell)
 
-    def set_ignition_at_indices(self, row: int, col: int):
+    def set_ignition_at_indices(self, row: int, col: int) -> None:
         """Ignite the cell at the specified grid indices.
 
         Args:
@@ -1224,7 +1224,7 @@ class BaseFireSim:
         # Set ignition at cell
         self.set_ignition_at_cell(cell)
 
-    def set_ignition_at_cell(self, cell: Cell):
+    def set_ignition_at_cell(self, cell: Cell) -> None:
         """Ignite the specified cell.
 
         Sets the cell to the FIRE state and adds it to the new ignitions list.
@@ -1238,7 +1238,7 @@ class BaseFireSim:
         self.set_state_at_cell(cell, CellStates.FIRE)
         self._new_ignitions.append(cell)
 
-    def add_retardant_at_xy(self, x_m: float, y_m: float, duration_hr: float, effectiveness: float):
+    def add_retardant_at_xy(self, x_m: float, y_m: float, duration_hr: float, effectiveness: float) -> None:
         """Apply long-term fire retardant at the specified coordinates.
 
         Args:
@@ -1251,7 +1251,7 @@ class BaseFireSim:
         """
         self._control_handler.add_retardant_at_xy(x_m, y_m, duration_hr, effectiveness)
 
-    def add_retardant_at_indices(self, row: int, col: int, duration_hr: float, effectiveness: float):
+    def add_retardant_at_indices(self, row: int, col: int, duration_hr: float, effectiveness: float) -> None:
         """Apply long-term fire retardant at the specified grid indices.
 
         Args:
@@ -1264,7 +1264,7 @@ class BaseFireSim:
         """
         self._control_handler.add_retardant_at_indices(row, col, duration_hr, effectiveness)
 
-    def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float):
+    def add_retardant_at_cell(self, cell: Cell, duration_hr: float, effectiveness: float) -> None:
         """Apply long-term fire retardant to the specified cell.
 
         Effectiveness is clamped to the range [0.0, 1.0]. Only applies
@@ -1279,7 +1279,7 @@ class BaseFireSim:
         """
         self._control_handler.add_retardant_at_cell(cell, duration_hr, effectiveness)
 
-    def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float):
+    def water_drop_at_xy_as_rain(self, x_m: float, y_m: float, water_depth_cm: float) -> None:
         """Apply water drop as equivalent rainfall at the specified coordinates.
 
         Args:
@@ -1291,7 +1291,7 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_xy_as_rain(x_m, y_m, water_depth_cm)
 
-    def water_drop_at_indices_as_rain(self, row: int, col: int, water_depth_cm: float):
+    def water_drop_at_indices_as_rain(self, row: int, col: int, water_depth_cm: float) -> None:
         """Apply water drop as equivalent rainfall at the specified grid indices.
 
         Args:
@@ -1303,7 +1303,7 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_indices_as_rain(row, col, water_depth_cm)
 
-    def water_drop_at_cell_as_rain(self, cell: Cell, water_depth_cm: float):
+    def water_drop_at_cell_as_rain(self, cell: Cell, water_depth_cm: float) -> None:
         """Apply water drop as equivalent rainfall to the specified cell.
 
         Only applies to burnable cells. Adds cell to active water drops
@@ -1320,7 +1320,7 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_cell_as_rain(cell, water_depth_cm)
 
-    def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float):
+    def water_drop_at_xy_as_moisture_bump(self, x_m: float, y_m: float, moisture_inc: float) -> None:
         """Apply water drop as direct moisture increase at the specified coordinates.
 
         Args:
@@ -1332,7 +1332,7 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_xy_as_moisture_bump(x_m, y_m, moisture_inc)
 
-    def water_drop_at_indices_as_moisture_bump(self, row: int, col: int, moisture_inc: float):
+    def water_drop_at_indices_as_moisture_bump(self, row: int, col: int, moisture_inc: float) -> None:
         """Apply water drop as direct moisture increase at the specified grid indices.
 
         Args:
@@ -1344,7 +1344,7 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_indices_as_moisture_bump(row, col, moisture_inc)
 
-    def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float):
+    def water_drop_at_cell_as_moisture_bump(self, cell: Cell, moisture_inc: float) -> None:
         """Apply water drop as direct moisture increase to the specified cell.
 
         Only applies to burnable cells. Adds cell to active water drops
@@ -1388,7 +1388,7 @@ class BaseFireSim:
             curr_time_s=self.curr_time_s
         )
 
-    def stop_fireline_construction(self, fireline_id: str):
+    def stop_fireline_construction(self, fireline_id: str) -> None:
         """Stop construction of an active fireline.
 
         Finalizes the partially constructed fireline and adds it to the
@@ -1594,7 +1594,7 @@ class BaseFireSim:
         """
         return self.__class__.__name__ == "FirePredictor"
 
-    def add_agent(self, agent: AgentBase):
+    def add_agent(self, agent: AgentBase) -> None:
         """Add agent to the simulation's registered agent list.
 
         Registered agents are logged and displayed in visualizations.

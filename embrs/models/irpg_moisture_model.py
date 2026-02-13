@@ -1,10 +1,18 @@
-"""IRPG Fuel Moisture Model
+"""IRPG fine dead fuel moisture estimation model.
 
-Implements the Incident Response Pocket Guide (IRPG) fine dead fuel moisture
-estimation method using Reference Fuel Moisture (RFM) tables and correction
-factor (Δ) tables based on site conditions.
+Implement the Incident Response Pocket Guide (IRPG) method for estimating
+fine dead fuel moisture (FDFM) from temperature, relative humidity, and
+site condition correction factors (shading, aspect, slope, elevation,
+time of day, and month).
 
-Reference: National Wildfire Coordinating Group, "Incident Response Pocket Guide," January 2014
+Classes:
+    - FuelMoisturePriors: Prior probability distributions for site conditions.
+    - IRPGMoistureModel: FDFM estimation combining RFM lookup and stochastic
+        correction factors.
+
+References:
+    National Wildfire Coordinating Group. (2014). Incident Response Pocket
+    Guide (IRPG). PMS 461, NFES 1077.
 """
 import bisect
 from dataclasses import dataclass, field

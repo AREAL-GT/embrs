@@ -315,14 +315,14 @@ class DeadFuelMoisture:
         m_s: Saturation at each node (fraction)
     """
 
-    def __init__(self, radius, stv, wmx, wfilmk):
+    def __init__(self, radius: float, stv: float, wmx: float, wfilmk: float):
         """Initialize the dead fuel moisture model.
 
         Args:
-            radius: Fuel stick radius (cm)
-            stv: Storm threshold (cm/h)
-            wmx: Maximum fiber saturation (g/g)
-            wfilmk: Water film constant
+            radius (float): Fuel stick radius (cm).
+            stv (float): Storm threshold (cm/h).
+            wmx (float): Maximum fiber saturation (g/g).
+            wfilmk (float): Water film constant.
         """
         self.m_semTime = None
         self.initializeParameters(radius, stv, wmx, wfilmk)
@@ -350,25 +350,31 @@ class DeadFuelMoisture:
         self.m_rdur = 0.0
         self.initializeStick()
 
-    def deriveDiffusivitySteps(self, radius):
+    def deriveDiffusivitySteps(self, radius: float) -> int:
+        """Derive number of diffusivity sub-steps from stick radius."""
         return int(4.777 + 2.496 / radius ** 1.3)
 
-    def derivePlanarHeatTransferRate(self, radius):
+    def derivePlanarHeatTransferRate(self, radius: float) -> float:
+        """Derive planar heat transfer rate from stick radius."""
         return 0.2195 + 0.05260 / radius ** 2.5
 
-    def deriveStickNodes(self, radius):
+    def deriveStickNodes(self, radius: float) -> int:
+        """Derive number of radial nodes from stick radius (always odd)."""
         nodes = int(10.727 + 0.1746 / radius)
         if nodes % 2 == 0:
             nodes += 1
         return nodes
 
-    def deriveRainfallRunoffFactor(self, radius):
+    def deriveRainfallRunoffFactor(self, radius: float) -> float:
+        """Derive rainfall runoff factor from stick radius."""
         return 0.02822 + 0.1056 / radius ** 2.2
 
-    def deriveAdsorptionRate(self, radius):
+    def deriveAdsorptionRate(self, radius: float) -> float:
+        """Derive adsorption rate constant from stick radius."""
         return 0.0004509 + 0.006126 / radius ** 2.6
 
-    def deriveMoistureSteps(self, radius):
+    def deriveMoistureSteps(self, radius: float) -> int:
+        """Derive number of moisture sub-steps from stick radius."""
         return int(9.8202 + 26.865 / radius ** 1.4)
 
     def initializeStick(self):
@@ -475,18 +481,20 @@ class DeadFuelMoisture:
         """Check if environment has been initialized."""
         return self.m_init
 
-    def initializeEnvironment(self, ta, ha, sr, rc, ti, hi, wi, bp):
+    def initializeEnvironment(self, ta: float, ha: float, sr: float,
+                              rc: float, ti: float, hi: float,
+                              wi: float, bp: float):
         """Initialize environmental conditions.
 
         Args:
-            ta: Ambient air temperature (°C)
-            ha: Ambient air relative humidity (g/g)
-            sr: Solar radiation (W/m²)
-            rc: Cumulative rainfall (cm)
-            ti: Initial stick temperature (°C)
-            hi: Initial stick surface humidity (g/g)
-            wi: Initial stick moisture content (g/g)
-            bp: Barometric pressure (cal/cm³)
+            ta (float): Ambient air temperature (°C).
+            ha (float): Ambient air relative humidity (g/g).
+            sr (float): Solar radiation (W/m²).
+            rc (float): Cumulative rainfall (cm).
+            ti (float): Initial stick temperature (°C).
+            hi (float): Initial stick surface humidity (g/g).
+            wi (float): Initial stick moisture content (g/g).
+            bp (float): Barometric pressure (cal/cm³).
         """
         self.m_ta0 = self.m_ta1 = ta
         self.m_ha0 = self.m_ha1 = ha
@@ -603,19 +611,26 @@ class DeadFuelMoisture:
         """Generate uniform random value in range."""
         return (max_val - min_val) * random.random() + min_val
 
-    def update(self, year, month, day, hour, minute, second, at, rh, sW, rcum, bpr):
+    def update(self, year: int, month: int, day: int, hour: int,
+               minute: int, second: int, at: float, rh: float,
+               sW: float, rcum: float, bpr: float) -> bool:
         """Update moisture based on datetime and weather.
 
         Args:
-            year, month, day, hour, minute, second: Date/time
-            at: Air temperature (°C)
-            rh: Relative humidity (fraction)
-            sW: Solar radiation (W/m²)
-            rcum: Cumulative rainfall (cm)
-            bpr: Barometric pressure (cal/cm³)
+            year (int): Year.
+            month (int): Month (1-12).
+            day (int): Day of month.
+            hour (int): Hour (0-23).
+            minute (int): Minute (0-59).
+            second (int): Second (0-59).
+            at (float): Air temperature (°C).
+            rh (float): Relative humidity (fraction).
+            sW (float): Solar radiation (W/m²).
+            rcum (float): Cumulative rainfall (cm).
+            bpr (float): Barometric pressure (cal/cm³).
 
         Returns:
-            True if update succeeded, False otherwise
+            bool: True if update succeeded, False otherwise.
         """
         # Determine Julian date for this new observation
         jd0 = self.m_semTime.toordinal() + 1721424.5
@@ -632,22 +647,23 @@ class DeadFuelMoisture:
         # Update!
         return self.update_internal(et, at, rh, sW, rcum, bpr)
 
-    def update_internal(self, et, at, rh, sW, rcum, bpr):
+    def update_internal(self, et: float, at: float, rh: float,
+                        sW: float, rcum: float, bpr: float) -> bool:
         """Update moisture state for elapsed time.
 
         This is the main computational method. Inner loops are JIT-compiled
         when Numba is available.
 
         Args:
-            et: Elapsed time (hours)
-            at: Air temperature (°C)
-            rh: Relative humidity (fraction)
-            sW: Solar radiation (W/m²)
-            rcum: Cumulative rainfall (cm)
-            bpr: Barometric pressure (cal/cm³)
+            et (float): Elapsed time (hours).
+            at (float): Air temperature (°C).
+            rh (float): Relative humidity (fraction).
+            sW (float): Solar radiation (W/m²).
+            rcum (float): Cumulative rainfall (cm).
+            bpr (float): Barometric pressure (cal/cm³).
 
         Returns:
-            True if update succeeded, False otherwise
+            bool: True if update succeeded, False otherwise.
         """
         # Validate inputs
         if et < 0.0000027:
@@ -987,7 +1003,16 @@ class DeadFuelMoisture:
         output.append(f"m_state {self.m_state}")
         return '\n'.join(output)
 
-    def from_string(input_str):
+    @staticmethod
+    def from_string(input_str: str) -> 'DeadFuelMoisture':
+        """Deserialize a DeadFuelMoisture instance from its string representation.
+
+        Args:
+            input_str (str): String produced by ``__str__``.
+
+        Returns:
+            DeadFuelMoisture: Reconstructed model instance.
+        """
         lines = input_str.strip().split('\n')
         r = DeadFuelMoisture(0, "")
         r.m_semTime = datetime.datetime.strptime(lines[0].split()[1], "%Y/%m/%d %H:%M:%S.%f")
