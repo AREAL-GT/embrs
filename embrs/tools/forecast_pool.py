@@ -609,9 +609,9 @@ class ForecastPool:
         Returns:
             tuple: (perturbed_stream, speed_seed_used, dir_seed_used)
         """
-        from embrs.models.weather import WeatherStream
+        from embrs.utilities.data_classes import WeatherEntry
 
-        new_weather_stream = copy.deepcopy(weather_stream)
+        new_weather_stream = copy.copy(weather_stream)
 
         end_idx = num_indices + start_idx + 1  # +1 for inclusive end
 
@@ -638,15 +638,20 @@ class ForecastPool:
         dir_error = 0.0
         new_stream = []
 
-        for entry in new_weather_stream.stream[start_idx:end_idx]:
-            new_entry = copy.deepcopy(entry)
-
-            # Apply bias and accumulated error
-            new_entry.wind_speed += speed_error + wind_speed_bias
-            new_entry.wind_speed = max(0.0, new_entry.wind_speed)
-            new_entry.wind_dir_deg += dir_error + wind_dir_bias
-            new_entry.wind_dir_deg = new_entry.wind_dir_deg % 360
-
+        for entry in weather_stream.stream[start_idx:end_idx]:
+            new_entry = WeatherEntry(
+                wind_speed=max(0.0, entry.wind_speed + speed_error + wind_speed_bias),
+                wind_dir_deg=(entry.wind_dir_deg + dir_error + wind_dir_bias) % 360,
+                temp=entry.temp,
+                rel_humidity=entry.rel_humidity,
+                cloud_cover=entry.cloud_cover,
+                rain=entry.rain,
+                dni=entry.dni,
+                dhi=entry.dhi,
+                ghi=entry.ghi,
+                solar_zenith=entry.solar_zenith,
+                solar_azimuth=entry.solar_azimuth
+            )
             new_stream.append(new_entry)
 
             # Update errors using AR(1) process
@@ -654,6 +659,7 @@ class ForecastPool:
             dir_error = beta * dir_error + dir_rng.normal(0, wnd_dir_std)
 
         new_weather_stream.stream = new_stream
+        new_weather_stream.sim_start_idx = 0
         return new_weather_stream, speed_seed, dir_seed
 
 

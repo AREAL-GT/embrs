@@ -180,6 +180,12 @@ def run_windninja(weather: WeatherStream, map: MapParams,
     ]
     # Use multiprocessing Pool to parallelize
     num_tasks = len(tasks)
+    if num_tasks == 0:
+        raise ValueError(
+            f"No weather entries to process (sim_start_idx={weather.sim_start_idx}, "
+            f"stream length={len(weather.stream)}). Check that the weather stream "
+            f"has entries beyond sim_start_idx."
+        )
     # Use provided num_workers, or auto-detect based on CPU cores
     if num_workers is None:
         num_workers = min(cpu_count(), num_tasks)  # Limit workers to available CPU cores
