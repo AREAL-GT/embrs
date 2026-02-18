@@ -109,6 +109,9 @@ class Cell:
         # Track if firebrands have been lofted from cell
         self.lofted = False
 
+        # Source cell coordinates if ignited by ember spotting (set by Embers.flight)
+        self.spot_source_xy = None
+
         # Weak reference to parent BaseFire object
         self._parent = None
 
@@ -172,6 +175,7 @@ class Cell:
         self._break_width = 0
         self.breached = True
         self.lofted = False
+        self.spot_source_xy = None
         self._arrival_time = -999
 
         # Wind forecast

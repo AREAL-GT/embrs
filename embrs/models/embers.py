@@ -115,6 +115,8 @@ class Embers:
                 ember = {
                     'x': cell.x_pos,
                     'y': cell.y_pos,
+                    'source_x': cell.x_pos,
+                    'source_y': cell.y_pos,
                     'diam': diameter,
                     'height': ft_to_m(zf),
                     'start_elev': cell.elevation_m,
@@ -510,6 +512,7 @@ class Embers:
                         if dist > self.min_spot_dist_m:
                             
                             if curr_cell.state == CellStates.FUEL:
+                                curr_cell.spot_source_xy = (temp_ember['source_x'], temp_ember['source_y'])
                                 spots.add(curr_cell) # Add to a set that will handle igniting spot fires
                                 curr_cell.get_ign_params(0) # Get ignition parameters for the cell
                                 curr_cell._set_state(CellStates.FIRE)
