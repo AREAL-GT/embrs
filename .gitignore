@@ -163,6 +163,7 @@ embrs/.DS_Store
 sample_wind_forecasts/burnout_wind_forecast.json
 sample_wind_forecasts/burnout_wind_forecast.json
 
+journal_paper/
 embrs/test_code/
 embrs/config_files/
 embrs/configs/
@@ -177,5 +178,6 @@ embrs/validation/flatland/
 *.sqlite
 # *.yml
 *.parquet
-
-
+*.md
+*.txt
+*.prof
