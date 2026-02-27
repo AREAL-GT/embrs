@@ -196,12 +196,12 @@ class TestFirePredictorMemoryBehavior:
         import inspect
         source = inspect.getsource(FirePredictor._prediction_loop)
 
-        # Verify that _updated_cells is used in the loop
-        assert '_updated_cells[cell.id] = cell' in source
+        # Verify that updated_cells is used in the loop (may be cached as local)
+        assert 'updated_cells[cell.id] = cell' in source
 
-        # After the fix, there should be a clear() call
+        # After the fix, there should be a clear() call (may use cached local name)
         # This test will fail before the fix and pass after
-        assert '_updated_cells.clear()' in source, \
+        assert 'updated_cells.clear()' in source, \
             "_prediction_loop should clear _updated_cells after each iteration"
 
 

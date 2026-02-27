@@ -12,9 +12,11 @@ Classes:
 """
 
 from shapely.geometry import Point, Polygon, LineString
+from shapely import polygons as shapely_polygons, linearrings as shapely_linearrings
 from typing import Tuple, Union, List, Dict
 from tqdm import tqdm
 import numpy as np
+import math as _math
 import pickle
 import copy
 import os
@@ -35,6 +37,63 @@ from embrs.models.weather import WeatherStream
 from embrs.fire_simulator.cell import Cell
 from embrs.models.embers import Embers
 from embrs.models.rothermel import *
+from embrs.utilities.numba_utils import njit_if_enabled
+import math
+
+
+@njit_if_enabled(cache=True)
+def _propagate_fire_core(fire_spread, avg_ros, distances, intersections,
+                         time_step, r_t, r_ss, check_zero, new_ixn_buf):
+    """Core propagation loop, JIT-compiled for small-array performance.
+
+    Updates fire_spread in-place, marks new intersections in the boolean array,
+    and returns status code indicating whether cell is fully burning.
+
+    Args:
+        fire_spread: float64 array of cumulative fire spread per direction.
+        avg_ros: float64 array of current average ROS per direction.
+        distances: float64 array of boundary distances per direction.
+        intersections: bool array tracking which directions have crossed boundary.
+        time_step: simulation time step in seconds.
+        r_t: float64 array of transient ROS per direction.
+        r_ss: float64 array of steady-state ROS per direction.
+        check_zero: if True, check whether all ROS are zero (skip on iter 0).
+        new_ixn_buf: int64 array of size n, filled with new intersection indices.
+
+    Returns:
+        int: Number of new intersections (>=0), or -1 if fully_burning due to
+             zero ROS, or -2 if fully_burning due to all directions crossed.
+    """
+    n = len(fire_spread)
+
+    # Check if cell has zero ROS in all directions
+    if check_zero:
+        all_zero = True
+        for i in range(n):
+            if r_t[i] != 0.0 or r_ss[i] != 0.0:
+                all_zero = False
+                break
+        if all_zero:
+            return -1
+
+    n_new = 0
+    n_crossed = 0
+
+    for i in range(n):
+        fire_spread[i] += avg_ros[i] * time_step
+        if intersections[i]:
+            n_crossed += 1
+        elif fire_spread[i] > distances[i]:
+            intersections[i] = True
+            new_ixn_buf[n_new] = i
+            n_new += 1
+            n_crossed += 1
+
+    if n_crossed == n:
+        return -(n_new + 2)  # encode fully_burning + n_new
+
+    return n_new
+
 
 class BaseFireSim:
     """Base class for fire simulation providing shared logic for FireSim and FirePredictor.
@@ -110,6 +169,9 @@ class BaseFireSim:
         self._frontier = set()
         self.starting_ignitions = set()
         self._urban_cells = []
+
+        # Pre-allocated buffer for propagate_fire new intersection indices (12 hex dirs)
+        self._new_ixn_buf = np.empty(12, dtype=np.int64)
 
         # Crown fire containers
         self._scheduled_spot_fires = {}
@@ -187,6 +249,10 @@ class BaseFireSim:
         self._live_h_mf = live_h_mf
         self._live_w_mf = live_w_mf
 
+        # Cache fuel model instances by (fuel_key, live_h_mf) to avoid
+        # creating duplicate objects. Typically ~40 unique fuel types vs 100K+ cells.
+        self._fuel_cache = {}
+
         # Pre-compute terrain data for all cells using vectorized operations
         self._precompute_terrain_data()
 
@@ -197,6 +263,9 @@ class BaseFireSim:
                 cell_factory=self._create_cell,
                 progress_callback=pbar.update
             )
+
+        # Batch-create all cell polygons using vectorized Shapely operations
+        self._batch_create_polygons()
 
         # Clear pre-computed data to free memory
         self._clear_precomputed_terrain_data()
@@ -296,7 +365,11 @@ class BaseFireSim:
                 cell_data.live_h_mf = mf_vals[3]
                 cell_data.live_w_mf = mf_vals[4]
 
-        fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
+        cache_key = (fuel_key, cell_data.live_h_mf)
+        fuel = self._fuel_cache.get(cache_key)
+        if fuel is None:
+            fuel = self.FuelClass(fuel_key, cell_data.live_h_mf)
+            self._fuel_cache[cache_key] = fuel
         cell_data.fuel_type = fuel
 
         # Get data for cell
@@ -353,6 +426,45 @@ class BaseFireSim:
         self._precomputed_ch = self._ch_map[data_row_idx, data_col_idx]
         self._precomputed_cbh = self._cbh_map[data_row_idx, data_col_idx]
         self._precomputed_cbd = self._cbd_map[data_row_idx, data_col_idx]
+
+    def _batch_create_polygons(self) -> None:
+        """Create all cell polygons in a single vectorized Shapely call.
+
+        Computes hex vertex coordinates for all cells using numpy, then calls
+        shapely.polygons() once instead of creating 100K+ individual Polygon
+        objects. This avoids Shapely's per-call inspect.signature overhead.
+        """
+        rows, cols = self._shape
+        total = rows * cols
+        cell_size = self._cell_size
+        sqrt3_half = _math.sqrt(3) / 2 * cell_size
+
+        # Build coordinate array: (total, 7, 2) — 7 vertices (closed ring)
+        coords = np.empty((total, 7, 2), dtype=np.float64)
+        idx = 0
+        for row in range(rows):
+            for col in range(cols):
+                cell = self._cell_grid[row, col]
+                x, y = cell.x_pos, cell.y_pos
+                coords[idx, 0] = (x, y + cell_size)
+                coords[idx, 1] = (x + sqrt3_half, y + cell_size / 2)
+                coords[idx, 2] = (x + sqrt3_half, y - cell_size / 2)
+                coords[idx, 3] = (x, y - cell_size)
+                coords[idx, 4] = (x - sqrt3_half, y - cell_size / 2)
+                coords[idx, 5] = (x - sqrt3_half, y + cell_size / 2)
+                coords[idx, 6] = (x, y + cell_size)  # close ring
+                idx += 1
+
+        # Create all polygons in one C-level batch call
+        rings = shapely_linearrings(coords)
+        polys = shapely_polygons(rings)
+
+        # Assign back to cells
+        idx = 0
+        for row in range(rows):
+            for col in range(cols):
+                self._cell_grid[row, col].polygon = polys[idx]
+                idx += 1
 
     def _clear_precomputed_terrain_data(self) -> None:
         """Clear pre-computed terrain data to free memory.
@@ -572,30 +684,42 @@ class BaseFireSim:
         intersections with neighbor boundaries, and triggers ignition
         of neighboring cells when fire reaches them.
 
+        Uses a JIT-compiled inner loop to avoid Python overhead on the
+        12-element direction arrays.
+
         Args:
             cell (Cell): Burning cell from which to propagate fire.
         """
-        if (cell.r_t == 0).all() and (cell.r_ss == 0).all() and self._iters != 0:
+        intersections = cell.intersections
+        r_t = cell.r_t
+        new_ixn_buf = self._new_ixn_buf
+
+        result = _propagate_fire_core(
+            cell.fire_spread, cell.avg_ros, cell.distances,
+            intersections, self._time_step,
+            r_t, cell.r_ss, self._iters != 0, new_ixn_buf
+        )
+
+        if result == -1:
+            # All ROS zero — mark fully burning
             cell.fully_burning = True
             return
 
-        # Update extent of fire spread along each direction
-        cell.fire_spread = cell.fire_spread + (cell.avg_ros * self._time_step)
-
-        # Compute intersections between fire spread and distances to neighbors
-        intersections = np.where(cell.fire_spread > cell.distances)[0]
-
-        for idx in intersections:
-            if idx not in cell.intersections:
-                # Check if ignition signal should be sent to each intersecting neighbor
-                if cell.breached: # Check if the cell can spread fire (breached only false if there is a fire break and the probability test failed)
-                    self.ignite_neighbors(cell, cell.r_t[idx], cell.directions[idx], cell.end_pts[idx])
-
-        # Add new intersections to tracked intersections
-        cell.intersections.update(intersections)
-
-        if len(cell.intersections) == len(cell.directions):
+        if result < -1:
+            # Fully burning (all directions crossed) with some new intersections
+            n_new = -(result + 2)
             cell.fully_burning = True
+        else:
+            n_new = result
+
+        # Process new intersections — ignite neighbors
+        if n_new > 0 and cell.breached:
+            directions = cell.directions
+            end_pts = cell.end_pts
+            ignite = self.ignite_neighbors
+            for j in range(n_new):
+                i = int(new_ixn_buf[j])
+                ignite(cell, r_t[i], directions[i], end_pts[i])
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
         """Attempt to ignite neighboring cells reached by fire spread.

@@ -591,38 +591,49 @@ class FirePredictor(BaseFireSim):
         """
         self._iters = 0
 
+        # Cache frequently-accessed attributes and methods for tight loop
+        weather_changed = self.weather_changed
+        ros_bias = self.ros_bias_factor
+        update_steady = self.update_steady_state
+        propagate = self.propagate_fire
+        remove_nbrs = self.remove_neighbors
+        set_state = self.set_state_at_cell
+        updated_cells = self._updated_cells
+        model_spotting = self.model_spotting
+        nom_ign_prob = self.nom_ign_prob
+        burnt_locs = self.burnt_locs
+        BURNT = CellStates.BURNT
+
         while self._init_iteration():
             fires_still_burning = []
+            weather_changed = self.weather_changed
 
             for cell in self._burning_cells:
-                if self.weather_changed or not cell.has_steady_state:
-                    # Update the steady state
-                    self.update_steady_state(cell)
-                    cell.r_t = cell.r_ss * self.ros_bias_factor
-                    cell.avg_ros = cell.r_ss * self.ros_bias_factor
-                    cell.I_t = cell.I_ss * self.ros_bias_factor
+                if weather_changed or not cell.has_steady_state:
+                    update_steady(cell)
+                    cell.r_t = cell.r_ss * ros_bias
+                    cell.avg_ros = cell.r_ss * ros_bias
+                    cell.I_t = cell.I_ss * ros_bias
 
-                self.propagate_fire(cell)
-                self.remove_neighbors(cell)
+                propagate(cell)
+                remove_nbrs(cell)
 
                 if cell.fully_burning or len(cell.burnable_neighbors) == 0:
-                    self.set_state_at_cell(cell, CellStates.BURNT)
-                    self.burnt_locs.append((cell.x_pos, cell.y_pos))
+                    set_state(cell, BURNT)
+                    burnt_locs.append((cell.x_pos, cell.y_pos))
                 else:
                     fires_still_burning.append(cell)
 
-                self._updated_cells[cell.id] = cell
+                updated_cells[cell.id] = cell
 
-            if self.model_spotting and self.nom_ign_prob > 0:
+            if model_spotting and nom_ign_prob > 0:
                 self._ignite_spots()
 
             self.update_control_interface_elements()
 
             self._burning_cells = list(fires_still_burning)
-            
-            # Clear updated cells to prevent unbounded memory growth
-            # (cells are tracked per-iteration, not across iterations)
-            self._updated_cells.clear()
+
+            updated_cells.clear()
 
             self._iters += 1
 
@@ -768,10 +779,16 @@ class FirePredictor(BaseFireSim):
         self._cell_grid = self.orig_grid
         self._cell_dict = self.orig_dict
 
-        # Reset all cells to initial FUEL state and fix weak references
-        for cell in self._cell_dict.values():
-            cell.reset_to_fuel()
-            cell.set_parent(self)
+        # On first run after deserialization, cells are already in initial FUEL
+        # state with set_parent already called in __setstate__. Skip the expensive
+        # reset loop (~1.1s on 105K-cell grids).
+        if getattr(self, '_skip_first_reset', False):
+            self._skip_first_reset = False
+        else:
+            # Reset all cells to initial FUEL state and fix weak references
+            for cell in self._cell_dict.values():
+                cell.reset_to_fuel()
+                cell.set_parent(self)
 
         self._burnt_cells = []
         self._burning_cells = []
