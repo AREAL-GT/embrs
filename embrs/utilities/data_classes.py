@@ -530,8 +530,9 @@ class PredictionOutput:
         fli_kw_m (dict): Maps (x, y) to fireline intensity in kW/m.
         ros_ms (dict): Maps (x, y) to rate of spread in m/s.
         spread_dir (dict): Maps (x, y) to spread direction in degrees.
-        crown_fire (dict): Maps (x, y) to crown fire status ('active' or 'passive').
-        hold_probs (dict): Maps (x, y) to hold probability (0-1).
+        all_crown_fire (dict): Maps (x, y) to time in seconds when crown fire is first predicted.
+        active_crown_fire (dict): Maps time in seconds to dict of ((x, y), crown_fire_status('active' or 'passive')).
+        end_active_crown (dict): Maps (x,y) to time in seconds when crown fire goes out.
         breaches (dict): Maps (x, y) to breach status (bool).
         active_fire_front (dict): Maps time in seconds to list of (x, y) positions
             where fire is predicted to be currently burning at that time.
@@ -546,7 +547,9 @@ class PredictionOutput:
     fli_kw_m: dict
     ros_ms: dict
     spread_dir: dict
-    crown_fire: dict
+    all_crown_fire: dict
+    active_crown_fire: dict
+    end_active_crown: dict
     hold_probs: dict
     breaches: dict
     active_fire_front: dict
@@ -604,9 +607,11 @@ class EnsemblePredictionOutput:
         ros_ms_stats (dict): Maps (x, y) to CellStatistics for rate of spread.
         spread_dir_stats (dict): Maps (x, y) to dict with 'mean_x' and 'mean_y'
             for circular mean spread direction.
-        crown_fire_frequency (dict): Maps (x, y) to crown fire probability (0-1).
+        crown_fire_probability (dict): Maps time in seconds to dict of (x, y) to crown fire probability (0-1).
         hold_prob_stats (dict): Maps (x, y) to CellStatistics for hold probability.
         breach_frequency (dict): Maps (x, y) to breach probability (0-1).
+        active_fire_probability (Optional[dict]): Maps time in seconds to dict of (x, y) to probability of active fire presence (0-1). Optional.
+        burnt_probability (Optional[dict]): Maps time in seconds to dict of (x, y) to probability of being burnt (0-1). Optional.
         individual_predictions (List[PredictionOutput]): Individual prediction
             outputs for inspection. Optional.
         forecast_indices (Optional[List[int]]): List of ints indicating the indices of 
@@ -619,7 +624,7 @@ class EnsemblePredictionOutput:
     fli_kw_m_stats: dict
     ros_ms_stats: dict
     spread_dir_stats: dict
-    crown_fire_frequency: dict
+    crown_fire_probability: dict
     hold_prob_stats: dict
     breach_frequency: dict
     active_fire_probability: Optional[dict] = None

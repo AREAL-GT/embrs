@@ -264,7 +264,9 @@ class FirePredictor(BaseFireSim):
         self.fli_kw_m = {}
         self.ros_ms = {}
         self.spread_dir = {}
-        self.crown_fire = {}
+        self.active_crown_fire = {}
+        self.end_active_crown = {}
+        self.all_crown_fire = {}
         self.hold_probs = {}
         self.breaches = {}
         self.active_fire_front = {}
@@ -283,7 +285,9 @@ class FirePredictor(BaseFireSim):
             fli_kw_m=self.fli_kw_m,
             ros_ms=self.ros_ms,
             spread_dir=self.spread_dir,
-            crown_fire=self.crown_fire,
+            all_crown_fire=self.all_crown_fire,
+            active_crown_fire=self.active_crown_fire,
+            end_active_crown=self.end_active_crown,
             hold_probs=self.hold_probs,
             breaches=self.breaches,
             active_fire_front=self.active_fire_front,
@@ -727,9 +731,6 @@ class FirePredictor(BaseFireSim):
                 else:
                     self.spread[self._curr_time_s].append((cell.x_pos, cell.y_pos))
 
-                if cell._crown_status != CrownStatus.NONE:
-                    self.crown_fire[(cell.x_pos, cell.y_pos)] = cell._crown_status
-
                 self.fli_kw_m[(cell.x_pos, cell.y_pos)] = BTU_ft_min_to_kW_m(np.max(cell.I_ss))
                 self.ros_ms[(cell.x_pos, cell.y_pos)] = np.max(cell.r_ss)
                 self.spread_dir[(cell.x_pos, cell.y_pos)] = cell.directions[np.argmax(cell.r_ss)]
@@ -737,19 +738,40 @@ class FirePredictor(BaseFireSim):
         # Store all the burnt cells at this time step
         self.burnt_spread[self._curr_time_s] = list(self.burnt_locs)
 
-        # Store the cells actively burning at this time step
-        self.active_fire_front[self._curr_time_s] = [(cell.x_pos, cell.y_pos) for cell in self._burning_cells]
+        # Add any new ignitions to the current set of burning cells
+        self._burning_cells.extend(self._new_ignitions)
+        
+        # Track active fire front and crown fire locations for this time step
+        fire_front = self.active_fire_front.setdefault(self._curr_time_s, [])
+        active_crown_fire = self.active_crown_fire.setdefault(self._curr_time_s, [])
+        
+        last_iter_crowns = set()
+        if self._iters > 0:
+            last_iter_crowns = set(self.active_crown_fire.get(self._curr_time_s - self._time_step, []))
+
+        for cell in self._burning_cells:
+            fire_front.append((cell.x_pos, cell.y_pos))
+
+            if cell._crown_status != CrownStatus.NONE:
+                if (cell.x_pos, cell.y_pos) not in self.all_crown_fire:
+                    self.all_crown_fire[(cell.x_pos, cell.y_pos)] = self._curr_time_s
+                    
+                active_crown_fire.append(((cell.x_pos, cell.y_pos), cell._crown_status))
+
+        burnt_out_crowns = last_iter_crowns - set(c[0] for c in active_crown_fire)
+        
+        for loc in burnt_out_crowns:
+            if loc not in self.end_active_crown:
+                self.end_active_crown[loc] = self._curr_time_s
+
+        # Reset new ignitions
+        self._new_ignitions = []
 
         if self._curr_time_s >= self._end_time:
             return False
-
+        
         # Check if weather has changed
         self.weather_changed = self._update_weather()
-
-        # Add any new ignitions to the current set of burning cells
-        self._burning_cells.extend(self._new_ignitions)
-        # Reset new ignitions
-        self._new_ignitions = []
 
         return True
 
@@ -1342,8 +1364,14 @@ class FirePredictor(BaseFireSim):
             self.ros_ms.clear()
         if hasattr(self, 'spread_dir'):
             self.spread_dir.clear()
-        if hasattr(self, 'crown_fire'):
-            self.crown_fire.clear()
+        if hasattr(self, 'all_crown_fire'):
+            self.all_crown_fire.clear()
+        if hasattr(self, 'crown_fire_locs'):
+            self.crown_fire_locs.clear()
+        if hasattr(self, 'active_crown_fire'):
+            self.active_crown_fire.clear()
+        if hasattr(self, 'end_active_crown'):
+            self.end_active_crown.clear()
         if hasattr(self, 'hold_probs'):
             self.hold_probs.clear()
         if hasattr(self, 'breaches'):
@@ -1587,11 +1615,20 @@ def _aggregate_ensemble_predictions(
     # -------------------------------------------------------------------------
     # 4. Crown fire frequency
     # -------------------------------------------------------------------------
-    crown_frequency = {}
-    for cell_loc in all_burned_cells:
-        crown_count = sum(1 for p in predictions if cell_loc in p.crown_fire)
-        crown_frequency[cell_loc] = crown_count / n_ensemble
+    all_crown_times = sorted(set(
+        time_s for pred in predictions for time_s in pred.active_crown_fire.keys()
+    ))
 
+    crown_fire_probability = {}
+    for time_s in all_crown_times:
+        cell_counts = {}
+        for pred in predictions:
+            if time_s in pred.active_crown_fire:
+                for loc, _ in pred.active_crown_fire[time_s]:
+                    cell_counts[loc] = cell_counts.get(loc, 0) + 1
+        crown_fire_probability[time_s] = {
+            loc: count / n_ensemble for loc, count in cell_counts.items()
+        }
     # -------------------------------------------------------------------------
     # 5. Spread direction (using circular statistics)
     # -------------------------------------------------------------------------
@@ -1661,7 +1698,7 @@ def _aggregate_ensemble_predictions(
         fli_kw_m_stats=fli_stats,
         ros_ms_stats=ros_stats,
         spread_dir_stats=spread_dir_stats,
-        crown_fire_frequency=crown_frequency,
+        crown_fire_probability=crown_fire_probability,
         hold_prob_stats=hold_prob_stats,
         breach_frequency=breach_frequency,
         active_fire_probability=active_fire_probability,
