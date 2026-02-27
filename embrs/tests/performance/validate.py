@@ -59,10 +59,12 @@ def run_simulation(cfg_path: str, seed: int = 42) -> Tuple[dict, float]:
             - num_burning_cells_history: list of int, burning cell count per iteration
             - final_time_s: float, final simulation time
     """
+    import random
     from embrs.main import load_sim_params
     from embrs.fire_simulator.fire import FireSim
 
     np.random.seed(seed)
+    random.seed(seed)
 
     sim_params = load_sim_params(cfg_path)
     sim_params.visualize = False

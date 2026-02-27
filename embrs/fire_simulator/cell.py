@@ -29,6 +29,13 @@ from embrs.models.dead_fuel_moisture import DeadFuelMoisture
 from embrs.models.weather import WeatherStream, apply_site_specific_correction, calc_local_solar_radiation
 from embrs.utilities.logger_schemas import CellLogEntry
 
+# Pre-allocated read-only arrays for reset_to_fuel. These are shared across all
+# cells and never modified — each cell replaces them with new arrays when it
+# starts burning (via get_ign_params / surface_fire).
+_RESET_ARRAY_ZERO = np.array([0], dtype=np.float64)
+_RESET_ARRAY_EMPTY = np.array([], dtype=np.float64)
+_RESET_IXN_EMPTY = np.zeros(0, dtype=np.bool_)
+
 
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
@@ -77,15 +84,20 @@ class Cell:
         """
         self.id = id
 
+        # Deterministic hash based on cell ID (not memory address) so that
+        # set iteration order is reproducible across process invocations.
+        self._hash = hash(id)
+
         # Set cell indices
         self._col = col
         self._row = row
 
         # x_pos, y_pos are the global position of cell in m
+        _sqrt3 = 1.7320508075688772  # math.sqrt(3)
         if row % 2 == 0:
-            self._x_pos = col * cell_size * np.sqrt(3)
+            self._x_pos = col * cell_size * _sqrt3
         else:
-            self._x_pos = (col + 0.5) * cell_size * np.sqrt(3)
+            self._x_pos = (col + 0.5) * cell_size * _sqrt3
 
         self._y_pos = row * cell_size * 1.5
 
@@ -116,6 +128,9 @@ class Cell:
         self._parent = None
 
         self._arrival_time = -999
+
+    def __hash__(self):
+        return self._hash
 
     def set_parent(self, parent: BaseFireSim) -> None:
         """Sets the parent BaseFire object for this cell.
@@ -150,19 +165,19 @@ class Cell:
         self.cfb = 0
         self.reaction_intensity = 0
 
-        # Spread arrays — back to empty/zero defaults from _set_cell_data
+        # Spread arrays — shared read-only constants (replaced when cell ignites)
         self.distances = None
         self.directions = None
         self.end_pts = None
         self.r_h_ss = None
         self.I_h_ss = None
-        self.r_t = np.array([0])
-        self.fire_spread = np.array([])
-        self.avg_ros = np.array([])
-        self.r_ss = np.array([])
-        self.I_ss = np.array([0])
-        self.I_t = np.array([0])
-        self.intersections = set()
+        self.r_t = _RESET_ARRAY_ZERO
+        self.fire_spread = _RESET_ARRAY_EMPTY
+        self.avg_ros = _RESET_ARRAY_EMPTY
+        self.r_ss = _RESET_ARRAY_EMPTY
+        self.I_ss = _RESET_ARRAY_ZERO
+        self.I_t = _RESET_ARRAY_ZERO
+        self.intersections = _RESET_IXN_EMPTY
         self.e = 0
         self.alpha = None
         self.has_steady_state = False
@@ -182,22 +197,14 @@ class Cell:
         self.forecast_wind_speeds = []
         self.forecast_wind_dirs = []
 
-        # Moisture — reset to initial values
+        # Moisture — reset to initial values (use cached template if available)
         self.moist_update_time_s = 0
         if self._fuel.burnable:
-            # Reset DFM objects in-place (avoids recreating them)
-            for dfm in self.dfms:
-                dfm.initializeStick()
-            # Reset moisture array to initial values
-            indices = self._fuel.rel_indices
-            fmois = np.zeros(6)
-            if 0 in indices: fmois[0] = self.init_dead_mf[0]
-            if 1 in indices: fmois[1] = self.init_dead_mf[1]
-            if 2 in indices: fmois[2] = self.init_dead_mf[2]
-            if 3 in indices: fmois[3] = self.init_dead_mf[0]
-            if 4 in indices: fmois[4] = self.init_live_h_mf
-            if 5 in indices: fmois[5] = self.init_live_w_mf
-            self.fmois = np.array(fmois)
+            if self.dfms:
+                for dfm in self.dfms:
+                    dfm.initializeStick()
+            # Reset moisture array from cached initial values
+            self.fmois = self._init_fmois.copy()
 
         # Restore full neighbor set (remove_neighbors modifies _burnable_neighbors during sim)
         self._burnable_neighbors = dict(self._neighbors)
@@ -279,8 +286,8 @@ class Cell:
         # Last time the moisture was updated in cell
         self.moist_update_time_s = 0
 
-        # Get shapely polygon representation of cell
-        self.polygon = self.to_polygon()
+        # Polygon is set externally via batch creation for performance
+        self.polygon = None
 
         # Variables that define spread directions within cell
         self.distances = None
@@ -298,7 +305,7 @@ class Cell:
         self.r_ss = np.array([])
         self.I_ss = np.array([0])
         self.I_t = np.array([0])
-        self.intersections = set()
+        self.intersections = np.zeros(0, dtype=np.bool_)
         self.e = 0
         self.alpha = None
 
@@ -315,34 +322,30 @@ class Cell:
     def set_arrays(self):
         """Initialize fuel moisture tracking arrays for this cell.
 
-        Creates DeadFuelMoisture objects for each relevant fuel size class
-        (1-hr, 10-hr, 100-hr) based on the fuel model and initializes the
-        moisture content array with starting values.
+        DFM objects are created lazily on first moisture update to avoid
+        allocating ~12 numpy arrays per object for cells that never burn.
 
         Side Effects:
-            - Creates self.dfms list containing DeadFuelMoisture instances.
             - Sets self.wdry and self.sigma from fuel model properties.
             - Initializes self.fmois array with initial moisture fractions.
+            - Sets self._dfms_needed tuple for lazy DFM creation.
         """
         indices = self._fuel.rel_indices
 
         self.wdry = self._fuel.w_n[self._fuel.rel_indices]
         self.sigma = self._fuel.s[self._fuel.rel_indices]
 
+        # Defer DFM creation — store which classes are needed
         self.dfms = []
+        self._dfms_needed = (0 in indices, 1 in indices, 2 in indices)
+
         fmois = np.zeros(6)
 
         if 0 in indices:
-            self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
-            self.dfms.append(self.dfm1)
             fmois[0] = self.init_dead_mf[0]
         if 1 in indices:
-            self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
-            self.dfms.append(self.dfm10)
             fmois[1] = self.init_dead_mf[1]
         if 2 in indices:
-            self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
-            self.dfms.append(self.dfm100)
             fmois[2] = self.init_dead_mf[2]
         if 3 in indices:
             fmois[3] = self.init_dead_mf[0]
@@ -352,6 +355,28 @@ class Cell:
             fmois[5] = self.init_live_w_mf
 
         self.fmois = np.array(fmois)
+        # Cache initial fmois for efficient reset_to_fuel
+        self._init_fmois = self.fmois.copy()
+
+    def _ensure_dfms(self):
+        """Create DeadFuelMoisture objects on demand (lazy initialization).
+
+        Called before first moisture update. Uses template cloning for fast
+        object creation.
+        """
+        if self.dfms:
+            return  # Already initialized
+
+        need_1hr, need_10hr, need_100hr = self._dfms_needed
+        if need_1hr:
+            self.dfm1 = DeadFuelMoisture.createDeadFuelMoisture1()
+            self.dfms.append(self.dfm1)
+        if need_10hr:
+            self.dfm10 = DeadFuelMoisture.createDeadFuelMoisture10()
+            self.dfms.append(self.dfm10)
+        if need_100hr:
+            self.dfm100 = DeadFuelMoisture.createDeadFuelMoisture100()
+            self.dfms.append(self.dfm100)
 
     def project_distances_to_surf(self, distances: np.ndarray):
         """Project horizontal distances onto the sloped terrain surface.
@@ -427,6 +452,10 @@ class Cell:
         Side Effects:
             - Updates internal state of each DeadFuelMoisture object in self.dfms.
         """
+        # Lazy DFM creation — only allocate when first needed
+        if not self.dfms:
+            self._ensure_dfms()
+
         elev_ref = weather_stream.ref_elev
 
         curr_weather = weather_stream.stream[idx]
@@ -714,9 +743,11 @@ class Cell:
         self._state = state
 
         if self._state == CellStates.FIRE:
-            self.fire_spread = np.zeros(len(self.directions))
-            self.r_ss = np.zeros(len(self.directions))
-            self.I_ss = np.zeros(len(self.directions))
+            n_dirs = len(self.directions)
+            self.fire_spread = np.zeros(n_dirs)
+            self.r_ss = np.zeros(n_dirs)
+            self.I_ss = np.zeros(n_dirs)
+            self.intersections = np.zeros(n_dirs, dtype=np.bool_)
 
             self.r_h_ss = 0
             self.I_h_ss = 0
@@ -816,6 +847,9 @@ class Cell:
         if not self.fuel.burnable:
             return
 
+        if not self.dfms:
+            self._ensure_dfms()
+
         # Catch cell up to current time
         parent = self._parent()
         now_idx = parent._curr_weather_idx
@@ -901,7 +935,7 @@ class Cell:
         Returns:
             float: The area of the hexagonal cell in square meters.
         """
-        area_m2 = (3 * np.sqrt(3) * self.cell_size ** 2) / 2
+        area_m2 = (3 * 1.7320508075688772 * self.cell_size ** 2) / 2  # 3*sqrt(3)/2
         return area_m2
 
     def to_polygon(self) -> Polygon:

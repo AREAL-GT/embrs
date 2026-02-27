@@ -28,6 +28,8 @@ References:
     Eighth Conference on Fire and Forest Meteorology. SAF Publication 85-04.
 """
 
+import math
+
 from embrs.models.rothermel import *
 from embrs.models.fuel_models import Anderson13
 from embrs.utilities.unit_conversions import *
@@ -76,9 +78,9 @@ def crown_fire(cell: Cell, fmc: float):
     I_o = (0.01 * cell.canopy_base_height * (460 + 25.9 * fmc))**(3/2) # kW/m
 
     # Get the max rate of spread and fireline intensity within the cell
-    R_m_s = np.max(cell.r_ss)
+    R_m_s = float(np.max(cell.r_ss))
     R = R_m_s * 60 # R in m/min
-    I_btu_ft_min = np.max(cell.I_ss)
+    I_btu_ft_min = float(np.max(cell.I_ss))
     I_t = BTU_ft_min_to_kW_m(I_btu_ft_min) # I in kw/m
 
     # Check if fireline intensity is high enough to initiate crown fire
@@ -96,10 +98,10 @@ def crown_fire(cell: Cell, fmc: float):
         sfc = I_t / (300 * R) # kg/m^2
 
         # CFB scaling exponent
-        a_c = -np.log(0.1) / (0.9 * (rac - R_0))
+        a_c = -math.log(0.1) / (0.9 * (rac - R_0))
 
         # Crown fraction burned, proportion of the trees involved in crowning phase
-        cfb = 1 - np.exp(-a_c * (R - R_0))
+        cfb = 1 - math.exp(-a_c * (R - R_0))
 
         # Set the crown fraction burned in the cell
         cell.cfb = cfb
@@ -136,7 +138,7 @@ def crown_fire(cell: Cell, fmc: float):
         
         # Set rate of spread based on crown fire equations
         cell.r_ss, cell.I_ss = calc_crown_propagation(cell, r_actual, crown_dir, vec_mag, sfc, cfb)
-        cell.r_h_ss = np.max(cell.r_ss)
+        cell.r_h_ss = float(np.max(cell.r_ss))
 
     else:
         cell._crown_status = CrownStatus.NONE
@@ -154,7 +156,7 @@ def set_accel_constant(cell: Cell, cfb: float):
     Side Effects:
         Sets ``cell.a_a`` (1/s).
     """
-    a = (0.3 - 18.8 * (cfb ** 2.5) * np.exp(-8 * cfb)) / 60
+    a = (0.3 - 18.8 * (cfb ** 2.5) * math.exp(-8 * cfb)) / 60
 
     cell.a_a = a
 
@@ -209,18 +211,20 @@ def get_wind_slope_vector(cell: Cell, phi_w: float, phi_s: float,
     """
     wind_speed, wind_dir = cell.curr_wind()
 
-    angle = np.abs(wind_dir - cell.aspect) # degrees
+    angle = abs(wind_dir - cell.aspect) # degrees
 
     wind_speed_ft_min = m_s_to_ft_min(wind_speed) # ft/min
     wind_speed = 0.5 * wind_speed_ft_min
 
+    angle_rad = math.radians(angle)
     if angle != 180:
-        vec_speed = np.sqrt(phi_w**2 + phi_s**2 + 2 * phi_w * phi_s * np.cos(np.deg2rad(angle)))
-        vec_mag = np.sqrt(wind_speed ** 2 + slope_speed ** 2 + (2 * wind_speed * slope_speed * np.cos(np.deg2rad(angle))))
-    
+        cos_angle = math.cos(angle_rad)
+        vec_speed = math.sqrt(phi_w**2 + phi_s**2 + 2 * phi_w * phi_s * cos_angle)
+        vec_mag = math.sqrt(wind_speed ** 2 + slope_speed ** 2 + (2 * wind_speed * slope_speed * cos_angle))
+
     else:
-        vec_speed = np.abs(phi_s - phi_w)
-        vec_mag = np.abs(slope_speed - wind_speed)
+        vec_speed = abs(phi_s - phi_w)
+        vec_mag = abs(slope_speed - wind_speed)
 
     if phi_s >= phi_w:
         aside = phi_w
@@ -238,15 +242,15 @@ def get_wind_slope_vector(cell: Cell, phi_w: float, phi_s: float,
             vangle = 1
         else:
             if vangle < 0:
-                vangle = np.pi
+                vangle = math.pi
             else:
-                vangle = np.arccos(vangle)
-                vangle = np.abs(vangle)
+                vangle = math.acos(vangle)
+                vangle = abs(vangle)
 
     else:
         vangle = 0
 
-    vangle = np.rad2deg(vangle)
+    vangle = math.degrees(vangle)
 
     if angle < 90:
         if angle > 0:
@@ -322,7 +326,7 @@ def calc_crown_vector(cell: Cell, R10: float) -> Tuple[float, float, float]:
     wind_ft_min = m_s_to_ft_min(wind_speed) # ft/min
     phi_w = calc_wind_factor(cell.fuel, wind_ft_min * 0.4) # Reduce wind speed by 0.4 to get R_10 (Rothermel 1991)
 
-    slope_rad = np.deg2rad(cell.slope_deg)
+    slope_rad = math.radians(cell.slope_deg)
     phi_s = calc_slope_factor(cell.fuel, slope_rad)
 
     slope_speed = calc_slope_speed(cell, phi_s)
@@ -338,7 +342,7 @@ def calc_crown_vector(cell: Cell, R10: float) -> Tuple[float, float, float]:
 
     vec_ros *= 3.34 # R10 * 3.34 to get crown fire spread rate
 
-    return vec_ros, np.deg2rad(vec_dir), vec_mag # ft/min, radians, ft/min
+    return vec_ros, math.radians(vec_dir), vec_mag # ft/min, radians, ft/min
 
 def calc_crown_eccentricity(wind_slope_vec_mag: float) -> float:
     """Compute crown fire ellipse eccentricity from wind/slope vector magnitude.
@@ -359,9 +363,9 @@ def calc_crown_eccentricity(wind_slope_vec_mag: float) -> float:
     """
     wind_slope_vec_mag = ft_min_to_mph(wind_slope_vec_mag) # convert to mph
 
-    z = 0.936 * np.exp(0.1147 * wind_slope_vec_mag) + 0.461 * np.exp(-0.0692 * wind_slope_vec_mag) - 0.397
+    z = 0.936 * math.exp(0.1147 * wind_slope_vec_mag) + 0.461 * math.exp(-0.0692 * wind_slope_vec_mag) - 0.397
 
-    e = ((z**2 - 1)**0.5)/z
+    e = math.sqrt(z**2 - 1) / z
 
     return e
 
@@ -419,7 +423,7 @@ def crown_loading_burned(cell: Cell, cfb: float) -> float:
     cbh = cell.canopy_base_height
 
     # Compute crown loading burned (kg/m2)
-    crown_load_burned = cfb * cbd * np.abs(ch - cbh) # Van Wagner 1990
+    crown_load_burned = cfb * cbd * abs(ch - cbh) # Van Wagner 1990
 
     return crown_load_burned
 
@@ -437,7 +441,7 @@ def crown_intensity(R: float, sfc: float, clb: float) -> float:
     # Convert R to ft/s
     R /= (0.3048 * 60.0) # m/min to ft/s
 
-    I_h = np.abs(R * (sfc + clb) * 1586.01) # btu/ft/s
+    I_h = abs(R * (sfc + clb) * 1586.01) # btu/ft/s
 
     I_h *= 60 # convert to btu/ft/min
 

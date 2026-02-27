@@ -22,8 +22,58 @@ from embrs.models.fuel_models import Fuel
 from embrs.utilities.fire_util import CrownStatus
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
+from embrs.utilities.numba_utils import njit_if_enabled, NUMBA_AVAILABLE
 import numpy as np
+import math
 from typing import Tuple
+
+
+@njit_if_enabled(cache=True)
+def _accelerate_core(r_t, r_ss, avg_ros, I_t, I_ss, a_a, time_step):
+    """Core acceleration loop optimized for small arrays.
+
+    Replaces numpy masked operations with explicit element-wise loops,
+    eliminating Python/numpy dispatch overhead on 12-element arrays.
+    JIT-compiled with Numba when available for additional speedup.
+    Modifies r_t, avg_ros, I_t in-place.
+    """
+    n = len(r_t)
+    clip_upper = 1.0 - 1e-7
+
+    for i in range(n):
+        rt_i = r_t[i]
+        rss_i = r_ss[i]
+
+        if rt_i >= rss_i:
+            r_t[i] = rss_i
+            avg_ros[i] = rss_i
+            continue
+
+        if rt_i != 0.0:
+            ratio = rt_i / (rss_i + 1e-7)
+            if ratio < 0.0:
+                ratio = 0.0
+            elif ratio > clip_upper:
+                ratio = clip_upper
+
+            T_t = math.log(1.0 - ratio) / (-a_a)
+
+            D_t = rss_i * (T_t + math.exp(-a_a * T_t) / a_a - 1.0 / a_a)
+            D_t1 = rss_i * (
+                time_step + T_t + math.exp(-a_a * (time_step + T_t)) / a_a - 1.0 / a_a
+            )
+            avg_ros[i] = (D_t1 - D_t) / time_step
+            r_t1 = rss_i * (1.0 - math.exp(-a_a * (time_step + T_t)))
+            r_t[i] = r_t1
+            I_t[i] = (r_t1 / (rss_i + 1e-7)) * I_ss[i]
+        else:
+            r_t1 = rss_i * (1.0 - math.exp(-a_a * time_step))
+            D_t = rss_i * (
+                time_step + math.exp(-a_a * time_step) / a_a - 1.0 / a_a
+            )
+            avg_ros[i] = D_t / time_step
+            r_t[i] = r_t1
+            I_t[i] = (r_t1 / (rss_i + 1e-7)) * I_ss[i]
 
 def surface_fire(cell: Cell):
     """Compute steady-state surface fire ROS and fireline intensity for a cell.
@@ -71,6 +121,9 @@ def accelerate(cell: Cell, time_step: float):
     acceleration model (McAlpine 1989). Directions already at or above
     steady-state are clamped.
 
+    Uses a JIT-compiled inner loop to avoid numpy dispatch overhead on
+    small (12-element) arrays.
+
     Args:
         cell (Cell): Burning cell with ``r_ss``, ``r_t``, ``a_a`` set.
         time_step (float): Simulation time step in seconds.
@@ -78,57 +131,8 @@ def accelerate(cell: Cell, time_step: float):
     Side Effects:
         Updates ``cell.r_t``, ``cell.avg_ros``, and ``cell.I_t`` in-place.
     """
-    # Mask where acceleration is needed
-    mask_accel = cell.r_t < cell.r_ss
-
-    # Mask for nonzero r_t (partial acceleration history)
-    mask_nonzero = mask_accel & (cell.r_t != 0)
-
-    # Mask for zero r_t (accelerate from rest)
-    mask_zero = mask_accel & (cell.r_t == 0)
-
-    # --- Handle nonzero r_t ---
-    if mask_nonzero.any():
-        r_t = cell.r_t[mask_nonzero]
-        r_ss = cell.r_ss[mask_nonzero]
-        a_a = cell.a_a
-
-        ratio = np.clip(r_t / (r_ss + 1e-7), 0.0, 1.0 - 1e-7)
-        T_t = np.log(1 - ratio) / (-a_a)
-
-        D_t = r_ss * (T_t + np.exp(-a_a * T_t) / a_a - (1 / a_a))
-        D_t1 = r_ss * (
-            time_step + T_t + np.exp(-a_a * (time_step + T_t)) / a_a - (1 / a_a)
-        )
-        avg_ros = (D_t1 - D_t) / time_step
-        r_t1 = r_ss * (1 - np.exp(-a_a * (time_step + T_t)))
-
-        # Apply updates
-        cell.r_t[mask_nonzero] = r_t1
-        cell.avg_ros[mask_nonzero] = avg_ros
-        cell.I_t[mask_nonzero] = (r_t1 / (r_ss + 1e-7)) * cell.I_ss[mask_nonzero]
-
-    # --- Handle zero r_t ---
-    if mask_zero.any():
-        r_ss = cell.r_ss[mask_zero]
-        a_a = cell.a_a if np.isscalar(cell.a_a) else cell.a_a[mask_zero]
-
-        r_t1 = r_ss * (1 - np.exp(-a_a * time_step))
-        D_t = r_ss * (
-            time_step + np.exp(-a_a * time_step) / a_a - (1 / a_a)
-        )
-        avg_ros = D_t / time_step
-
-        # Apply updates
-        cell.r_t[mask_zero] = r_t1
-        cell.avg_ros[mask_zero] = avg_ros
-        cell.I_t[mask_zero] = (r_t1 / (r_ss + 1e-7)) * cell.I_ss[mask_zero]
-
-    # --- Handle steady state ---
-    mask_steady = ~mask_accel
-    if mask_steady.any():
-        cell.r_t[mask_steady] = cell.r_ss[mask_steady]
-        cell.avg_ros[mask_steady] = cell.r_ss[mask_steady]
+    _accelerate_core(cell.r_t, cell.r_ss, cell.avg_ros, cell.I_t, cell.I_ss,
+                     cell.a_a, float(time_step))
 
 def calc_vals_for_all_directions(cell: Cell, R_h: float, I_r: float, alpha: float,
                                  e: float, I_h: float = None) -> Tuple[np.ndarray, np.ndarray]:
@@ -219,8 +223,8 @@ def calc_r_h(cell: Cell, R_0: float = None, I_r: float = None) -> Tuple[float, f
         if rel_wind_dir_deg < 0:
             rel_wind_dir_deg += 360
 
-    rel_wind_dir = np.deg2rad(rel_wind_dir_deg)
-    slope_angle = np.deg2rad(slope_angle_deg)
+    rel_wind_dir = math.radians(rel_wind_dir_deg)
+    slope_angle = math.radians(slope_angle_deg)
 
     fuel = cell.fuel
     m_f = cell.fmois
@@ -234,7 +238,7 @@ def calc_r_h(cell: Cell, R_0: float = None, I_r: float = None) -> Tuple[float, f
 
     # Enforce maximum wind speed
     U_max = 0.9 * I_r
-    wind_speed_ft_min = np.min([U_max, wind_speed_ft_min])
+    wind_speed_ft_min = min(U_max, wind_speed_ft_min)
 
     phi_w = calc_wind_factor(fuel, wind_speed_ft_min)
     phi_s = calc_slope_factor(fuel, slope_angle)
@@ -265,15 +269,15 @@ def calc_wind_slope_vec(R_0: float, phi_w: float, phi_s: float, angle: float) ->
     d_w = R_0 * phi_w
     d_s = R_0 * phi_s
 
-    x = d_s + d_w * np.cos(angle)
-    y = d_w * np.sin(angle)
-    vec_mag = np.sqrt(x**2 + y**2)
+    x = d_s + d_w * math.cos(angle)
+    y = d_w * math.sin(angle)
+    vec_mag = math.sqrt(x**2 + y**2)
 
     if vec_mag == 0:
         vec_dir = 0
 
     else:
-        vec_dir = np.arctan2(y, x)
+        vec_dir = math.atan2(y, x)
 
     return vec_mag, vec_dir
 
@@ -344,15 +348,15 @@ def calc_live_mx(fuel: Fuel, m_f: float) -> float:
     """
     W = fuel.W
 
-    if W == np.inf:
+    if W == math.inf:
         return fuel.dead_mx
 
     num = 0
     den = 0
     for i in range(4):
         if fuel.s[i] != 0:
-            num += m_f * fuel.load[i] * np.exp(-138/fuel.s[i])
-            den += fuel.load[i] * np.exp(-138/fuel.s[i])
+            num += m_f * fuel.load[i] * math.exp(-138/fuel.s[i])
+            den += fuel.load[i] * math.exp(-138/fuel.s[i])
 
     mf_dead = num/den
 
@@ -411,14 +415,14 @@ def calc_heat_sink(fuel: Fuel, m_f: np.ndarray) -> float:
     dead_sum = 0
     for j in range(4):
         if fuel.s[j] != 0:
-            dead_sum += fuel.f_dead_arr[j] * np.exp(-138/fuel.s[j]) * Q_ig[j]
+            dead_sum += fuel.f_dead_arr[j] * math.exp(-138/fuel.s[j]) * Q_ig[j]
 
     heat_sink += fuel.f_i[0] * dead_sum
 
     live_sum = 0
     for j in range(2):
         if fuel.s[4+j] != 0:
-            live_sum += fuel.f_live_arr[j] * np.exp(-138/fuel.s[4+j]) * Q_ig[4+j]
+            live_sum += fuel.f_live_arr[j] * math.exp(-138/fuel.s[4+j]) * Q_ig[4+j]
         
     heat_sink += fuel.f_i[1] * live_sum
     heat_sink *= fuel.rho_b
@@ -454,7 +458,7 @@ def calc_slope_factor(fuel: Fuel, phi: float) -> float:
     """
     packing_ratio = fuel.rho_b / fuel.rho_p
 
-    phi_s = 5.275 * (packing_ratio ** (-0.3)) * (np.tan(phi)) ** 2
+    phi_s = 5.275 * (packing_ratio ** (-0.3)) * math.tan(phi) ** 2
 
     return phi_s
 
@@ -483,6 +487,8 @@ def calc_moisture_damping(m_f: float, m_x: float) -> float:
 
     return max(0, moist_damping)
 
+_MINERAL_DAMPING_DEFAULT = 0.174 * 0.010 ** (-0.19)
+
 def calc_mineral_damping(s_e: float = 0.010) -> float:
     """Compute mineral damping coefficient.
 
@@ -493,6 +499,8 @@ def calc_mineral_damping(s_e: float = 0.010) -> float:
     Returns:
         float: Mineral damping coefficient (dimensionless).
     """
+    if s_e == 0.010:
+        return _MINERAL_DAMPING_DEFAULT
 
     mineral_damping = 0.174 * s_e ** (-0.19)
 
@@ -560,9 +568,9 @@ def calc_eccentricity(fuel: Fuel, R_h: float, R_0: float) -> float:
     """
     u_e = calc_effective_wind_speed(fuel, R_h, R_0)
     u_e_ms = ft_min_to_m_s(u_e)
-    z = 0.936 * np.exp(0.2566 * u_e_ms) + 0.461 * np.exp(-0.1548 * u_e_ms) - 0.397
-    z = np.min([z, 8.0])
-    e = ((z**2 - 1)**0.5)/z
+    z = 0.936 * math.exp(0.2566 * u_e_ms) + 0.461 * math.exp(-0.1548 * u_e_ms) - 0.397
+    z = min(z, 8.0)
+    e = math.sqrt(z**2 - 1) / z
 
     return e
 
@@ -579,7 +587,7 @@ def calc_flame_len(cell: Cell) -> float:
         float: Flame length in feet.
     """
     # Fireline intensity in Btu/ft/min
-    fli = np.max(cell.I_ss)
+    fli = float(np.max(cell.I_ss))
     fli /= 60 # convert to Btu/ft/s
 
     if cell._crown_status == CrownStatus.NONE:

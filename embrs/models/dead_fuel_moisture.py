@@ -12,6 +12,7 @@ Performance Note:
     Set EMBRS_DISABLE_JIT=1 to disable JIT compilation for debugging.
 """
 
+import math
 import numpy as np
 import datetime
 import random
@@ -252,6 +253,235 @@ def _update_temperature(m_nodes, m_dx, m_mdt, m_x, m_Tv, m_Ttold, m_t):
 
 
 @njit_if_enabled(cache=True)
+def _update_internal_loop(
+    num_steps, et, mdt, mdt_2,
+    ta0, at, ha0, rh, sv0, sv1, bp0_old, bpr,
+    m_w, m_s, m_t, m_d, m_x,
+    m_Twold, m_Tsold, m_Ttold, m_Tv, m_To, m_Tg,
+    m_nodes, m_dx, m_density,
+    m_wmax, m_wmx, m_wfilmk, m_vf, m_hc, m_hwf,
+    m_stca, m_stcd, m_stv,
+    m_allowRainstorm, m_allowRainfall2, m_amlf, m_capf,
+    ra1, m_rdur_init, pptrate,
+    rai0, rai1,
+    ddt, m_wsa_init, m_hf_init,
+    perturbate,
+    tstate_arr,
+    tt_init, ddtNext_init
+):
+    """JIT-compiled main time-stepping loop for dead fuel moisture model.
+
+    Encapsulates the entire inner loop of update_internal() in a single
+    JIT-compiled function. This eliminates ~115 Python interpreter iterations
+    and ~690 JIT kernel call transitions per update_internal() call.
+
+    All state arrays (m_w, m_s, m_t, m_d, etc.) are mutated in-place.
+    Scalar state values are returned as a tuple for the caller to write
+    back to ``self``.
+
+    Returns:
+        Tuple of (m_rdur, wsa, hf, wfilm, state, sem).
+    """
+    Ap_over_024_over_18 = Ap / 0.24 / 18.0
+
+    tt = tt_init
+    ddtNext = ddtNext_init
+    m_rdur = m_rdur_init
+    wsa = m_wsa_init
+    hf = m_hf_init
+    wfilm = 0.0
+    state = 0
+    sem = 0.0
+
+    # Pre-allocate random perturbation array
+    random_vals = np.empty(m_nodes)
+
+    for nstep in range(1, num_steps):
+        # Weather interpolation
+        tfract = tt / et
+        ta = ta0 + (at - ta0) * tfract
+        ha = ha0 + (rh - ha0) * tfract
+        sv = sv0 + (sv1 - sv0) * tfract
+        bp = bp0_old + (bpr - bp0_old) * tfract
+        fsc = sv / Srf
+        tka = ta + Kelvin
+        tdw = 5205.0 / ((5205.0 / tka) - math.log(ha))
+        tdp = tdw - Kelvin
+
+        if fsc < 0.000001:
+            tsk = Tcn + Kelvin
+            hr = Hrn
+            sr = 0.0
+        else:
+            tsk = Tcd + Kelvin
+            hr = Hrd
+            sr = Srf * fsc
+
+        psa = 0.0000239 * math.exp(20.58 - (5205.0 / tka))
+        pa = ha * psa
+        psd = 0.0000239 * math.exp(20.58 - (5205.0 / tdw))
+
+        if ra1 < 0.0001:
+            m_rdur = 0.0
+        else:
+            m_rdur += mdt
+
+        # Surface node calculations
+        hr_plus_hc = hr + m_hc
+        tfd = ta + (sr - hr * (ta - tsk + Kelvin)) / hr_plus_hc
+        qv = 13550.0 - 10.22 * (tfd + Kelvin)
+        qw = 5040.0 * math.exp(-14.0 * m_w[0])
+        hw = (m_hwf * Ap_over_024_over_18) * qv
+        m_t[0] = tfd - (hw * (tfd - ta) / (hr_plus_hc + hw))
+        tkf = m_t[0] + Kelvin
+        gnu = 0.00439 + 0.00000177 * (338.76 - tkf) ** 2.1237
+
+        c1 = 0.1617 - 0.001419 * m_t[0]
+        c2 = 0.4657 + 0.003578 * m_t[0]
+        wsa = c1 * Wsf ** c2
+        wdiff = m_wmax - wsa
+        if wdiff < 0.000001:
+            wdiff = 0.000001
+        ps1 = 0.0000239 * math.exp(20.58 - (5205.0 / tkf))
+        p1 = pa + Ap * bp * (qv / (qv + qw)) * (tka - tkf)
+        if p1 < 0.000001:
+            p1 = 0.000001
+        hf = p1 / ps1
+        if hf > Hfs:
+            hf = Hfs
+        hf_log = -math.log(1.0 - hf)
+        sem = c1 * hf_log ** c2
+
+        # State machine for surface moisture
+        state = 0
+        wfilm = 0.0
+        w_old = m_w[0]
+        w_new = w_old
+        s_new = m_s[0]
+
+        if ra1 > 0.0:
+            if m_allowRainstorm and pptrate >= m_stv:
+                state = 8
+                wfilm = m_wfilmk
+                w_new = m_wmx
+            else:
+                if m_rdur < 1.0 or not m_allowRainfall2:
+                    state = 6
+                    w_new = w_old + rai0
+                else:
+                    state = 7
+                    w_new = w_old + rai1
+            wfilm = m_wfilmk
+            s_new = (w_new - wsa) / wdiff
+            m_t[0] = tfd
+            hf = Hfs
+        else:
+            if w_old > wsa:
+                p1 = ps1
+                hf = Hfs
+                aml = m_amlf * (ps1 - psd) / bp
+                if m_t[0] <= tdp and p1 > psd:
+                    aml = 0.0
+                w_new = w_old - aml * mdt_2
+                if aml > 0.0:
+                    w_new -= (mdt * m_capf / gnu)
+                if w_new > m_wmx:
+                    w_new = m_wmx
+                s_new = (w_new - wsa) / wdiff
+                if w_new > w_old:
+                    state = 3
+                elif w_new == w_old:
+                    state = 9
+                else:
+                    state = 5
+            elif m_t[0] <= tdp:
+                state = 4
+                aml = 0.0 if p1 > psd else m_amlf * (p1 - psd) / bp
+                w_new = w_old - aml * mdt_2
+                s_new = (w_new - wsa) / wdiff
+            else:
+                if w_old >= sem:
+                    state = 2
+                    bi = m_stcd * m_dx / m_d[0]
+                else:
+                    state = 1
+                    bi = m_stca * m_dx / m_d[0]
+                w_new = (m_w[1] + bi * sem) / (1.0 + bi)
+                s_new = 0.0
+
+        if w_new > m_wmx:
+            m_w[0] = m_wmx
+        else:
+            m_w[0] = w_new
+        if s_new > 0.0:
+            m_s[0] = s_new
+        else:
+            m_s[0] = 0.0
+        tstate_arr[state] += 1
+
+        # Prepare coefficients
+        _prepare_coefficients(
+            m_nodes, m_w, m_s, m_t, m_d, m_x,
+            m_Twold, m_Tsold, m_Ttold, m_Tv, m_To
+        )
+
+        if state != 9:
+            # Compute gravity drainage
+            _compute_gravity_drainage(
+                m_nodes, m_w, wsa, wdiff, gnu,
+                m_x, m_vf, m_Tg
+            )
+
+            # Solve saturation
+            _solve_saturation(
+                m_nodes, m_dx, mdt, m_x,
+                m_Tg, m_Tsold, m_s
+            )
+
+            # Update moisture based on liquid continuity
+            continuousLiquid = _check_continuous_liquid(m_nodes, m_s)
+
+            if continuousLiquid:
+                if perturbate:
+                    for i in range(m_nodes):
+                        random_vals[i] = np.random.uniform(-0.0001, 0.0001)
+                    _update_moisture_continuous(
+                        m_nodes, wsa, wdiff, m_wmx,
+                        m_s, m_w, random_vals
+                    )
+                else:
+                    # Inline moisture update without perturbation
+                    for i in range(1, m_nodes - 1):
+                        m_w[i] = wsa + m_s[i] * wdiff
+                        if m_w[i] < 0.0:
+                            m_w[i] = 0.0
+                        elif m_w[i] > m_wmx:
+                            m_w[i] = m_wmx
+                    m_w[m_nodes - 1] = m_w[m_nodes - 2]
+            else:
+                _update_moisture_diffusion(
+                    m_nodes, m_dx, mdt, m_wmx,
+                    m_x, m_To, m_Twold, m_w
+                )
+
+        # Update temperature
+        _update_temperature(
+            m_nodes, m_dx, mdt,
+            m_x, m_Tv, m_Ttold, m_t
+        )
+
+        # Periodically recalculate diffusivity
+        if (ddtNext - tt) < (0.5 * mdt):
+            _compute_diffusivity(
+                m_nodes, m_t, m_w, wsa, hf,
+                m_density, bp, m_d
+            )
+            ddtNext += ddt
+
+    return (m_rdur, wsa, hf, wfilm, state, sem)
+
+
+@njit_if_enabled(cache=True)
 def _compute_diffusivity(m_nodes, m_t, m_w, m_wsa, m_hf, m_density, bp, m_d):
     """Compute moisture diffusivity at each node.
 
@@ -457,25 +687,59 @@ class DeadFuelMoisture:
             self.m_hf, self.m_density, bp, self.m_d
         )
 
+    # Class-level templates for fast cloning (populated on first use)
+    _template_1hr = None
+    _template_10hr = None
+    _template_100hr = None
+    _template_1000hr = None
+
+    # Mutable array attribute names that must be deep-copied when cloning
+    _MUTABLE_ARRAYS = (
+        'm_t', 'm_s', 'm_d', 'm_w', 'm_x', 'm_v',
+        'm_Twold', 'm_Ttold', 'm_Tsold', 'm_Tv', 'm_To', 'm_Tg',
+    )
+
+    @classmethod
+    def _clone_from_template(cls, template):
+        """Create a new instance by cloning a template's state.
+
+        Copies all scalar attributes via dict update (fast) and deep-copies
+        only the mutable numpy arrays. Much faster than full __init__ because
+        it skips parameter derivation and array initialization math.
+        """
+        new = object.__new__(cls)
+        new.__dict__.update(template.__dict__)
+        for attr in cls._MUTABLE_ARRAYS:
+            setattr(new, attr, getattr(template, attr).copy())
+        return new
+
     @staticmethod
     def createDeadFuelMoisture1():
         """Create 1-hour fuel moisture model (fine fuels)."""
-        return DeadFuelMoisture(0.20, 0.006, 0.85, 0.10)
+        if DeadFuelMoisture._template_1hr is None:
+            DeadFuelMoisture._template_1hr = DeadFuelMoisture(0.20, 0.006, 0.85, 0.10)
+        return DeadFuelMoisture._clone_from_template(DeadFuelMoisture._template_1hr)
 
     @staticmethod
     def createDeadFuelMoisture10():
         """Create 10-hour fuel moisture model."""
-        return DeadFuelMoisture(0.64, 0.05, 0.60, 0.05)
+        if DeadFuelMoisture._template_10hr is None:
+            DeadFuelMoisture._template_10hr = DeadFuelMoisture(0.64, 0.05, 0.60, 0.05)
+        return DeadFuelMoisture._clone_from_template(DeadFuelMoisture._template_10hr)
 
     @staticmethod
     def createDeadFuelMoisture100():
         """Create 100-hour fuel moisture model."""
-        return DeadFuelMoisture(2.00, 5.0, 0.40, 0.005)
+        if DeadFuelMoisture._template_100hr is None:
+            DeadFuelMoisture._template_100hr = DeadFuelMoisture(2.00, 5.0, 0.40, 0.005)
+        return DeadFuelMoisture._clone_from_template(DeadFuelMoisture._template_100hr)
 
     @staticmethod
     def createDeadFuelMoisture1000():
         """Create 1000-hour fuel moisture model (large logs)."""
-        return DeadFuelMoisture(6.40, 7.5, 0.32, 0.003)
+        if DeadFuelMoisture._template_1000hr is None:
+            DeadFuelMoisture._template_1000hr = DeadFuelMoisture(6.40, 7.5, 0.32, 0.003)
+        return DeadFuelMoisture._clone_from_template(DeadFuelMoisture._template_1000hr)
 
     def initialized(self):
         """Check if environment has been initialized."""
@@ -652,7 +916,8 @@ class DeadFuelMoisture:
         """Update moisture state for elapsed time.
 
         This is the main computational method. Inner loops are JIT-compiled
-        when Numba is available.
+        when Numba is available. The outer loop uses local variable caching
+        and math.exp/math.log for scalar operations to minimize overhead.
 
         Args:
             et (float): Elapsed time (hours).
@@ -684,210 +949,123 @@ class DeadFuelMoisture:
             print(f"DeadFuelMoisture::update() has an out-of-range air temperature of {at} oC.")
             return False
 
-        sW = max(0.0, sW)
+        if sW < 0.0:
+            sW = 0.0
         if sW > 2000.0:
             print(f"DeadFuelMoisture::update() has an out-of-range solar insolation of {sW} W/m2.")
             return False
 
         # Save previous weather values
-        self.m_ta0 = self.m_ta1
-        self.m_ha0 = self.m_ha1
-        self.m_sv0 = self.m_sv1
-        self.m_rc0 = self.m_rc1
-        self.m_ra0 = self.m_ra1
-        self.m_bp0 = self.m_bp1
+        ta0 = self.m_ta1
+        ha0 = self.m_ha1
+        sv0 = self.m_sv1
+        rc0 = self.m_rc1
+        ra0 = self.m_ra1
+        bp0_old = self.m_bp1
+        self.m_ta0 = ta0
+        self.m_ha0 = ha0
+        self.m_sv0 = sv0
+        self.m_rc0 = rc0
+        self.m_ra0 = ra0
+        self.m_bp0 = bp0_old
 
         # Save current weather values
+        sv1 = sW / Smv
         self.m_ta1 = at
         self.m_ha1 = rh
-        self.m_sv1 = sW / Smv
+        self.m_sv1 = sv1
         self.m_rc1 = rcum
         self.m_bp1 = bpr
         self.m_et = et
 
         # Precipitation calculations
-        self.m_ra1 = self.m_rc1 - self.m_rc0
-        self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur
-        self.m_pptrate = self.m_ra1 / et / Pi
-        self.m_mdt = et / self.m_mSteps
-        self.m_mdt_2 = self.m_mdt * 2.0
-        self.m_sf = 3600.0 * self.m_mdt / (self.m_dx_2 * self.m_density)
-        self.m_ddt = et / self.m_dSteps
+        ra1 = rcum - rc0
+        self.m_ra1 = ra1
+        m_rdur = 0.0 if ra1 < 0.0001 else self.m_rdur
+        self.m_rdur = m_rdur
+        pptrate = ra1 / et / Pi
+        self.m_pptrate = pptrate
+        m_mSteps = self.m_mSteps
+        mdt = et / m_mSteps
+        self.m_mdt = mdt
+        mdt_2 = mdt * 2.0
+        self.m_mdt_2 = mdt_2
+        m_dx = self.m_dx
+        self.m_sf = 3600.0 * mdt / (self.m_dx_2 * self.m_density)
+        m_dSteps = self.m_dSteps
+        ddt = et / m_dSteps
+        self.m_ddt = ddt
 
-        rai0 = self.m_mdt * self.m_rai0 * (1.0 - np.exp(-100.0 * self.m_pptrate))
-        if self.m_ha1 < self.m_ha0:
+        rai0 = mdt * self.m_rai0 * (1.0 - math.exp(-100.0 * pptrate))
+        if rh < ha0:
             if self.m_rampRai0:
-                rai0 *= (1.0 - ((self.m_ha0 - self.m_ha1) / self.m_ha0))
+                rai0 *= (1.0 - ((ha0 - rh) / ha0))
             else:
                 rai0 *= 0.15
-        rai1 = self.m_mdt * self.m_rai1 * self.m_pptrate
+        rai1 = mdt * self.m_rai1 * pptrate
 
-        # State tracking
-        tstate = [0] * 11
-        ddtNext = self.m_ddt
-        tt = self.m_mdt
+        # Time-stepping control
+        ddtNext = ddt
+        tt = mdt
 
-        # Pre-generate random values for perturbation if enabled
-        # (random.random() is not supported in Numba nopython mode)
-        if self.m_pertubateColumn:
-            random_vals = np.array([self.uniformRandom(-0.0001, 0.0001)
-                                   for _ in range(self.m_nodes)], dtype=np.float64)
-        else:
-            random_vals = None
+        # Perturbation flag
+        perturbate = self.m_pertubateColumn
 
-        # Main time-stepping loop
-        num_steps = int(et / self.m_mdt) + 1
-        for nstep in range(1, num_steps):
-            tfract = tt / et
-            ta = self.m_ta0 + (self.m_ta1 - self.m_ta0) * tfract
-            ha = self.m_ha0 + (self.m_ha1 - self.m_ha0) * tfract
-            sv = self.m_sv0 + (self.m_sv1 - self.m_sv0) * tfract
-            bp = self.m_bp0 + (self.m_bp1 - self.m_bp0) * tfract
-            fsc = sv / Srf
-            tka = ta + Kelvin
-            tdw = 5205.0 / ((5205.0 / tka) - np.log(ha))
-            tdp = tdw - Kelvin
-            tsk = Tcn + Kelvin if fsc < 0.000001 else Tcd + Kelvin
-            hr = Hrn if fsc < 0.000001 else Hrd
-            sr = 0.0 if fsc < 0.000001 else Srf * fsc
-            psa = 0.0000239 * np.exp(20.58 - (5205.0 / tka))
-            pa = ha * psa
-            psd = 0.0000239 * np.exp(20.58 - (5205.0 / tdw))
-            self.m_rdur = 0.0 if self.m_ra1 < 0.0001 else self.m_rdur + self.m_mdt
+        # Cache instance attributes used in JIT call
+        m_nodes = self.m_nodes
+        m_w = self.m_w
+        m_s = self.m_s
+        m_t = self.m_t
+        m_d = self.m_d
+        m_x = self.m_x
+        m_Twold = self.m_Twold
+        m_Tsold = self.m_Tsold
+        m_Ttold = self.m_Ttold
+        m_Tv = self.m_Tv
+        m_To = self.m_To
+        m_Tg = self.m_Tg
+        m_wmax = self.m_wmax
+        m_wmx = self.m_wmx
+        m_wfilmk = self.m_wfilmk
+        m_dx = self.m_dx
 
-            # Surface node calculations
-            tfd = ta + (sr - hr * (ta - tsk + Kelvin)) / (hr + self.m_hc)
-            qv = 13550.0 - 10.22 * (tfd + Kelvin)
-            qw = 5040.0 * np.exp(-14.0 * self.m_w[0])
-            hw = (self.m_hwf * Ap / 0.24) * qv / 18.0
-            self.m_t[0] = tfd - (hw * (tfd - ta) / (hr + self.m_hc + hw))
-            tkf = self.m_t[0] + Kelvin
-            gnu = 0.00439 + 0.00000177 * (338.76 - tkf) ** 2.1237
+        # Main time-stepping loop (JIT-compiled)
+        num_steps = int(et / mdt) + 1
+        tstate_arr = np.zeros(11, dtype=np.int64)
 
-            c1 = 0.1617 - 0.001419 * self.m_t[0]
-            c2 = 0.4657 + 0.003578 * self.m_t[0]
-            self.m_wsa = c1 * Wsf ** c2
-            wdiff = self.m_wmax - self.m_wsa
-            wdiff = max(0.000001, wdiff)
-            ps1 = 0.0000239 * np.exp(20.58 - (5205.0 / tkf))
-            p1 = pa + Ap * bp * (qv / (qv + qw)) * (tka - tkf)
-            p1 = max(0.000001, p1)
-            self.m_hf = min(p1 / ps1, Hfs)
-            hf_log = -np.log(1.0 - self.m_hf)
-            self.m_sem = c1 * hf_log ** c2
+        result = _update_internal_loop(
+            num_steps, et, mdt, mdt_2,
+            ta0, at, ha0, rh, sv0, sv1, bp0_old, bpr,
+            m_w, m_s, m_t, m_d, m_x,
+            m_Twold, m_Tsold, m_Ttold, m_Tv, m_To, m_Tg,
+            m_nodes, m_dx, self.m_density,
+            m_wmax, m_wmx, m_wfilmk, self.m_vf, self.m_hc, self.m_hwf,
+            self.m_stca, self.m_stcd, self.m_stv,
+            self.m_allowRainstorm, self.m_allowRainfall2, self.m_amlf, self.m_capf,
+            ra1, self.m_rdur, pptrate,
+            rai0, rai1,
+            ddt, self.m_wsa, self.m_hf,
+            perturbate,
+            tstate_arr,
+            tt, ddtNext
+        )
 
-            # State machine for surface moisture
-            self.m_state = 0
-            self.m_wfilm = 0.0
-            aml = 0.0
-            bi = 0.0
-            s_new = self.m_s[0]
-            w_new = self.m_w[0]
-            w_old = self.m_w[0]
-
-            if self.m_ra1 > 0.0:
-                if self.m_allowRainstorm and self.m_pptrate >= self.m_stv:
-                    self.m_state = 8
-                    self.m_wfilm = self.m_wfilmk
-                    w_new = self.m_wmx
-                else:
-                    if self.m_rdur < 1.0 or not self.m_allowRainfall2:
-                        self.m_state = 6
-                        w_new = w_old + rai0
-                    else:
-                        self.m_state = 7
-                        w_new = w_old + rai1
-                self.m_wfilm = self.m_wfilmk
-                s_new = (w_new - self.m_wsa) / wdiff
-                self.m_t[0] = tfd
-                self.m_hf = Hfs
-            else:
-                if w_old > self.m_wsa:
-                    p1 = ps1
-                    self.m_hf = Hfs
-                    aml = self.m_amlf * (ps1 - psd) / bp
-                    if self.m_t[0] <= tdp and p1 > psd:
-                        aml = 0.0
-                    w_new = w_old - aml * self.m_mdt_2
-                    if aml > 0.0:
-                        w_new -= (self.m_mdt * self.m_capf / gnu)
-                    w_new = min(self.m_wmx, w_new)
-                    s_new = (w_new - self.m_wsa) / wdiff
-                    if w_new > w_old:
-                        self.m_state = 3
-                    elif w_new == w_old:
-                        self.m_state = 9
-                    else:
-                        self.m_state = 5
-                elif self.m_t[0] <= tdp:
-                    self.m_state = 4
-                    aml = 0.0 if p1 > psd else self.m_amlf * (p1 - psd) / bp
-                    w_new = w_old - aml * self.m_mdt_2
-                    s_new = (w_new - self.m_wsa) / wdiff
-                else:
-                    if w_old >= self.m_sem:
-                        self.m_state = 2
-                        bi = self.m_stcd * self.m_dx / self.m_d[0]
-                    else:
-                        self.m_state = 1
-                        bi = self.m_stca * self.m_dx / self.m_d[0]
-                    w_new = (self.m_w[1] + bi * self.m_sem) / (1.0 + bi)
-                    s_new = 0.0
-
-            self.m_w[0] = min(self.m_wmx, w_new)
-            self.m_s[0] = max(0.0, s_new)
-            tstate[self.m_state] += 1
-
-            # Prepare coefficients using JIT kernel
-            _prepare_coefficients(
-                self.m_nodes, self.m_w, self.m_s, self.m_t, self.m_d, self.m_x,
-                self.m_Twold, self.m_Tsold, self.m_Ttold, self.m_Tv, self.m_To
-            )
-
-            if self.m_state != 9:
-                # Compute gravity drainage coefficients
-                _compute_gravity_drainage(
-                    self.m_nodes, self.m_w, self.m_wsa, wdiff, gnu,
-                    self.m_x, self.m_vf, self.m_Tg
-                )
-
-                # Solve saturation diffusion
-                _solve_saturation(
-                    self.m_nodes, self.m_dx, self.m_mdt, self.m_x,
-                    self.m_Tg, self.m_Tsold, self.m_s
-                )
-
-                # Update moisture based on liquid continuity
-                continuousLiquid = _check_continuous_liquid(self.m_nodes, self.m_s)
-
-                if continuousLiquid:
-                    # Generate new random values for this step if perturbation enabled
-                    if self.m_pertubateColumn:
-                        for i in range(self.m_nodes):
-                            random_vals[i] = self.uniformRandom(-0.0001, 0.0001)
-                    _update_moisture_continuous(
-                        self.m_nodes, self.m_wsa, wdiff, self.m_wmx,
-                        self.m_s, self.m_w, random_vals
-                    )
-                else:
-                    _update_moisture_diffusion(
-                        self.m_nodes, self.m_dx, self.m_mdt, self.m_wmx,
-                        self.m_x, self.m_To, self.m_Twold, self.m_w
-                    )
-
-            # Update temperature using JIT kernel
-            _update_temperature(
-                self.m_nodes, self.m_dx, self.m_mdt,
-                self.m_x, self.m_Tv, self.m_Ttold, self.m_t
-            )
-
-            # Periodically recalculate diffusivity
-            if (ddtNext - tt) < (0.5 * self.m_mdt):
-                self.diffusivity(bp)
-                ddtNext += self.m_ddt
+        # Write back scalar results
+        self.m_rdur = result[0]
+        self.m_wsa = result[1]
+        self.m_hf = result[2]
+        self.m_wfilm = result[3]
+        self.m_state = int(result[4])
+        self.m_sem = result[5]
 
         # Set final state to most common state
-        self.m_state = tstate.index(max(tstate))
+        most_common = 0
+        max_count = tstate_arr[0]
+        for i in range(1, 11):
+            if tstate_arr[i] > max_count:
+                max_count = tstate_arr[i]
+                most_common = i
+        self.m_state = most_common
         return True
 
     def zero(self):

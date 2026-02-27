@@ -261,6 +261,9 @@ class PredictorSerializer:
         predictor._visualizer = None  # No visualizer in worker
         predictor._finished = False
 
+        # Pre-allocated buffer for propagate_fire JIT kernel
+        predictor._new_ixn_buf = np.empty(12, dtype=np.int64)
+
         # Empty containers (will be populated by _set_states)
         predictor._updated_cells = {}
         predictor._cell_dict = {}
@@ -385,6 +388,10 @@ class PredictorSerializer:
         # Sync grid manager's internal state with restored cells
         predictor._grid_manager._cell_grid = predictor.orig_grid
         predictor._grid_manager._cell_dict = predictor.orig_dict
+
+        # Flag to skip redundant reset_to_fuel on first run — cells are already
+        # in initial FUEL state from the template, and set_parent was just called.
+        predictor._skip_first_reset = True
 
         # =====================================================================
         # Phase 4: Rebuild lightweight components

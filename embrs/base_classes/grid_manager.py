@@ -146,8 +146,6 @@ class GridManager:
                 if progress_callback is not None:
                     progress_callback(1)
 
-        self._build_spatial_index()
-
     def _build_spatial_index(self) -> None:
         """Build R-tree spatial index over all cell polygons.
 

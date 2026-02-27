@@ -21,6 +21,7 @@ References:
     USDA Forest Service General Technical Report RMRS-GTR-153.
 """
 import numpy as np
+import math
 import os
 import json
 from embrs.utilities.unit_conversions import *
@@ -114,7 +115,7 @@ class Fuel:
             self.rat = self.beta / self.beta_op
             self.A = 133 * self.sav_ratio ** (-0.7913)
             self.gammax = (self.sav_ratio ** 1.5) / (495 + 0.0594 * self.sav_ratio ** 1.5)
-            self.gamma = self.gammax * (self.rat ** self.A) * np.exp(self.A*(1-self.rat))
+            self.gamma = self.gammax * (self.rat ** self.A) * math.exp(self.A*(1-self.rat))
             self.rho_b = np.sum(self.w_0) / self.fuel_depth_ft
             self.flux_ratio = self.calc_flux_ratio()
             self.E, self.B, self.C = self.calc_E_B_C()
@@ -135,7 +136,7 @@ class Fuel:
             float: Propagating flux ratio (dimensionless).
         """
         packing_ratio = self.rho_b / self.rho_p
-        flux_ratio = (192 + 0.2595*self.sav_ratio)**(-1) * np.exp((0.792 + 0.681*np.sqrt(self.sav_ratio))*(packing_ratio + 0.1))
+        flux_ratio = (192 + 0.2595*self.sav_ratio)**(-1) * math.exp((0.792 + 0.681*math.sqrt(self.sav_ratio))*(packing_ratio + 0.1))
 
         return flux_ratio
 
@@ -152,9 +153,9 @@ class Fuel:
 
         sav_ratio = self.sav_ratio
 
-        E = 0.715 * np.exp(-3.59e-4 * sav_ratio)
+        E = 0.715 * math.exp(-3.59e-4 * sav_ratio)
         B = 0.02526 * sav_ratio ** 0.54
-        C = 7.47 * np.exp(-0.133 * sav_ratio**0.55)
+        C = 7.47 * math.exp(-0.133 * sav_ratio**0.55)
 
         return E, B, C
 
@@ -267,15 +268,15 @@ class Fuel:
 
         for i in range(4):
             if s[i] != 0:
-                num += w[i] * np.exp(-138/s[i])
+                num += w[i] * math.exp(-138/s[i])
 
         den = 0
         for i in range(4, 6):
             if s[i] != 0:
-                den += w[i] * np.exp(-500/s[i])
+                den += w[i] * math.exp(-500/s[i])
 
         if den == 0:
-            W = np.inf # Live moisture does not apply here
+            W = math.inf # Live moisture does not apply here
         
         else:
             W = num/den

@@ -333,7 +333,7 @@ class TestCellResetToFuel:
         configured_cell.r_t = np.array([0.5, 0.6, 0.7])
         configured_cell.has_steady_state = True
         configured_cell.e = 0.8
-        configured_cell.intersections = {1, 2, 3}
+        configured_cell.intersections = np.array([False, True, True, True, False, False], dtype=np.bool_)
 
         configured_cell.reset_to_fuel()
 

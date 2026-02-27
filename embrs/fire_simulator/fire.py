@@ -82,41 +82,49 @@ class FireSim(BaseFireSim):
         if self._init_iteration():
             self._finished = True
             return
-        
+
         # Loop over surface fires
+        # Cache frequently-accessed attributes and methods for tight loop
+        weather_changed = self.weather_changed
+        weather_idx = self._curr_weather_idx
+        weather_stream = self._weather_stream
+        ts = self.time_step
+        updated_cells = self._updated_cells
+        burnt_cells = self._burnt_cells
+        update_steady = self.update_steady_state
+        propagate = self.propagate_fire
+        remove_nbrs = self.remove_neighbors
+
         # Track cells to remove (avoids copying entire list)
         cells_to_remove = []
         for cell in self._burning_cells:
             if cell.fully_burning:
                 cell._set_state(CellStates.BURNT)
-                self._burnt_cells.add(cell)
+                burnt_cells.add(cell)
                 cells_to_remove.append(cell)
-                self._updated_cells[cell.id] = cell
+                updated_cells[cell.id] = cell
                 continue
 
             # Check if conditions have changed
-            if self.weather_changed or not cell.has_steady_state: 
-                # Update moisture in cell
-                cell._update_moisture(self._curr_weather_idx, self._weather_stream)
+            if weather_changed or not cell.has_steady_state:
+                cell._update_moisture(weather_idx, weather_stream)
+                update_steady(cell)
 
-                # Updates the cell's steady-state rate of spread and fireline intensity
-                # Also checks for crown fire initiation
-                self.update_steady_state(cell)
-
-            # Set real time ROS and fireline intensity (vals stored in cell.avg_ros, cell.I_t)
-            accelerate(cell, self.time_step)
+            # Set real time ROS and fireline intensity
+            accelerate(cell, ts)
 
             # Update extent of fire along each direction and check for ignition
-            self.propagate_fire(cell)
+            propagate(cell)
 
             # Remove any neighbors that are no longer burnable
-            self.remove_neighbors(cell)
+            remove_nbrs(cell)
 
-            self._updated_cells[cell.id] = cell
+            updated_cells[cell.id] = cell
 
         # Remove fully burned cells after iteration completes
-        for cell in cells_to_remove:
-            self._burning_cells.remove(cell)
+        if cells_to_remove:
+            remove_set = set(cells_to_remove)
+            self._burning_cells = [c for c in self._burning_cells if c not in remove_set]
 
         # Get set of spot fires started in this time step
         if self.model_spotting and self._spot_ign_prob > 0:
