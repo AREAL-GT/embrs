@@ -615,9 +615,14 @@ class FirePredictor(BaseFireSim):
             for cell in self._burning_cells:
                 if weather_changed or not cell.has_steady_state:
                     update_steady(cell)
-                    cell.r_t = cell.r_ss * ros_bias
-                    cell.avg_ros = cell.r_ss * ros_bias
-                    cell.I_t = cell.I_ss * ros_bias
+                    # cell.r_t = cell.r_ss * ros_bias
+                    # cell.avg_ros = cell.r_ss * ros_bias
+                    # cell.I_t = cell.I_ss * ros_bias
+
+                accelerate(cell, self._time_step)
+                cell.r_t *= ros_bias
+                cell.avg_ros *= ros_bias
+                cell.I_t *= ros_bias
 
                 propagate(cell)
                 remove_nbrs(cell)
@@ -854,6 +859,16 @@ class FirePredictor(BaseFireSim):
             # Set the burning cells based on provided estimate
             if state_estimate.burning_polys:
                 self._set_initial_ignition(state_estimate.burning_polys)
+
+            # Populate scheduled future ignitions (for staggered strip firing rollouts)
+            if state_estimate.scheduled_ignitions:
+                for ign_time_s, polys in state_estimate.scheduled_ignitions.items():
+                    cells_at_time = []
+                    for poly in polys:
+                        cells = self.get_cells_at_geometry(poly)
+                        cells_at_time.extend(cells)
+                    if cells_at_time:
+                        self._scheduled_spot_fires[ign_time_s] = cells_at_time
 
     # =========================================================================
     # Weather & Wind

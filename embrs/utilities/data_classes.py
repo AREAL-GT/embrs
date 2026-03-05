@@ -566,11 +566,16 @@ class StateEstimate:
         burning_polys (List[Polygon]): Polygons of actively burning area.
         start_time_s (Optional[float]): Start time in seconds from simulation start.
             If None, uses current fire simulation time.
+        scheduled_ignitions (Optional[Dict[float, List[Polygon]]]): Future ignitions
+            keyed by absolute simulation time (seconds). Used for staggered strip
+            firing rollouts. Polygons are resolved to cells inside the worker
+            process via get_cells_at_geometry().
     """
 
     burnt_polys: List[Polygon]
     burning_polys: List[Polygon]
     start_time_s: Optional[float] = None
+    scheduled_ignitions: Optional[Dict[float, List[Polygon]]] = None
 
 @dataclass
 class CellStatistics:
