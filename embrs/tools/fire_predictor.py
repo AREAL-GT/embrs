@@ -35,6 +35,7 @@ from embrs.utilities.fire_util import UtilFuncs, CellStates
 from embrs.models.rothermel import *
 from embrs.models.crown_model import *
 from embrs.models.wind_forecast import run_windninja, temp_file_path
+from embrs.models.perryman_spot import PerrymanSpotting
 
 if TYPE_CHECKING:
     from embrs.models.weather import WeatherStream
@@ -635,7 +636,7 @@ class FirePredictor(BaseFireSim):
 
                 updated_cells[cell.id] = cell
 
-            if model_spotting and nom_ign_prob > 0:
+            if (model_spotting and nom_ign_prob > 0) or self._scheduled_spot_fires:
                 self._ignite_spots()
 
             self.update_control_interface_elements()
@@ -869,6 +870,9 @@ class FirePredictor(BaseFireSim):
                         cells_at_time.extend(cells)
                     if cells_at_time:
                         self._scheduled_spot_fires[ign_time_s] = cells_at_time
+
+                if not self.model_spotting:
+                    self.embers = PerrymanSpotting(0, (self.x_lim, self.y_lim))
 
     # =========================================================================
     # Weather & Wind
