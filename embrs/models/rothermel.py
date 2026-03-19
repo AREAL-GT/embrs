@@ -92,14 +92,17 @@ def surface_fire(cell: Cell):
         ``cell.alpha`` (radians), and ``cell.e`` (eccentricity) on the cell.
     """
     R_h, R_0, I_r, alpha = calc_r_h(cell)
+
     cell.alpha = alpha
     spread_directions = np.deg2rad(cell.directions)
     
     if R_h < R_0 or R_0 == 0:
-        I_list = np.zeros_like(spread_directions)
-        r_list = np.zeros_like(spread_directions)
-
-        return np.array(r_list), np.array(I_list)
+        cell.r_ss = np.zeros_like(spread_directions)
+        cell.I_ss = np.zeros_like(spread_directions)
+        cell.r_h_ss = 0.0
+        cell.reaction_intensity = 0
+        cell.e = 0
+        return
 
     cell.reaction_intensity = I_r
 
@@ -232,7 +235,7 @@ def calc_r_h(cell: Cell, R_0: float = None, I_r: float = None) -> Tuple[float, f
     if R_0 is None or I_r is None:
         R_0, I_r = calc_r_0(fuel, m_f)
 
-    if R_0 == 0:
+    if R_0 <= 1e-12:
         # No spread in this cell
         return 0, 0, 0, 0
 

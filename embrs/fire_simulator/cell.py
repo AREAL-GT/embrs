@@ -112,6 +112,10 @@ class Cell:
         # Track the total amount of water dropped (if modelled as rain)
         self.local_rain = 0.0
 
+        # Van Wagner energy-balance water suppression (Van Wagner & Taylor 2022)
+        self.water_applied_kJ = 0.0   # Cumulative cooling energy from water drops
+        self._vw_efficiency = 2.5     # Application efficiency multiplier (Table 4)
+
         # Width in meters of any fuel discontinuity within cell (road or firebreak)
         self._break_width = 0 
 
@@ -169,6 +173,7 @@ class Cell:
         self.distances = None
         self.directions = None
         self.end_pts = None
+        self._ign_n_loc = None
         self.r_h_ss = None
         self.I_h_ss = None
         self.r_t = _RESET_ARRAY_ZERO
@@ -187,6 +192,8 @@ class Cell:
         self._retardant_factor = 1.0
         self.retardant_expiration_s = -1.0
         self.local_rain = 0.0
+        self.water_applied_kJ = 0.0
+        self._vw_efficiency = 2.5
         self._break_width = 0
         self.breached = True
         self.lofted = False
@@ -293,6 +300,7 @@ class Cell:
         self.distances = None
         self.directions = None
         self.end_pts = None
+        self._ign_n_loc = None  # Set when cell ignites via get_ign_params()
 
         # Heading rate of spread and fireline intensity
         self.r_h_ss = None
@@ -414,6 +422,7 @@ class Cell:
             - Sets self.end_pts: coordinates of cell boundary points.
             - Initializes self.avg_ros, self.I_t, self.r_t to zero arrays.
         """
+        self._ign_n_loc = n_loc
         self.directions, distances, self.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
         self.project_distances_to_surf(distances)
         self.avg_ros = np.zeros_like(self.directions)
@@ -736,7 +745,7 @@ class Cell:
         Side Effects:
             - Updates the `_state` attribute with the given state.
             - If the state is `CellStates.FIRE`, initializes fire spread-related attributes:
-                - `fire_spread`: Tracks fire spread rates in different directions.
+                - `fire_spread`: Tracks fire spread extent in different directions.
                 - `r_ss`: Stores steady-state rates of spread.
                 - `I_ss`: Stores steady-state fireline intensity values.
         """
@@ -826,6 +835,8 @@ class Cell:
             # Set dead herbaceous moisture to 1-hr value
             self.fmois[3] = self.fmois[0]
 
+        self.has_steady_state = False
+
     def water_drop_as_moisture_bump(self, moisture_bump: float):
         """Apply a water drop as a direct fuel moisture increase.
 
@@ -871,6 +882,90 @@ class Cell:
             # Set dead herbaceous moisture to 1-hr value
             self.fmois[3] = self.fmois[0]
 
+        self.has_steady_state = False
+
+    def water_drop_vw(self, volume_L: float, efficiency: float = 2.5,
+                       T_a: float = 20.0):
+        """Apply water using Van Wagner (2022) energy-balance model.
+
+        Converts water volume to cooling energy (Eq. 1b) and accumulates in
+        water_applied_kJ. Moisture injection is applied during iterate() by
+        apply_vw_suppression().
+
+        Args:
+            volume_L: Water volume in liters (1 L = 1 kg).
+            efficiency: Application efficiency multiplier (Table 4, Van Wagner
+                2022). Typical range 2.0–4.0. Default 2.5.
+            T_a: Ambient air temperature in °C. Default 20.
+
+        Raises:
+            ValueError: If volume_L < 0.
+        """
+        if volume_L < 0:
+            raise ValueError(f"Water volume must be >= 0, got {volume_L}")
+
+        if not self.fuel.burnable:
+            return
+
+        from embrs.models.van_wagner_water import volume_L_to_energy_kJ
+
+        self._vw_efficiency = efficiency
+        energy_kJ = volume_L_to_energy_kJ(volume_L, T_a)
+        self.water_applied_kJ += energy_kJ
+        self.has_steady_state = False
+
+    def apply_vw_suppression(self):
+        """Apply moisture injection from accumulated Van Wagner water energy.
+
+        Called by iterate() for cells with water_applied_kJ > 0. Computes
+        suppression ratio from current fire state, then injects moisture
+        toward dead_mx proportionally.
+
+        Uses:
+            - I_ss (BTU/ft/min) converted to kW/m
+            - fuel.w_n_dead + w_n_live (lb/ft²) converted to kg/m²
+            - fire_area_m2 property
+            - self._vw_efficiency (stored from water_drop_vw call)
+            - heat_to_extinguish_kJ() (Eq. 7b + 10b + Table 4)
+            - compute_suppression_ratio()
+            - compute_moisture_injection()
+
+        Side Effects:
+            - Modifies self.fmois
+            - Sets self.has_steady_state = False
+        """
+        from embrs.models.van_wagner_water import (
+            heat_to_extinguish_kJ, compute_suppression_ratio,
+            compute_moisture_injection
+        )
+        from embrs.utilities.unit_conversions import BTU_ft_min_to_kW_m, Lbsft2_to_KiSq
+
+        # Convert fireline intensity from BTU/(ft·min) to kW/m
+        # I_ss is a numpy array; use head-fire value (max or index 0)
+        I_btu = max(self.I_t) if len(self.I_t) > 0 else 0.0
+        I_kW_m = BTU_ft_min_to_kW_m(I_btu)
+
+        # Dead fuel loading in kg/m² (w_n_dead is in lb/ft²)
+        W_1_kg_m2 = Lbsft2_to_KiSq(self.fuel.w_n_dead)
+
+        # Current fire area
+        area_m2 = self.fire_area_m2
+
+        # Compute energy needed to extinguish
+        heat_needed = heat_to_extinguish_kJ(
+            I_kW_m, W_1_kg_m2, area_m2,
+            efficiency=self._vw_efficiency
+        )
+
+        # Suppression ratio
+        ratio = compute_suppression_ratio(self.water_applied_kJ, heat_needed)
+
+        # Inject moisture into dead fuel classes toward extinction
+        self.fmois = compute_moisture_injection(
+            self.fmois, self.fuel.dead_mx, ratio
+        )
+
+        self.has_steady_state = False
 
     def __str__(self) -> str:
         """Returns a formatted string representation of the cell.
@@ -1126,6 +1221,47 @@ class Cell:
     def cell_area(self) -> float:
         """Area of the cell in square meters."""
         return self._cell_area
+
+    @property
+    def fire_area_m2(self) -> float:
+        """Estimated fire area within cell based on elliptical spread extent.
+
+        Uses per-direction fire_spread distances to approximate ellipse semi-axes,
+        then applies a geometric correction factor based on ignition origin:
+
+          n_loc 0          (center):      full ellipse,     fraction = 1.0
+          n_loc odd        (edge mid):    half-ellipse,     fraction = 0.5
+          n_loc even > 0   (corner):      60-degree sector, fraction = 1/6
+
+        n_loc follows a clock-face convention: 0=center, odd=edge midpoints,
+        even non-zero=corners.
+
+        Raw ellipse area is clamped to cell_area as an upper bound, handling
+        mature fires where the ellipse has grown beyond the cell boundary.
+
+        Returns 0.0 for non-burning cells, cells with no spread data, or
+        cells where _ign_n_loc has not yet been set.
+        """
+        if self._state != CellStates.FIRE or len(self.fire_spread) == 0:
+            return 0.0
+
+        if self._ign_n_loc is None:
+            return 0.0
+
+        a = float(np.max(self.fire_spread))
+        b = float(np.median(self.fire_spread))
+
+        if a <= 0.0:
+            return 0.0
+
+        if self._ign_n_loc == 0:
+            area_fraction = 1.0
+        elif self._ign_n_loc % 2 == 1:   # odd — edge midpoint
+            area_fraction = 0.5
+        else:                              # even non-zero — corner
+            area_fraction = 1 / 6
+
+        return min(np.pi * a * b * area_fraction, self._cell_area)
 
     @property
     def x_pos(self) -> float:

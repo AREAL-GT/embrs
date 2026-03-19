@@ -21,7 +21,8 @@ from embrs.models.rothermel import (
     calc_eccentricity,
     calc_flame_len,
     calc_r_h,
-    calc_vals_for_all_directions
+    calc_vals_for_all_directions,
+    surface_fire
 )
 from embrs.models.fuel_models import Anderson13, ScottBurgan40
 from embrs.fire_simulator.cell import Cell
@@ -308,3 +309,94 @@ class TestEdgeCases:
         m_x = 0.0
         result = calc_moisture_damping(m_f, m_x)
         assert result == 0.0
+
+
+class TestSurfaceFire:
+    """Tests for surface_fire() cell attribute writes, especially the early-return path."""
+
+    @pytest.fixture
+    def fire_cell(self):
+        """Create a Cell configured for surface_fire() calls.
+
+        Uses Anderson13(1) (short grass, dead-only, dead_mx=0.12).
+        """
+        fuel = Anderson13(1)
+        cell_data = CellData(
+            fuel_type=fuel,
+            elevation=0,
+            aspect=0,
+            slope_deg=0,
+            canopy_cover=0.0,
+            canopy_height=0.0,
+            canopy_base_height=0.0,
+            canopy_bulk_density=0.0,
+            init_dead_mf=[0.06, 0.06, 0.06],
+            live_h_mf=0.0,
+            live_w_mf=0.0,
+        )
+        cell = Cell(0, 0, 0, 30)
+        cell._set_cell_data(cell_data)
+
+        parent = MagicMock()
+        parent._curr_weather_idx = 0
+        parent.sim_start_w_idx = 0
+        cell.set_parent(parent)
+
+        cell.directions, distances, cell.end_pts = UtilFuncs.get_ign_parameters(0, cell.cell_size)
+
+        wind_speed_ft_min = mph_to_ft_min(5)
+        cell.forecast_wind_speeds = [wind_speed_ft_min]
+        cell.forecast_wind_dirs = [0]
+        return cell
+
+    def test_surface_fire_zeros_cell_when_moisture_at_extinction(self, fire_cell):
+        """When dead fuel moisture >= extinction, surface_fire should zero all spread attributes."""
+        # Set stale nonzero values that should be overwritten
+        n = len(fire_cell.directions)
+        fire_cell.r_ss = np.ones(n)
+        fire_cell.I_ss = np.ones(n)
+        fire_cell.r_h_ss = 1.0
+        fire_cell.reaction_intensity = 100
+        fire_cell.e = 0.5
+
+        # Set moisture at extinction (dead_mx=0.12 for Anderson13(1))
+        fire_cell.fmois = np.array([0.15, 0.15, 0.15, 0.15, 0.0, 0.0])
+
+        result = surface_fire(fire_cell)
+
+        assert result is None
+        np.testing.assert_array_equal(fire_cell.r_ss, np.zeros(n))
+        np.testing.assert_array_equal(fire_cell.I_ss, np.zeros(n))
+        assert fire_cell.r_h_ss == 0.0
+        assert fire_cell.reaction_intensity == 0
+        assert fire_cell.e == 0
+
+    def test_surface_fire_sets_nonzero_values_for_active_fire(self, fire_cell):
+        """With low moisture, surface_fire should produce nonzero spread rates."""
+        fire_cell.fmois = np.array([0.04, 0.04, 0.04, 0.04, 0.0, 0.0])
+
+        surface_fire(fire_cell)
+
+        assert np.any(fire_cell.r_ss > 0)
+        assert np.any(fire_cell.I_ss > 0)
+        assert fire_cell.r_h_ss > 0
+        assert fire_cell.reaction_intensity > 0
+        assert fire_cell.e >= 0
+
+    def test_surface_fire_transition_from_active_to_extinguished(self, fire_cell):
+        """Raising moisture above extinction should zero spread after recalculation."""
+        # First call: low moisture, active fire
+        fire_cell.fmois = np.array([0.04, 0.04, 0.04, 0.04, 0.0, 0.0])
+        surface_fire(fire_cell)
+        assert np.any(fire_cell.r_ss > 0)
+
+        # Second call: high moisture, extinguished
+        fire_cell.fmois = np.array([0.15, 0.15, 0.15, 0.15, 0.0, 0.0])
+        surface_fire(fire_cell)
+
+        n = len(fire_cell.directions)
+        np.testing.assert_array_equal(fire_cell.r_ss, np.zeros(n))
+        np.testing.assert_array_equal(fire_cell.I_ss, np.zeros(n))
+        assert fire_cell.r_h_ss == 0.0
+        assert fire_cell.reaction_intensity == 0
+        assert fire_cell.e == 0

@@ -459,3 +459,141 @@ class TestCellResetToFuel:
         # DFMs should be re-initialized (m_init should be False)
         for dfm in configured_cell.dfms:
             assert dfm.initialized() == False
+
+
+class TestWaterDropSteadyStateInvalidation:
+    """Tests that water drop methods invalidate has_steady_state."""
+
+    @pytest.fixture
+    def burning_cell(self):
+        """Create a burning cell with has_steady_state=True."""
+        cell = Cell(id=0, col=5, row=5, cell_size=30.0)
+        cell_data = CellData(
+            fuel_type=Anderson13(1),
+            elevation=100.0,
+            aspect=0.0,
+            slope_deg=0.0,
+            canopy_cover=0.0,
+            canopy_height=0.0,
+            canopy_base_height=0.0,
+            canopy_bulk_density=0.0,
+            init_dead_mf=[0.06, 0.06, 0.06],
+            live_h_mf=0.0,
+            live_w_mf=0.0,
+        )
+        cell._set_cell_data(cell_data)
+
+        parent = MagicMock()
+        parent._curr_weather_idx = 0
+        parent.sim_start_w_idx = 0
+        parent.curr_time_s = 100.0
+        parent._weather_stream = MagicMock()
+        cell.set_parent(parent)
+        # Keep strong reference so weak ref doesn't die
+        cell._test_parent_ref = parent
+
+        cell.has_steady_state = True
+        return cell
+
+    @patch.object(Cell, '_catch_up_moisture_to_curr')
+    @patch.object(Cell, '_step_moisture')
+    def test_water_drop_as_rain_invalidates_steady_state(
+        self, mock_step, mock_catch_up, burning_cell
+    ):
+        """water_drop_as_rain should set has_steady_state=False."""
+        burning_cell.water_drop_as_rain(water_depth_cm=1.0, duration_s=60.0)
+
+        assert burning_cell.has_steady_state is False
+
+    @patch.object(Cell, '_catch_up_moisture_to_curr')
+    @patch.object(Cell, '_step_moisture')
+    def test_water_drop_as_moisture_bump_invalidates_steady_state(
+        self, mock_step, mock_catch_up, burning_cell
+    ):
+        """water_drop_as_moisture_bump should set has_steady_state=False."""
+        burning_cell.water_drop_as_moisture_bump(moisture_bump=0.10)
+
+        assert burning_cell.has_steady_state is False
+
+
+class TestWaterDropVW:
+    """Tests for Van Wagner energy-balance water drop on Cell."""
+
+    @pytest.fixture
+    def burnable_cell(self):
+        """Create a burnable cell for VW testing."""
+        cell = Cell(id=0, col=5, row=5, cell_size=30.0)
+        cell_data = CellData(
+            fuel_type=Anderson13(1),
+            elevation=100.0,
+            aspect=0.0,
+            slope_deg=0.0,
+            canopy_cover=0.0,
+            canopy_height=0.0,
+            canopy_base_height=0.0,
+            canopy_bulk_density=0.0,
+            init_dead_mf=[0.06, 0.06, 0.06],
+            live_h_mf=0.0,
+            live_w_mf=0.0,
+        )
+        cell._set_cell_data(cell_data)
+        return cell
+
+    def test_accumulates_energy(self, burnable_cell):
+        """Two drops should accumulate energy additively."""
+        from embrs.models.van_wagner_water import volume_L_to_energy_kJ
+
+        burnable_cell.water_drop_vw(10.0)
+        e1 = burnable_cell.water_applied_kJ
+
+        burnable_cell.water_drop_vw(5.0)
+        e2 = burnable_cell.water_applied_kJ
+
+        expected = volume_L_to_energy_kJ(10.0) + volume_L_to_energy_kJ(5.0)
+        assert e2 == pytest.approx(expected, rel=1e-10)
+        assert e2 > e1
+
+    def test_stores_efficiency(self, burnable_cell):
+        """_vw_efficiency should be updated from the parameter."""
+        burnable_cell.water_drop_vw(10.0, efficiency=3.5)
+        assert burnable_cell._vw_efficiency == pytest.approx(3.5)
+
+    def test_non_burnable_no_effect(self):
+        """Water on non-burnable cell should not accumulate energy."""
+        cell = Cell(id=0, col=0, row=0, cell_size=30.0)
+        cell_data = CellData(
+            fuel_type=Anderson13(91),
+            elevation=100.0,
+            aspect=0.0,
+            slope_deg=0.0,
+            canopy_cover=0.0,
+            canopy_height=0.0,
+            canopy_base_height=0.0,
+            canopy_bulk_density=0.0,
+        )
+        cell._set_cell_data(cell_data)
+
+        cell.water_drop_vw(10.0)
+        assert cell.water_applied_kJ == 0.0
+
+    def test_negative_volume_raises(self, burnable_cell):
+        """Negative volume should raise ValueError."""
+        with pytest.raises(ValueError, match="Water volume must be >= 0"):
+            burnable_cell.water_drop_vw(-1.0)
+
+    def test_sets_has_steady_state_false(self, burnable_cell):
+        """water_drop_vw should invalidate steady state."""
+        burnable_cell.has_steady_state = True
+        burnable_cell.water_drop_vw(10.0)
+        assert burnable_cell.has_steady_state is False
+
+    def test_reset_to_fuel_clears_water_applied_kJ(self, burnable_cell):
+        """reset_to_fuel should reset water_applied_kJ to 0."""
+        burnable_cell._neighbors = {}
+        burnable_cell._burnable_neighbors = {}
+        burnable_cell.water_drop_vw(10.0)
+        assert burnable_cell.water_applied_kJ > 0
+
+        burnable_cell.reset_to_fuel()
+        assert burnable_cell.water_applied_kJ == 0.0
+        assert burnable_cell._vw_efficiency == 2.5

@@ -106,8 +106,17 @@ class FireSim(BaseFireSim):
                 continue
 
             # Check if conditions have changed
-            if weather_changed or not cell.has_steady_state:
+            needs_update = weather_changed or not cell.has_steady_state
+
+            if needs_update:
                 cell._update_moisture(weather_idx, weather_stream)
+
+            # Van Wagner moisture injection (after DFM update, before surface_fire)
+            if cell.water_applied_kJ > 0:
+                cell.apply_vw_suppression()
+                needs_update = True
+
+            if needs_update:
                 update_steady(cell)
 
             # Set real time ROS and fireline intensity

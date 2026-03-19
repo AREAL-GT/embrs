@@ -34,6 +34,7 @@ _KISQ_TO_TPA = _TPA_TO_KISQ_DIVISOR  # 4.46
 # Heat flux conversions
 _BTU_FT2_MIN_TO_KW_M2 = 0.189276
 _BTU_FT_MIN_TO_KW_M = 0.05767
+_BTU_FT_MIN_TO_KCAL_S_M = _BTU_FT_MIN_TO_KW_M / 4.184  # ≈ 0.01378
 
 # Heat content conversions
 _CAL_G_TO_BTU_LB = 1.8
@@ -238,6 +239,18 @@ def BTU_ft_min_to_kW_m(f_btu_ft_min: float) -> float:
         float: Fireline intensity in kW/m.
     """
     return f_btu_ft_min * _BTU_FT_MIN_TO_KW_M
+
+
+def BTU_ft_min_to_kcal_s_m(f_btu_ft_min: float) -> float:
+    """Convert fireline intensity from BTU/(ft*min) to kcal/(s*m).
+
+    Args:
+        f_btu_ft_min (float): Fireline intensity in BTU/(ft*min).
+
+    Returns:
+        float: Fireline intensity in kcal/(s*m).
+    """
+    return f_btu_ft_min * _BTU_FT_MIN_TO_KCAL_S_M
 
 
 # ============================================================================

@@ -1485,6 +1485,53 @@ class BaseFireSim:
         """
         self._control_handler.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
+    def water_drop_at_xy_vw(self, x_m: float, y_m: float, volume_L: float,
+                             efficiency: float = 2.5, T_a: float = 20.0) -> None:
+        """Apply Van Wagner energy-balance water drop at the specified coordinates.
+
+        Args:
+            x_m (float): X position in meters.
+            y_m (float): Y position in meters.
+            volume_L (float): Water volume in liters (1 L = 1 kg).
+            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            T_a (float): Ambient air temperature in °C. Default 20.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_xy_vw().
+        """
+        self._control_handler.water_drop_at_xy_vw(x_m, y_m, volume_L, efficiency, T_a)
+
+    def water_drop_at_indices_vw(self, row: int, col: int, volume_L: float,
+                                  efficiency: float = 2.5, T_a: float = 20.0) -> None:
+        """Apply Van Wagner energy-balance water drop at the specified grid indices.
+
+        Args:
+            row (int): Row index in the cell grid.
+            col (int): Column index in the cell grid.
+            volume_L (float): Water volume in liters (1 L = 1 kg).
+            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            T_a (float): Ambient air temperature in °C. Default 20.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_indices_vw().
+        """
+        self._control_handler.water_drop_at_indices_vw(row, col, volume_L, efficiency, T_a)
+
+    def water_drop_at_cell_vw(self, cell: 'Cell', volume_L: float,
+                               efficiency: float = 2.5, T_a: float = 20.0) -> None:
+        """Apply Van Wagner energy-balance water drop to the specified cell.
+
+        Args:
+            cell (Cell): Cell to apply water to.
+            volume_L (float): Water volume in liters (1 L = 1 kg).
+            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            T_a (float): Ambient air temperature in °C. Default 20.
+
+        Raises:
+            ValueError: If volume_L is negative.
+
+        Note: This method delegates to ControlActionHandler.water_drop_at_cell_vw().
+        """
+        self._control_handler.water_drop_at_cell_vw(cell, volume_L, efficiency, T_a)
+
     def construct_fireline(self, line: LineString, width_m: float, construction_rate: float = None, id: str = None) -> str:
         """Construct a fire break along a line geometry.
 

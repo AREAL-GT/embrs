@@ -62,6 +62,13 @@ class MockCell:
         """Mock moisture bump."""
         pass
 
+    def water_drop_vw(self, volume_L, efficiency=2.5, T_a=20.0):
+        """Mock Van Wagner water drop."""
+        from embrs.models.van_wagner_water import volume_L_to_energy_kJ
+        self._vw_efficiency = efficiency
+        self.water_applied_kJ = getattr(self, 'water_applied_kJ', 0.0)
+        self.water_applied_kJ += volume_L_to_energy_kJ(volume_L, T_a)
+
     def _set_fuel_type(self, fuel):
         """Mock fuel type setter."""
         self._fuel = fuel
@@ -816,3 +823,64 @@ class TestControlActionHandlerBehaviorMatch:
 
         with pytest.raises(ValueError, match="Water depth must be >=0"):
             control_handler.water_drop_at_cell_as_rain(handler_cell, -1.0)
+
+
+class TestVanWagnerWaterDrop:
+    """Tests for Van Wagner energy-balance water drop on ControlActionHandler."""
+
+    def test_water_drop_at_cell_vw(self, control_handler):
+        """Van Wagner water drop should accumulate energy on cell."""
+        cell = control_handler._grid_manager.get_cell_from_indices(5, 5)
+
+        control_handler.water_drop_at_cell_vw(cell, 10.0)
+
+        assert cell.water_applied_kJ > 0
+        assert cell in control_handler.active_water_drops
+
+    def test_water_drop_at_xy_vw(self, control_handler):
+        """Van Wagner water drop at xy should resolve to cell."""
+        control_handler.water_drop_at_xy_vw(150.0, 150.0, 10.0)
+
+        cell = control_handler._grid_manager.get_cell_from_xy(150.0, 150.0)
+        assert cell.water_applied_kJ > 0
+        assert cell in control_handler.active_water_drops
+
+    def test_water_drop_at_indices_vw(self, control_handler):
+        """Van Wagner water drop at indices should resolve to cell."""
+        control_handler.water_drop_at_indices_vw(3, 4, 10.0)
+
+        cell = control_handler._grid_manager.get_cell_from_indices(3, 4)
+        assert cell.water_applied_kJ > 0
+
+    def test_adds_to_active_water_drops(self, control_handler):
+        """Van Wagner drops should be tracked in active_water_drops."""
+        cell = control_handler._grid_manager.get_cell_from_indices(5, 5)
+
+        control_handler.water_drop_at_cell_vw(cell, 10.0)
+        control_handler.water_drop_at_cell_vw(cell, 5.0)
+
+        assert control_handler.active_water_drops.count(cell) == 2
+
+    def test_negative_volume_raises(self, control_handler):
+        """Negative volume should raise ValueError."""
+        cell = control_handler._grid_manager.get_cell_from_indices(5, 5)
+
+        with pytest.raises(ValueError, match="Water volume must be >= 0"):
+            control_handler.water_drop_at_cell_vw(cell, -1.0)
+
+    def test_not_applied_to_unburnable(self, control_handler):
+        """Van Wagner drop should not be applied to non-burnable cells."""
+        cell = control_handler._grid_manager.get_cell_from_indices(5, 5)
+        cell._fuel = MockFuel(burnable=False)
+
+        control_handler.water_drop_at_cell_vw(cell, 10.0)
+
+        assert cell not in control_handler.active_water_drops
+
+    def test_marks_cell_as_updated(self, control_handler):
+        """Van Wagner drop should track cell as updated."""
+        cell = control_handler._grid_manager.get_cell_from_indices(5, 5)
+
+        control_handler.water_drop_at_cell_vw(cell, 10.0)
+
+        assert cell.id in control_handler._updated_cells
