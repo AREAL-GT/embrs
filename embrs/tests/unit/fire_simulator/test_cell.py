@@ -597,3 +597,125 @@ class TestWaterDropVW:
         burnable_cell.reset_to_fuel()
         assert burnable_cell.water_applied_kJ == 0.0
         assert burnable_cell._vw_efficiency == 2.5
+
+
+class TestFireAreaM2:
+    """Tests for fire_area_m2 trapezoidal polar integration."""
+
+    @pytest.fixture
+    def cell(self):
+        """Create a basic cell for fire area tests."""
+        return Cell(id=0, col=5, row=5, cell_size=30.0)
+
+    def test_non_burning_returns_zero(self, cell):
+        """Non-burning cell should return 0.0."""
+        cell._state = CellStates.FUEL
+        cell.fire_spread = np.ones(12)
+        assert cell.fire_area_m2 == 0.0
+
+    def test_burning_no_spread_returns_zero(self, cell):
+        """Burning cell with all-zero fire_spread should return 0.0."""
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 0
+        cell.directions = np.linspace(30, 360, 12)
+        cell.fire_spread = np.zeros(12)
+        assert cell.fire_area_m2 == 0.0
+
+    def test_no_ign_n_loc_returns_zero(self, cell):
+        """Burning cell with _ign_n_loc=None should return 0.0."""
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = None
+        cell.fire_spread = np.ones(12)
+        assert cell.fire_area_m2 == 0.0
+
+    def test_center_ignition_circle(self, cell):
+        """Center ignition with uniform spread should give πR²."""
+        R = 10.0
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 0
+        cell.directions = np.linspace(30, 360, 12)
+        cell.fire_spread = np.full(12, R)
+
+        expected = np.pi * R * R
+        assert cell.fire_area_m2 == pytest.approx(expected, rel=1e-6)
+
+    def test_edge_ignition_half_circle(self, cell):
+        """Edge ignition (n_loc=1) with uniform spread should give πR²/2."""
+        R = 10.0
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 1
+        # Edge ignition spans 180° with 11 directions
+        start = 120.0
+        dirs = [
+            start,
+            start + 30,
+            start + 40.893,
+            start + 60,
+            start + 73.898,
+            start + 90,
+            start + 180 - 73.898,
+            start + 180 - 60,
+            start + 180 - 40.893,
+            start + 180 - 30,
+            start + 180,
+        ]
+        cell.directions = np.array([d % 360 for d in dirs])
+        cell.fire_spread = np.full(11, R)
+
+        expected = np.pi * R * R / 2
+        assert cell.fire_area_m2 == pytest.approx(expected, rel=1e-6)
+
+    def test_corner_ignition_sector(self, cell):
+        """Corner ignition (n_loc=2) with uniform spread should give πR²/3."""
+        R = 10.0
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 2
+        # Corner ignition spans 120° with 9 directions
+        start = 180.0
+        dirs = [
+            start,
+            start + 19.107,
+            start + 30,
+            start + 46.102,
+            start + 60,
+            start + 120 - 46.102,
+            start + 120 - 30,
+            start + 120 - 19.107,
+            start + 120,
+        ]
+        cell.directions = np.array([d % 360 for d in dirs])
+        cell.fire_spread = np.full(9, R)
+
+        expected = np.pi * R * R / 3
+        assert cell.fire_area_m2 == pytest.approx(expected, rel=1e-6)
+
+    def test_elliptical_spread(self, cell):
+        """Elliptical spread should match high-resolution trapezoidal integration."""
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 0
+        dirs = np.linspace(30, 360, 12)
+        cell.directions = dirs
+
+        # Elliptical r(θ) = ab / sqrt((b·cosθ)² + (a·sinθ)²)
+        a, b = 15.0, 8.0
+        thetas = np.deg2rad(dirs)
+        radii = (a * b) / np.sqrt((b * np.cos(thetas))**2 + (a * np.sin(thetas))**2)
+        cell.fire_spread = radii
+
+        # High-resolution reference: integrate with many points
+        fine_theta = np.linspace(0, 2 * np.pi, 100000)
+        fine_r = (a * b) / np.sqrt((b * np.cos(fine_theta))**2 + (a * np.sin(fine_theta))**2)
+        reference = np.trapezoid(0.5 * fine_r**2, fine_theta)
+
+        # With only 12 directions, expect within ~5% of exact
+        assert cell.fire_area_m2 == pytest.approx(reference, rel=0.05)
+
+    def test_clamped_to_cell_area(self, cell):
+        """Area should be clamped to cell_area when spread exceeds cell bounds."""
+        R = 1000.0  # Much larger than cell
+        cell._state = CellStates.FIRE
+        cell._ign_n_loc = 0
+        cell.directions = np.linspace(30, 360, 12)
+        cell.fire_spread = np.full(12, R)
+
+        assert cell.fire_area_m2 == pytest.approx(cell.cell_area)

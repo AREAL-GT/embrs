@@ -1224,44 +1224,43 @@ class Cell:
 
     @property
     def fire_area_m2(self) -> float:
-        """Estimated fire area within cell based on elliptical spread extent.
+        """Fire area within cell via trapezoidal polar integration.
 
-        Uses per-direction fire_spread distances to approximate ellipse semi-axes,
-        then applies a geometric correction factor based on ignition origin:
+        Computes A = (1/2) Σ Δθ_i · (r_i² + r_{i+1}²) / 2 over the
+        discretized spread directions.  For center ignition (n_loc=0) the
+        sum includes a closing segment from the last direction back to the
+        first.  No area_fraction is needed — the angular range of the
+        directions already encodes whether the fire covers the full cell,
+        a half-cell, or a 60° sector.
 
-          n_loc 0          (center):      full ellipse,     fraction = 1.0
-          n_loc odd        (edge mid):    half-ellipse,     fraction = 0.5
-          n_loc even > 0   (corner):      60-degree sector, fraction = 1/6
-
-        n_loc follows a clock-face convention: 0=center, odd=edge midpoints,
-        even non-zero=corners.
-
-        Raw ellipse area is clamped to cell_area as an upper bound, handling
-        mature fires where the ellipse has grown beyond the cell boundary.
+        Clamped to cell_area as an upper bound.
 
         Returns 0.0 for non-burning cells, cells with no spread data, or
         cells where _ign_n_loc has not yet been set.
         """
         if self._state != CellStates.FIRE or len(self.fire_spread) == 0:
             return 0.0
-
         if self._ign_n_loc is None:
             return 0.0
 
-        a = float(np.max(self.fire_spread))
-        b = float(np.median(self.fire_spread))
+        fs = self.fire_spread
+        dirs = self.directions
+        n = len(fs)
 
-        if a <= 0.0:
-            return 0.0
+        area = 0.0
+        for i in range(n - 1):
+            dth = (dirs[i + 1] - dirs[i]) % 360
+            area += dth * (fs[i] * fs[i] + fs[i + 1] * fs[i + 1])
 
         if self._ign_n_loc == 0:
-            area_fraction = 1.0
-        elif self._ign_n_loc % 2 == 1:   # odd — edge midpoint
-            area_fraction = 0.5
-        else:                              # even non-zero — corner
-            area_fraction = 1 / 6
+            dth = (dirs[0] - dirs[-1] + 360) % 360
+            area += dth * (fs[-1] * fs[-1] + fs[0] * fs[0])
 
-        return min(np.pi * a * b * area_fraction, self._cell_area)
+        # 0.25 = (1/2 from polar integral) × (1/2 from trapezoidal average)
+        # π/180 converts the degree-valued Δθ to radians
+        area *= 0.25 * (np.pi / 180)
+
+        return min(area, self._cell_area)
 
     @property
     def x_pos(self) -> float:
