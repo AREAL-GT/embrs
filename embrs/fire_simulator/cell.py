@@ -941,7 +941,7 @@ class Cell:
         from embrs.utilities.unit_conversions import BTU_ft_min_to_kW_m, Lbsft2_to_KiSq
 
         # Convert fireline intensity from BTU/(ft·min) to kW/m
-        # I_ss is a numpy array; use head-fire value (max or index 0)
+        # I_t is a numpy array; use head-fire value (max)
         I_btu = max(self.I_t) if len(self.I_t) > 0 else 0.0
         I_kW_m = BTU_ft_min_to_kW_m(I_btu)
 
