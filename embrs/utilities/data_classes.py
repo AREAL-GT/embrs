@@ -407,6 +407,7 @@ class SimParams:
     num_runs: Optional[int] = None
     user_path: Optional[str] = None
     user_class: Optional[str] = None
+    burn_area_threshold: Optional[float] = 0.75
     write_logs: Optional[bool] = None
 
 

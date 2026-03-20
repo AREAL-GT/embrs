@@ -165,6 +165,7 @@ class BaseFireSim:
         # Containers for fire spread tracking (note: _cell_dict is set up with grid manager below)
         self._burning_cells = []
         self._new_ignitions = []
+        self._suppressed_cells = []
         self._burnt_cells = set()
         self._frontier = set()
         self.starting_ignitions = set()
@@ -600,6 +601,8 @@ class BaseFireSim:
         self.wind_ypad = self._weather_manager.wind_ypad
         self.wind_forecast = self._weather_manager.wind_forecast
 
+        self._burn_area_threshold = getattr(sim_params, 'burn_area_threshold', 0.75)
+
         self.model_spotting = sim_params.model_spotting
         self._spot_ign_prob = 0.0
 
@@ -642,7 +645,7 @@ class BaseFireSim:
         for n_id in cell.burnable_neighbors:
             neighbor = self._cell_dict[n_id]
 
-            if neighbor.state != CellStates.FUEL:
+            if neighbor.state == CellStates.BURNT:
                 neighbors_to_rem.append(n_id)
 
         if neighbors_to_rem:
@@ -701,8 +704,23 @@ class BaseFireSim:
         )
 
         if result == -1:
-            # All ROS zero — mark fully burning
-            cell.fully_burning = True
+            # All ROS zero — suppression scenario
+            fire_area_ratio = cell.fire_area_m2 / cell.cell_area
+
+            if fire_area_ratio >= self._burn_area_threshold:
+                cell.fully_burning = True  # Will become BURNT next iteration
+                return
+
+            # Compute which boundary locations are consumed (before clearing arrays)
+            cell.compute_disabled_locs()
+
+            if cell.n_disabled_locs >= 11:
+                cell.fully_burning = True  # <=1 loc remaining, can't propagate
+                return
+
+            # Partial suppression: return cell to FUEL
+            cell.suppress_to_fuel()
+            self._suppressed_cells.append(cell)
             return
 
         if result < -1:
@@ -717,8 +735,13 @@ class BaseFireSim:
             directions = cell.directions
             end_pts = cell.end_pts
             ignite = self.ignite_neighbors
+            self_end_points = cell._self_end_points
+            disabled = cell.disabled_locs
             for j in range(n_new):
                 i = int(new_ixn_buf[j])
+                # Check if exit boundary location is disabled
+                if self_end_points is not None and self_end_points[i] in disabled:
+                    continue
                 ignite(cell, r_t[i], directions[i], end_pts[i])
 
     def ignite_neighbors(self, cell: Cell, r_gamma: float, gamma: float, end_point: list):
@@ -747,6 +770,9 @@ class BaseFireSim:
             if neighbor:
                 # Check that neighbor state is burnable
                 if neighbor.state == CellStates.FUEL and neighbor.fuel.burnable:
+                    # Check that the entry point is not disabled
+                    if n_loc in neighbor.disabled_locs:
+                        continue
                     # Make ignition calculation
                     if self.is_firesim():
                         neighbor._update_moisture(self._curr_weather_idx, self._weather_stream)
