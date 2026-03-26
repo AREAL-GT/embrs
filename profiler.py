@@ -45,6 +45,7 @@ from collections import defaultdict
 # Layer 2: Targeted wall-clock instrumentation
 # ============================================================================
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else os.getcwd()
 _timing_data = defaultdict(lambda: {"calls": 0, "total_s": 0.0, "max_s": 0.0, "min_s": float('inf'), "history": []})
 _MAX_HISTORY = 200  # Keep per-call times for the first N calls per function
 
@@ -94,7 +95,7 @@ def _save_timing_report():
         "functions": out,
     }
 
-    path = os.path.join(os.path.dirname(__file__), "timing_breakdown_3.json")
+    path = os.path.join(_SCRIPT_DIR, "timing_breakdown_6.json")
     with open(path, "w") as f:
         json.dump(report, f, indent=2)
     print(f"\nTiming breakdown saved to {path}")
@@ -123,59 +124,125 @@ try:
 except Exception:
     pass
 
-# --- ra-cbba-core backburn ---
+# --- ra-cbba-core firefighting: coordinator ---
 try:
-    from applications.backburn.backburn import Backburn
-    _instrument(Backburn, "__init__")
-    _instrument(Backburn, "process_state")
+    from applications.firefighting.fire_coordinator import FireCoordinator
+    _instrument(FireCoordinator, "process_state")
 except Exception as e:
-    print(f"Warning: could not patch Backburn: {e}")
+    print(f"Warning: could not patch FireCoordinator: {e}")
 
+# --- firefighting: prediction ---
 try:
-    from applications.backburn.fire_prediction_manager import FirePredictionManager
+    from applications.firefighting.prediction.manager import FirePredictionManager
+    _instrument(FirePredictionManager, "should_run_prediction")
     _instrument(FirePredictionManager, "run_prediction")
-    _instrument(FirePredictionManager, "rollout_task")
+    _instrument(FirePredictionManager, "rollout_task_prediction")
+except Exception:
+    pass
+
+# --- firefighting: task generators ---
+try:
+    from applications.firefighting.suppression import Suppression
+    _instrument(Suppression, "generate_tasks")
+    _instrument(Suppression, "generate_reactive_tasks")
+    _instrument(Suppression, "generate_prevent_tasks")
 except Exception:
     pass
 
 try:
-    from applications.backburn.task_generator import TaskGenerator
-    _instrument(TaskGenerator, "generate_tasks")
-    _instrument(TaskGenerator, "rollout_proposed_tasks")
-    _instrument(TaskGenerator, "find_time_windows_for_seg")
-    _instrument(TaskGenerator, "find_time_windows_for_seg_probabilistic")
-    _instrument(TaskGenerator, "evaluate_task_prediction")
-    _instrument(TaskGenerator, "time_suitable")
-    _instrument(TaskGenerator, "backburn_wind_check")
+    from applications.firefighting.burnout import Burnout
+    _instrument(Burnout, "generate_tasks", "Burnout.generate_tasks")
+    _instrument(Burnout, "burnout_wind_check")
+    _instrument(Burnout, "check_burning_intersection")
 except Exception:
     pass
 
 try:
-    from applications.backburn.surveillance import Surveillance
-    _instrument(Surveillance, "update")
-    _instrument(Surveillance, "update_and_create_tasks")
-    _instrument(Surveillance, "sample_state_estimates")
-    _instrument(Surveillance, "set_initial_state")
+    from applications.firefighting.backburn.backburn import Backburn
+    _instrument(Backburn, "__init__")
+    _instrument(Backburn, "generate_tasks", "Backburn.generate_tasks")
 except Exception:
     pass
 
 try:
-    from applications.backburn.task_dispatcher import TaskDispatcher
+    from applications.firefighting.backburn.time_windows import TimeWindowFinder
+    _instrument(TimeWindowFinder, "find_probabilistic")
+    _instrument(TimeWindowFinder, "truncate_by_risk")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.backburn.evaluator import TaskEvaluator
+    _instrument(TaskEvaluator, "rollout_proposed_tasks")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.backburn.proposals import ProposalBuilder
+    _instrument(ProposalBuilder, "generate")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.backburn.scheduler import BackburnScheduler
+    _instrument(BackburnScheduler, "schedule")
+    _instrument(BackburnScheduler, "get_due_tasks")
+except Exception:
+    pass
+
+# --- firefighting: surveillance ---
+try:
+    from applications.firefighting.surveillance.surveillance import Surveillance
+    _instrument(Surveillance, "generate_tasks", "Surveillance.generate_tasks")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.surveillance.bof import BayesianOccupancyFilter
+    _instrument(BayesianOccupancyFilter, "propagate")
+    _instrument(BayesianOccupancyFilter, "commit_visit")
+    _instrument(BayesianOccupancyFilter, "update_cell_likelihood")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.surveillance.ensemble import EnsembleScorer
+    _instrument(EnsembleScorer, "update_weights")
+except Exception:
+    pass
+
+try:
+    from applications.firefighting.surveillance.task_generator import SurveillanceTaskGenerator
+    _instrument(SurveillanceTaskGenerator, "generate")
+except Exception:
+    pass
+
+# --- firefighting: dispatch ---
+try:
+    from applications.firefighting.dispatch.dispatcher import TaskDispatcher
     _instrument(TaskDispatcher, "dispatch_tasks")
     _instrument(TaskDispatcher, "tick_cbba")
 except Exception:
     pass
 
 try:
-    from applications.backburn.action_commit_handler import ActionCommitHandler
+    from applications.firefighting.dispatch.commit_handler import ActionCommitHandler
     _instrument(ActionCommitHandler, "commit_pending_actions")
 except Exception:
     pass
 
 try:
-    from applications.backburn.containment_geometry import ContainmentGeometryManager
+    from applications.firefighting.dispatch.bus import ActionBus
+    _instrument(ActionBus, "propose")
+    _instrument(ActionBus, "drain_proposals")
+except Exception:
+    pass
+
+# --- firefighting: geometry ---
+try:
+    from applications.firefighting.geometry.containment import ContainmentGeometryManager
     _instrument(ContainmentGeometryManager, "get_relevant_segments")
-    _instrument(ContainmentGeometryManager, "get_backburn_cells")
+    _instrument(ContainmentGeometryManager, "get_interior_cells")
 except Exception:
     pass
 
@@ -230,13 +297,13 @@ signal.signal(signal.SIGINT, _sigint_handler)
 from embrs.main import load_sim_params, sim_loop
 
 def run():
-    cfg_path = "/Users/rjdp3/Documents/Research/embrs/embrs/configs/scenario_1.cfg"
+    cfg_path = "/Users/rjdp3/Documents/Research/embrs/embrs/configs/testbed.cfg"
     sim_params = load_sim_params(cfg_path)
     sim_loop(sim_params)
 
 
 if __name__ == "__main__":
-    out_dir = os.path.dirname(__file__)
+    out_dir = _SCRIPT_DIR
 
     wall_start = time.perf_counter()
 
@@ -250,12 +317,12 @@ if __name__ == "__main__":
     wall_total = time.perf_counter() - wall_start
 
     # Save binary profile (for snakeviz / gprof2dot)
-    prof_path = os.path.join(out_dir, "profile_output_3.prof")
+    prof_path = os.path.join(out_dir, "profile_output_w_suppression_4.prof")
     profiler.dump_stats(prof_path)
     print(f"\ncProfile data saved to {prof_path}")
 
     # Save text summary
-    txt_path = os.path.join(out_dir, "profile_summary_3.txt")
+    txt_path = os.path.join(out_dir, "profile_summary_w_suppression_4.txt")
     with open(txt_path, "w") as f:
         f.write(f"Total wall-clock time: {wall_total:.1f}s ({wall_total/60:.1f} min)\n\n")
 
@@ -272,11 +339,12 @@ if __name__ == "__main__":
         s2.strip_dirs().sort_stats("tottime").print_stats(100)
 
         f.write("\n" + "=" * 100 + "\n")
-        f.write("BACKBURN / CBBA FUNCTIONS\n")
+        f.write("FIREFIGHTING / CBBA FUNCTIONS\n")
         f.write("=" * 100 + "\n")
         s3 = pstats.Stats(profiler, stream=f)
         s3.strip_dirs().sort_stats("cumulative").print_stats(
-            "backburn|cbba|cost_model|surveillance|task_gen|dispatcher|containment", 200
+            "backburn|cbba|cost_model|surveillance|task_gen|dispatcher|containment|"
+            "suppression|burnout|coordinator|bof|ensemble|evaluator|proposal|commit_handler|bus", 200
         )
 
         f.write("\n" + "=" * 100 + "\n")
