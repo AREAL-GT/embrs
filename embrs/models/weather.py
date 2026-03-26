@@ -25,20 +25,196 @@ Functions:
 from __future__ import annotations
 
 from retry_requests import retry
+from collections import deque
+from dataclasses import dataclass
 from datetime import timedelta, datetime
+import math
 import openmeteo_requests
 import requests_cache
 import pandas as pd
 import numpy as np
 import pytz
 import pvlib
-from typing import Iterator, Tuple, TYPE_CHECKING
+from typing import Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from embrs.fire_simulator.cell import Cell
 
 from embrs.utilities.data_classes import *
 from embrs.utilities.unit_conversions import *
+
+
+@dataclass
+class DailySummary:
+    """One day of aggregated weather for GSI computation.
+
+    Attributes:
+        date: Calendar date for this summary.
+        min_temp_F: Daily minimum temperature (Fahrenheit).
+        max_temp_F: Daily maximum temperature (Fahrenheit).
+        min_rh: Daily minimum relative humidity (percent, 0-100).
+        rain_cm: Total rainfall for this day (cm).
+    """
+    date: datetime
+    min_temp_F: float
+    max_temp_F: float
+    min_rh: float
+    rain_cm: float
+
+
+class GSITracker:
+    """Track rolling weather data and recompute GSI during simulation.
+
+    Maintains a 56-day rolling buffer of :class:`DailySummary` records
+    (seeded from pre-simulation data) and accumulates hourly weather
+    entries into daily summaries as the simulation advances. Call
+    :meth:`compute_gsi` after each day boundary to get an updated
+    Growing Season Index.
+
+    Args:
+        geo: :class:`GeoInfo` with ``center_lat``, ``center_lon``, and
+            ``timezone`` for photoperiod calculations.
+        pre_sim_summaries: Daily summaries from the pre-simulation window
+            (up to 56 days). Oldest first.
+        initial_cum_rain: Cumulative rain value (cm) from the last
+            pre-simulation weather entry, used to correctly compute
+            rain deltas for the first simulation hour.
+    """
+
+    def __init__(self, geo: GeoInfo, pre_sim_summaries: List[DailySummary],
+                 initial_cum_rain: float = 0.0):
+        self._geo = geo
+        self._daily_buffer: deque[DailySummary] = deque(maxlen=56)
+        for s in pre_sim_summaries:
+            self._daily_buffer.append(s)
+
+        # Current-day accumulators
+        self._hourly_temps: List[float] = []
+        self._hourly_rhs: List[float] = []
+        self._hourly_rain_cm: float = 0.0
+        self._last_cum_rain: float = initial_cum_rain
+        self._current_date: Optional[datetime] = None
+
+    def ingest_hourly(self, entry: WeatherEntry, sim_datetime: datetime) -> bool:
+        """Feed one hourly weather observation into the tracker.
+
+        Accumulates temperature, humidity, and rain delta. When the
+        calendar day changes, the previous day is finalized into a
+        :class:`DailySummary` and appended to the rolling buffer.
+
+        Args:
+            entry: Current weather entry (temp in F, rel_humidity in
+                percent, rain cumulative in cm).
+            sim_datetime: Simulation datetime corresponding to this entry.
+
+        Returns:
+            True if a day boundary was crossed (a new daily summary was
+            finalized), False otherwise.
+        """
+        entry_date = sim_datetime.date()
+        day_changed = False
+
+        if self._current_date is not None and entry_date != self._current_date:
+            # Day boundary — finalize the previous day
+            if self._hourly_temps:
+                self._finalize_day()
+                day_changed = True
+
+            # Reset accumulators for the new day
+            self._hourly_temps = []
+            self._hourly_rhs = []
+            self._hourly_rain_cm = 0.0
+
+        self._current_date = entry_date
+
+        # Accumulate hourly observations
+        self._hourly_temps.append(entry.temp)
+        self._hourly_rhs.append(entry.rel_humidity)
+
+        # Rain delta from cumulative value
+        if self._last_cum_rain is not None:
+            delta = entry.rain - self._last_cum_rain
+            if delta > 0:
+                self._hourly_rain_cm += delta
+        self._last_cum_rain = entry.rain
+
+        return day_changed
+
+    def _finalize_day(self):
+        """Build a DailySummary from the current-day accumulators and
+        append it to the rolling buffer."""
+        summary = DailySummary(
+            date=self._current_date,
+            min_temp_F=min(self._hourly_temps),
+            max_temp_F=max(self._hourly_temps),
+            min_rh=min(self._hourly_rhs),
+            rain_cm=self._hourly_rain_cm,
+        )
+        self._daily_buffer.append(summary)
+
+    def compute_gsi(self) -> float:
+        """Compute GSI from the rolling daily buffer.
+
+        Uses the same sub-index formulas as
+        :meth:`WeatherStream.calc_GSI`: photoperiod, minimum temperature,
+        vapor pressure deficit, and 28-day accumulated precipitation.
+
+        Returns:
+            GSI value in [0, 1], or -1 if fewer than 2 days are available.
+        """
+        buf = self._daily_buffer
+        n = len(buf)
+        if n < 2:
+            return -1.0
+
+        # Use last 28 entries for non-rain sub-indices
+        start = max(0, n - 28)
+
+        pv_loc = pvlib.location.Location(
+            self._geo.center_lat, self._geo.center_lon, tz=self._geo.timezone
+        )
+
+        gsi = 0.0
+        count = 0
+
+        for i in range(start, n):
+            day_summary = buf[i]
+
+            # Photoperiod sub-index
+            times = pd.date_range(
+                pd.Timestamp(day_summary.date), periods=1, freq='D',
+                tz=self._geo.timezone
+            )
+            solpos = pv_loc.get_sun_rise_set_transit(times)
+            sunrise = solpos['sunrise'].iloc[0]
+            sunset = solpos['sunset'].iloc[0]
+            if sunset < sunrise:
+                sunset += pd.Timedelta(days=1)
+            day_len = (sunset - sunrise).total_seconds()
+            iPhoto = max(0.0, min(1.0, (day_len - 36000) / (39600 - 36000)))
+
+            # Min temperature sub-index (convert F → C)
+            min_temp_C = F_to_C(day_summary.min_temp_F)
+            iTmin = max(0.0, min(1.0, (min_temp_C + 2) / (5 + 2)))
+
+            # VPD sub-index
+            max_temp_C = F_to_C(day_summary.max_temp_F)
+            min_rh = day_summary.min_rh
+            vpd = (1 - min_rh / 100) * 0.6108 * math.exp(
+                (17.27 * max_temp_C) / (max_temp_C + 237.3)
+            )
+            iVPD = max(0.0, min(1.0, (vpd - 0.9) / (4.1 - 0.9)))
+
+            # Precipitation sub-index: 28-day accumulated rain ending at day i
+            rain_start = max(0, i - 28)
+            tot_rain_mm = sum(buf[j].rain_cm * 10 for j in range(rain_start, i))
+            iPrcp = max(0.0, min(1.0, tot_rain_mm / 10))
+
+            gsi += iTmin * iPhoto * iVPD * iPrcp
+            count += 1
+
+        return gsi / count
+
 
 class WeatherStream:
     """Build and manage a weather stream for fire simulation.
@@ -196,6 +372,16 @@ class WeatherStream:
             self.sim_start_idx = self.stream_times.get_loc(start_datetime)
         except KeyError:
             self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
+
+        if self.use_gsi:
+            # Build GSI tracker seeded with pre-simulation daily summaries
+            pre_summaries = self._build_pre_sim_summaries(
+                hourly_data, buffered_start, start_datetime
+            )
+            init_rain = self.stream[self.sim_start_idx].rain
+            self.gsi_tracker = GSITracker(self.geo, pre_summaries, init_rain)
+        else:
+            self.gsi_tracker = None
 
         # Calculate foliar moisture content
         self.fmc = self.calc_fmc()
@@ -409,6 +595,22 @@ class WeatherStream:
 
         self.stream = list(self.generate_stream(hourly_data))
 
+        if self.use_gsi:
+            # Build GSI tracker seeded with pre-simulation daily summaries
+            wxs_hourly = {
+                "date": df.index,
+                "temperature": df["temperature"].values,
+                "rel_humidity": df["rel_humidity"].values,
+                "rain": df["rain"].values,
+            }
+            pre_summaries = self._build_pre_sim_summaries(
+                wxs_hourly, data_start, start_datetime
+            )
+            init_rain = self.stream[self.sim_start_idx].rain
+            self.gsi_tracker = GSITracker(self.geo, pre_summaries, init_rain)
+        else:
+            self.gsi_tracker = None
+
         # ── Step 9: Set metadata attributes ──────────────────────────
         self.time_step = time_step_min
         self.input_wind_ht = 6.1
@@ -595,6 +797,47 @@ class WeatherStream:
         # Average GSI
         gsi /= len(dates)
         return gsi
+
+    def _build_pre_sim_summaries(self, hourly_data: dict,
+                                 data_start, sim_start) -> List[DailySummary]:
+        """Convert pre-simulation hourly data into daily summaries for GSI tracking.
+
+        Aggregates hourly observations into per-day min/max temperature,
+        min humidity, and total rainfall, matching the aggregation used
+        by :meth:`calc_GSI`.
+
+        Args:
+            hourly_data: Hourly weather dictionary with keys ``'date'``,
+                ``'temperature'`` (Fahrenheit), ``'rel_humidity'`` (percent),
+                ``'rain'`` (cm, non-cumulative per-hour increments).
+            data_start: Start of the pre-simulation data window.
+            sim_start: Simulation start datetime.
+
+        Returns:
+            List of :class:`DailySummary`, oldest first, covering up to
+            56 days before *sim_start*.
+        """
+        filtered = filter_hourly_data(hourly_data, data_start, sim_start)
+        df = pd.DataFrame(filtered).set_index("date")
+
+        if df.empty:
+            return []
+
+        daily_min_temp = df["temperature"].resample('D').min()
+        daily_max_temp = df["temperature"].resample('D').max()
+        daily_min_rh = df["rel_humidity"].resample('D').min()
+        daily_rain = df["rain"].resample('D').sum()
+
+        summaries = []
+        for date in daily_min_temp.index:
+            summaries.append(DailySummary(
+                date=date.date() if hasattr(date, 'date') else date,
+                min_temp_F=daily_min_temp[date],
+                max_temp_F=daily_max_temp[date],
+                min_rh=daily_min_rh[date],
+                rain_cm=daily_rain[date],
+            ))
+        return summaries
 
     def calc_fmc(self) -> float:
         """Compute foliar moisture content based on latitude and date.

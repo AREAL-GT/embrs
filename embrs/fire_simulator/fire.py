@@ -12,6 +12,7 @@ Classes:
     :members:
 """
 
+from datetime import timedelta
 from tqdm import tqdm
 import numpy as np
 
@@ -59,9 +60,14 @@ class FireSim(BaseFireSim):
         self.curr_prediction = None
 
         super().__init__(sim_params)
-        
+
         # Log frequency (set to 1 hour by default)
         self._log_freq = int(np.floor(3600 / self._time_step))
+
+        # Dynamic GSI tracking (None if use_gsi is False)
+        self._gsi_tracker = self._weather_stream.gsi_tracker
+        self._last_gsi_weather_idx = -1
+        self._live_mf_changed = False
 
         self._init_iteration(True)
 
@@ -86,6 +92,7 @@ class FireSim(BaseFireSim):
         # Loop over surface fires
         # Cache frequently-accessed attributes and methods for tight loop
         weather_changed = self.weather_changed
+        live_mf_changed = self._live_mf_changed
         weather_idx = self._curr_weather_idx
         weather_stream = self._weather_stream
         ts = self.time_step
@@ -106,7 +113,7 @@ class FireSim(BaseFireSim):
                 continue
 
             # Check if conditions have changed
-            needs_update = weather_changed or not cell.has_steady_state
+            needs_update = weather_changed or not cell.has_steady_state or live_mf_changed
 
             if needs_update:
                 cell._update_moisture(weather_idx, weather_stream)
@@ -270,7 +277,60 @@ class FireSim(BaseFireSim):
         # Update wind if necessary
         self.weather_changed = self._update_weather()
 
+        # Reset live moisture flag and check for GSI day boundary
+        self._live_mf_changed = False
+        if self._gsi_tracker is not None:
+            self._update_gsi()
+
         return False
+
+    def _update_gsi(self):
+        """Feed hourly weather to the GSI tracker and trigger daily update.
+
+        Called each iteration from :meth:`_init_iteration`. Only acts
+        when the weather index has advanced (new hourly entry). If the
+        calendar day changed, finalizes the previous day's summary and
+        triggers :meth:`_apply_gsi_update` to recompute live moistures.
+        """
+        weather_idx = self._curr_weather_idx
+
+        if weather_idx == self._last_gsi_weather_idx:
+            return
+
+        entry = self._weather_stream.stream[weather_idx]
+        sim_dt = self._start_datetime + timedelta(seconds=self._curr_time_s)
+
+        day_changed = self._gsi_tracker.ingest_hourly(entry, sim_dt)
+        self._last_gsi_weather_idx = weather_idx
+
+        if day_changed:
+            self._apply_gsi_update()
+
+    def _apply_gsi_update(self):
+        """Recompute GSI and update fuel curing and sim-level live moistures.
+
+        Does NOT iterate over cells. Sets :attr:`_live_mf_changed` so
+        that burning cells sync their ``fmois`` lazily via
+        :meth:`Cell._update_moisture`. Cold cells pick up new values
+        when they ignite.
+        """
+        gsi = self._gsi_tracker.compute_gsi()
+        if gsi < 0:
+            return
+
+        new_h, new_w = self._weather_stream.set_live_moistures(gsi)
+
+        if abs(new_h - self._live_h_mf) < 1e-6 and abs(new_w - self._live_w_mf) < 1e-6:
+            return
+
+        self._live_h_mf = new_h
+        self._live_w_mf = new_w
+
+        # Update shared fuel objects (~40 cache entries)
+        for fuel in self._fuel_cache.values():
+            fuel.update_curing(new_h)
+
+        self._live_mf_changed = True
 
     def _get_agent_updates(self) -> list:
         """Collect log entries for all registered agents.
