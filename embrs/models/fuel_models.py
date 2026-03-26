@@ -346,6 +346,10 @@ class Anderson13(Fuel):
 
         super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
 
+    def update_curing(self, live_h_mf: float) -> None:
+        """Anderson 13 models have no dynamic curing — no-op."""
+        pass
+
 class ScottBurgan40(Fuel):
     """Scott-Burgan 40 fire behavior fuel models.
 
@@ -425,7 +429,44 @@ class ScottBurgan40(Fuel):
             mx_dead = self._fuel_models["mx_dead"][model_id]
             fuel_bed_depth = self._fuel_models["fuel_bed_depth"][model_id]    
 
+        self._model_id = model_id
+
         super().__init__(name, model_number, burnable, dynamic, w_0, s, s_total, mx_dead, fuel_bed_depth)
+
+    def update_curing(self, live_h_mf: float) -> None:
+        """Recompute curing and rebuild derived Rothermel constants in-place.
+
+        For dynamic models, recomputes the herbaceous load transfer from the
+        new ``live_h_mf`` and updates all loading-dependent constants. Non-dynamic
+        and non-burnable models are no-ops.
+
+        Args:
+            live_h_mf (float): New live herbaceous fuel moisture (fraction).
+        """
+        if not self.burnable or not self.dynamic:
+            return
+
+        T = self.calc_curing_level(live_h_mf)
+        w_0 = np.array(self._fuel_models["w_0"][self._model_id])
+
+        dead_herb_new = T * w_0[4]
+        live_h_new = w_0[4] - dead_herb_new
+        w_0[3] = dead_herb_new
+        w_0[4] = live_h_new
+
+        # Rebuild loading-dependent constants (mirrors Fuel.__init__ lines 104-122)
+        self.load = w_0
+        self.w_0 = TPA_to_Lbsft2(w_0)
+        w_n = self.w_0 * (1 - self.s_T)
+        self.set_fuel_loading(w_n)
+        self.w_n_dead_nominal = self.w_n_dead
+
+        self.beta = np.sum(self.w_0) / 32 / self.fuel_depth_ft
+        self.rat = self.beta / self.beta_op
+        self.gamma = self.gammax * (self.rat ** self.A) * math.exp(self.A * (1 - self.rat))
+        self.rho_b = np.sum(self.w_0) / self.fuel_depth_ft
+        self.flux_ratio = self.calc_flux_ratio()
+        self.W = self.calc_W(w_0)
 
     def calc_curing_level(self, live_h_mf: float) -> float:
         """Compute herbaceous curing level from live herbaceous moisture.

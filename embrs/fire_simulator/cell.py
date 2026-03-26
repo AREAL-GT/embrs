@@ -329,10 +329,6 @@ class Cell:
         # Increment suppression count
         self._suppression_count += 1
 
-        # TODO: delete DEBUG
-        print(f"Cell: {self.id} suppressed and returned to FUEL state. Has {self.n_disabled_locs} disabled locs")
-
-
     @property
     def n_disabled_locs(self) -> int:
         """Number of boundary locations disabled by prior suppression."""
@@ -648,6 +644,18 @@ class Cell:
         if self.fuel.dynamic:
             # Set dead herbaceous moisture to 1-hr value
             self.fmois[3] = self.fmois[0]
+
+        # Sync live fuel moisture from sim-level GSI-derived values
+        # Only when dynamic GSI is active (use_gsi=True); per-fuel-type
+        # overrides from fms_has_live are left untouched.
+        # Uses getattr for safety when parent is a FirePredictor.
+        parent = self._parent()
+        if getattr(parent, '_gsi_tracker', None) is not None:
+            rel = self._fuel.rel_indices
+            if 4 in rel:
+                self.fmois[4] = parent._live_h_mf
+            if 5 in rel:
+                self.fmois[5] = parent._live_w_mf
 
     def _catch_up_moisture_to_curr(self, target_time_s: float, weather_stream: WeatherStream):
         """Advance moisture calculations from last update time to target time.
