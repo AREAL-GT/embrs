@@ -350,6 +350,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
     spot_ign_prob = config["Simulation"].getfloat("spot_ign_prob", 0.05)
     min_spot_dist_m = config["Simulation"].getfloat("min_spot_dist_m", 50)
     spot_delay_s = config["Simulation"].getint("spot_delay_s", 30)
+    burn_area_threshold = config["Simulation"].getfloat("burn_area_threshold", 0.75)
 
     user_class = str(config["Simulation"].get("user_class", ""))
     user_path = str(config["Simulation"].get("user_path", ""))
@@ -375,6 +376,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
         spot_ign_prob=spot_ign_prob,
         min_spot_dist=min_spot_dist_m,
         spot_delay_s=spot_delay_s,
+        burn_area_threshold=burn_area_threshold,
         duration_s=duration_s,
         visualize=config["Simulation"].getboolean("visualize", False),
         num_runs=config["Simulation"].getint("num_runs", 1),

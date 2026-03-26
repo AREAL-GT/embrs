@@ -72,6 +72,8 @@ class CellLogEntry:
     wind_dir: float
     retardant: bool
     arrival_time: float
+    suppression_count: int = 0
+    n_disabled_locs: int = 0
 
     def to_dict(self) -> dict:
         """Convert entry to dictionary for serialization."""

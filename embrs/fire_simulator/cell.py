@@ -37,6 +37,34 @@ _RESET_ARRAY_EMPTY = np.array([], dtype=np.float64)
 _RESET_IXN_EMPTY = np.zeros(0, dtype=np.bool_)
 
 
+def _derive_self_end_points(n_loc):
+    """Derive self-boundary-location indices for each spread direction.
+
+    Returns a list of boundary location indices (1-12) corresponding to
+    each spread direction. Uses the same arithmetic as get_ign_parameters.
+
+    Args:
+        n_loc (int): Ignition location index (0=center, 1-12=boundary).
+
+    Returns:
+        list[int]: Self-boundary location for each spread direction.
+    """
+    if n_loc == 0:
+        start = 1
+        end = 12
+    elif n_loc % 2 == 0:
+        start = (n_loc + 2) % 12 or 12
+        end = (start + 8) % 12 or 12
+    else:
+        start = (n_loc + 1) % 12 or 12
+        end = (12 + (n_loc - 1)) % 12 or 12
+
+    if end < start:
+        return list(range(start, 13)) + list(range(1, end + 1))
+    else:
+        return list(range(start, end + 1))
+
+
 class Cell:
     """Represents a hexagonal simulation cell in the wildfire model.
 
@@ -169,11 +197,16 @@ class Cell:
         self.cfb = 0
         self.reaction_intensity = 0
 
+        # Partial suppression state
+        self.disabled_locs = set()
+        self._suppression_count = 0
+
         # Spread arrays — shared read-only constants (replaced when cell ignites)
         self.distances = None
         self.directions = None
         self.end_pts = None
         self._ign_n_loc = None
+        self._self_end_points = None
         self.r_h_ss = None
         self.I_h_ss = None
         self.r_t = _RESET_ARRAY_ZERO
@@ -215,6 +248,95 @@ class Cell:
 
         # Restore full neighbor set (remove_neighbors modifies _burnable_neighbors during sim)
         self._burnable_neighbors = dict(self._neighbors)
+
+    def compute_disabled_locs(self):
+        """Compute boundary locations consumed by current fire and add to disabled_locs.
+
+        Must be called BEFORE fire-state arrays are cleared. Uses three rules
+        to determine which boundary locations (1-12) have been consumed.
+
+        Rule 1: Entry point is consumed.
+        Rule 2: Each crossed intersection's exit boundary location is consumed.
+        Rule 3: For corner ignitions, adjacent midpoints are consumed if fire
+                 has spread past half the distance in that direction.
+        """
+        n_loc = self._ign_n_loc
+        if n_loc is None:
+            return
+
+        # Rule 1 — entry point
+        if n_loc != 0:
+            self.disabled_locs.add(n_loc)
+
+        # Rule 2 — crossed intersections → exit boundary locations
+        if self._self_end_points is not None:
+            for i in range(len(self.intersections)):
+                if self.intersections[i]:
+                    self.disabled_locs.add(self._self_end_points[i])
+
+        # Rule 3 — corner adjacent midpoints (even, nonzero n_loc only)
+        if n_loc != 0 and n_loc % 2 == 0:
+            if len(self.fire_spread) > 0 and self.distances is not None and len(self.distances) > 0:
+                if self.fire_spread[0] > self.distances[0] / 2:
+                    self.disabled_locs.add((n_loc % 12) + 1)
+                if self.fire_spread[-1] > self.distances[-1] / 2:
+                    self.disabled_locs.add(((n_loc - 2) % 12) + 1)
+
+    def suppress_to_fuel(self):
+        """Suppress cell back to FUEL state, preserving moisture and disabled_locs.
+
+        Similar to reset_to_fuel() but preserves:
+        - disabled_locs (accumulated consumed boundary locations)
+        - _suppression_count (incremented)
+        - Fuel moisture state (fmois, dfms, moist_update_time_s)
+
+        Clears fire-state arrays, VW water state, and crown fire state.
+        Restores burnable_neighbors from full neighbor set.
+        """
+        # Fire state
+        self._state = CellStates.FUEL
+        self.fully_burning = False
+        self._crown_status = CrownStatus.NONE
+        self.cfb = 0
+        self.reaction_intensity = 0
+
+        # Spread arrays
+        self.distances = None
+        self.directions = None
+        self.end_pts = None
+        self._ign_n_loc = None
+        self._self_end_points = None
+        self.r_h_ss = None
+        self.I_h_ss = None
+        self.r_t = _RESET_ARRAY_ZERO
+        self.fire_spread = _RESET_ARRAY_EMPTY
+        self.avg_ros = _RESET_ARRAY_EMPTY
+        self.r_ss = _RESET_ARRAY_EMPTY
+        self.I_ss = _RESET_ARRAY_ZERO
+        self.I_t = _RESET_ARRAY_ZERO
+        self.intersections = _RESET_IXN_EMPTY
+        self.e = 0
+        self.alpha = None
+        self.has_steady_state = False
+
+        # Clear VW water suppression state
+        self.water_applied_kJ = 0.0
+        self._vw_efficiency = 2.5
+
+        # Restore full neighbor set
+        self._burnable_neighbors = dict(self._neighbors)
+
+        # Increment suppression count
+        self._suppression_count += 1
+
+        # TODO: delete DEBUG
+        print(f"Cell: {self.id} suppressed and returned to FUEL state. Has {self.n_disabled_locs} disabled locs")
+
+
+    @property
+    def n_disabled_locs(self) -> int:
+        """Number of boundary locations disabled by prior suppression."""
+        return len(self.disabled_locs)
 
     def _set_cell_data(self, cell_data: CellData):
         """Configure cell properties from terrain and fuel data.
@@ -316,6 +438,11 @@ class Cell:
         self.intersections = np.zeros(0, dtype=np.bool_)
         self.e = 0
         self.alpha = None
+
+        # Partial suppression state
+        self.disabled_locs = set()  # boundary locations (1-12) consumed by prior burns
+        self._suppression_count = 0
+        self._self_end_points = None  # set by get_ign_params, used for disabled-exit checks
 
         # Boolean defining the cell already has a steady-state ROS
         self.has_steady_state = False
@@ -424,6 +551,7 @@ class Cell:
         """
         self._ign_n_loc = n_loc
         self.directions, distances, self.end_pts = UtilFuncs.get_ign_parameters(n_loc, self.cell_size)
+        self._self_end_points = _derive_self_end_points(n_loc)
         self.project_distances_to_surf(distances)
         self.avg_ros = np.zeros_like(self.directions)
         self.I_t = np.zeros_like(self.directions)
@@ -1114,7 +1242,9 @@ class Cell:
             wind_speed=wind_speed,
             wind_dir=wind_dir,
             retardant=self._retardant,
-            arrival_time=self._arrival_time
+            arrival_time=self._arrival_time,
+            suppression_count=self._suppression_count,
+            n_disabled_locs=self.n_disabled_locs
         )
 
         return entry

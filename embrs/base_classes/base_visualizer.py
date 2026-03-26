@@ -347,6 +347,12 @@ class BaseVisualizer:
         if entry.state == CellStates.FUEL:
             base_color = mcolors.to_rgba(fc.fuel_color_mapping[entry.fuel])
             fuel_frac = entry.w_n_dead / entry.w_n_dead_start if entry.w_n_dead_start > 0 else 1.0
+
+            if entry.n_disabled_locs > 0:
+                # Dim proportionally: fully-disabled (12/12) → 0 brightness
+                dim_factor = 1.0 - (entry.n_disabled_locs / 12.0)
+                fuel_frac *= dim_factor
+
             return tuple(np.array(base_color) * fuel_frac)
         elif entry.state == CellStates.FIRE:
             return mcolors.to_rgba('#F97306')

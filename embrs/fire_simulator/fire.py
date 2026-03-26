@@ -135,6 +135,14 @@ class FireSim(BaseFireSim):
             remove_set = set(cells_to_remove)
             self._burning_cells = [c for c in self._burning_cells if c not in remove_set]
 
+        # Remove suppressed cells (transitioned back to FUEL via partial suppression)
+        if self._suppressed_cells:
+            suppressed_set = set(self._suppressed_cells)
+            self._burning_cells = [c for c in self._burning_cells if c not in suppressed_set]
+            for cell in self._suppressed_cells:
+                self._updated_cells[cell.id] = cell
+            self._suppressed_cells.clear()
+
         # Get set of spot fires started in this time step
         if self.model_spotting and self._spot_ign_prob > 0:
             self.propagate_embers()
