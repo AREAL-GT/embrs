@@ -374,6 +374,15 @@ class WeatherStream:
         except KeyError:
             self.sim_start_idx = int(self.stream_times.searchsorted(start_datetime, side="left"))
 
+        if self.use_gsi:
+            # Build GSI tracker seeded with pre-simulation daily summaries
+            pre_summaries = self._build_pre_sim_summaries(
+                hourly_data, buffered_start, start_datetime
+            )
+            init_rain = self.stream[self.sim_start_idx].rain
+            self.gsi_tracker = GSITracker(self.geo, pre_summaries, init_rain)
+        else:
+            self.gsi_tracker = None
         if self.gsi_tracker is not None:
             self.gsi_tracker._last_cum_rain = self.stream[self.sim_start_idx].rain
 
@@ -583,6 +592,21 @@ class WeatherStream:
 
         self.stream = list(self.generate_stream(hourly_data))
 
+        if self.use_gsi:
+            # Build GSI tracker seeded with pre-simulation daily summaries
+            wxs_hourly = {
+                "date": df.index,
+                "temperature": df["temperature"].values,
+                "rel_humidity": df["rel_humidity"].values,
+                "rain": df["rain"].values,
+            }
+            pre_summaries = self._build_pre_sim_summaries(
+                wxs_hourly, data_start, start_datetime
+            )
+            init_rain = self.stream[self.sim_start_idx].rain
+            self.gsi_tracker = GSITracker(self.geo, pre_summaries, init_rain)
+        else:
+            self.gsi_tracker = None
         if self.gsi_tracker is not None:
             self.gsi_tracker._last_cum_rain = self.stream[self.sim_start_idx].rain
 
@@ -681,6 +705,47 @@ class WeatherStream:
         Aggregates hourly observations into per-day min/max temperature,
         min humidity, and total rainfall, matching the aggregation used
         by :meth:`GSITracker.compute_gsi`.
+
+        Args:
+            hourly_data: Hourly weather dictionary with keys ``'date'``,
+                ``'temperature'`` (Fahrenheit), ``'rel_humidity'`` (percent),
+                ``'rain'`` (cm, non-cumulative per-hour increments).
+            data_start: Start of the pre-simulation data window.
+            sim_start: Simulation start datetime.
+
+        Returns:
+            List of :class:`DailySummary`, oldest first, covering up to
+            56 days before *sim_start*.
+        """
+        filtered = filter_hourly_data(hourly_data, data_start, sim_start)
+        df = pd.DataFrame(filtered).set_index("date")
+
+        if df.empty:
+            return []
+
+        daily_min_temp = df["temperature"].resample('D').min()
+        daily_max_temp = df["temperature"].resample('D').max()
+        daily_min_rh = df["rel_humidity"].resample('D').min()
+        daily_rain = df["rain"].resample('D').sum()
+
+        summaries = []
+        for date in daily_min_temp.index:
+            summaries.append(DailySummary(
+                date=date.date() if hasattr(date, 'date') else date,
+                min_temp_F=daily_min_temp[date],
+                max_temp_F=daily_max_temp[date],
+                min_rh=daily_min_rh[date],
+                rain_cm=daily_rain[date],
+            ))
+        return summaries
+
+    def _build_pre_sim_summaries(self, hourly_data: dict,
+                                 data_start, sim_start) -> List[DailySummary]:
+        """Convert pre-simulation hourly data into daily summaries for GSI tracking.
+
+        Aggregates hourly observations into per-day min/max temperature,
+        min humidity, and total rainfall, matching the aggregation used
+        by :meth:`calc_GSI`.
 
         Args:
             hourly_data: Hourly weather dictionary with keys ``'date'``,
