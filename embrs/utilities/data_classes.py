@@ -408,6 +408,7 @@ class SimParams:
     user_path: Optional[str] = None
     user_class: Optional[str] = None
     burn_area_threshold: Optional[float] = 0.75
+    vw_decay_tau: Optional[float] = 120.0
     write_logs: Optional[bool] = None
 
 

@@ -14,7 +14,10 @@ from embrs.models.van_wagner_water import (
     heat_to_extinguish_kJ,
     volume_L_to_energy_kJ,
     compute_suppression_ratio,
-    compute_moisture_injection,
+    flame_depth_m,
+    burning_zone_area_m2,
+    efficiency_for_intensity,
+    _DEFAULT_EFFICIENCY_TABLE,
 )
 
 _KCAL_TO_KJ = 4.184
@@ -212,51 +215,106 @@ class TestSuppressionRatio:
         """Negative heat needed -> 1.0."""
         assert compute_suppression_ratio(50.0, -10.0) == pytest.approx(1.0)
 
+class TestFlameDepth:
+    """Tests for flame_depth_m (Van Wagner Eq. 2a-2b, Thomas 1963)."""
 
-class TestMoistureInjection:
-    """Tests for compute_moisture_injection."""
+    def test_I_100_kcal(self):
+        """I=100 kcal/s/m → L=1.71m, D=0.855m (Table 2)."""
+        D = flame_depth_m(100.0)
+        L = 0.0792 * 100.0 ** (2.0 / 3.0)
+        assert D == pytest.approx(L / 2.0, rel=1e-6)
+        assert D == pytest.approx(0.855, rel=1e-2)
 
-    def test_zero_ratio_no_change(self):
-        """Zero suppression ratio -> moisture unchanged."""
-        fmois = np.array([0.06, 0.07, 0.08, 0.06, 0.30, 0.80])
-        result = compute_moisture_injection(fmois, 0.25, 0.0)
-        np.testing.assert_array_almost_equal(result, fmois)
+    def test_I_1000_kcal(self):
+        """I=1000 kcal/s/m → L=7.92m, D=3.96m (Table 2)."""
+        D = flame_depth_m(1000.0)
+        L = 0.0792 * 1000.0 ** (2.0 / 3.0)
+        assert D == pytest.approx(L / 2.0, rel=1e-6)
+        assert D == pytest.approx(3.96, rel=1e-2)
 
-    def test_full_ratio_reaches_dead_mx(self):
-        """Ratio 1.0 -> dead fuel classes reach dead_mx."""
-        fmois = np.array([0.06, 0.07, 0.08, 0.06, 0.30, 0.80])
-        dead_mx = 0.25
-        result = compute_moisture_injection(fmois, dead_mx, 1.0)
+    def test_I_10000_kcal(self):
+        """I=10000 kcal/s/m → L=36.7m, D=18.4m (Table 2)."""
+        D = flame_depth_m(10000.0)
+        L = 0.0792 * 10000.0 ** (2.0 / 3.0)
+        assert D == pytest.approx(L / 2.0, rel=1e-6)
+        assert D == pytest.approx(18.4, rel=1e-2)
 
-        # Dead fuel classes (0-3) should be at dead_mx
-        for i in range(4):
-            assert result[i] == pytest.approx(dead_mx)
+    def test_zero_intensity(self):
+        """I=0 → D=0."""
+        assert flame_depth_m(0.0) == 0.0
 
-        # Live fuel classes (4-5) unchanged
-        assert result[4] == pytest.approx(0.30)
-        assert result[5] == pytest.approx(0.80)
+    def test_negative_intensity(self):
+        """I<0 → D=0."""
+        assert flame_depth_m(-50.0) == 0.0
 
-    def test_half_ratio_halfway(self):
-        """Ratio 0.5 -> dead fuel classes halfway to dead_mx."""
-        fmois = np.array([0.06, 0.07, 0.08, 0.06, 0.30, 0.80])
-        dead_mx = 0.25
-        result = compute_moisture_injection(fmois, dead_mx, 0.5)
 
-        for i in range(4):
-            expected = fmois[i] + 0.5 * (dead_mx - fmois[i])
-            assert result[i] == pytest.approx(expected)
+class TestBurningZoneArea:
+    """Tests for burning_zone_area_m2."""
 
-    def test_does_not_modify_input(self):
-        """Input array should not be modified."""
-        fmois = np.array([0.06, 0.07, 0.08, 0.06, 0.30, 0.80])
-        original = fmois.copy()
-        compute_moisture_injection(fmois, 0.25, 1.0)
-        np.testing.assert_array_equal(fmois, original)
+    def test_known_values(self):
+        """Area = flame_depth × front_length for known intensity."""
+        I = 1000.0  # kcal/s/m
+        front = 30.0  # meters
+        expected = flame_depth_m(I) * front
+        assert burning_zone_area_m2(I, front) == pytest.approx(expected, rel=1e-6)
 
-    def test_live_fuel_unchanged(self):
-        """Live fuel indices (4, 5) should always remain unchanged."""
-        fmois = np.array([0.10, 0.10, 0.10, 0.10, 0.50, 0.90])
-        result = compute_moisture_injection(fmois, 0.30, 0.8)
+    def test_zero_intensity(self):
+        """Zero intensity → 0.0."""
+        assert burning_zone_area_m2(0.0, 30.0) == 0.0
 
-        assert result[4] == pytest.approx(0.50)
-        assert result[5] == pytest.approx(0.90)
+    def test_negative_intensity(self):
+        """Negative intensity → 0.0."""
+        assert burning_zone_area_m2(-100.0, 30.0) == 0.0
+
+    def test_zero_front_length(self):
+        """Zero front length → 0.0."""
+        assert burning_zone_area_m2(1000.0, 0.0) == 0.0
+
+    def test_negative_front_length(self):
+        """Negative front length → 0.0."""
+        assert burning_zone_area_m2(1000.0, -5.0) == 0.0
+
+
+class TestEfficiencyForIntensity:
+    """Tests for efficiency_for_intensity with default and custom tables."""
+
+    def test_at_breakpoint_0(self):
+        """At first breakpoint (0 kW/m) → 2.0."""
+        assert efficiency_for_intensity(0.0) == pytest.approx(2.0)
+
+    def test_at_breakpoint_350(self):
+        """At breakpoint 350 kW/m → 2.5."""
+        assert efficiency_for_intensity(350.0) == pytest.approx(2.5)
+
+    def test_at_breakpoint_2000(self):
+        """At breakpoint 2000 kW/m → 5.0."""
+        assert efficiency_for_intensity(2000.0) == pytest.approx(5.0)
+
+    def test_at_breakpoint_3500(self):
+        """At breakpoint 3500 kW/m → 8.0."""
+        assert efficiency_for_intensity(3500.0) == pytest.approx(8.0)
+
+    def test_interpolation_midpoint(self):
+        """Midpoint between 0 and 350 kW/m → 2.25."""
+        assert efficiency_for_intensity(175.0) == pytest.approx(2.25, rel=1e-6)
+
+    def test_interpolation_between_2000_3500(self):
+        """Midpoint between 2000 and 3500 → 6.5."""
+        mid = (2000.0 + 3500.0) / 2.0
+        assert efficiency_for_intensity(mid) == pytest.approx(6.5, rel=1e-6)
+
+    def test_below_minimum_clamps(self):
+        """Below 0 kW/m → clamps to first value (2.0)."""
+        assert efficiency_for_intensity(-100.0) == pytest.approx(2.0)
+
+    def test_above_maximum_clamps(self):
+        """Above 3500 kW/m → clamps to last value (8.0)."""
+        assert efficiency_for_intensity(5000.0) == pytest.approx(8.0)
+
+    def test_custom_table(self):
+        """Custom table should override default."""
+        custom = [(0.0, 1.0), (100.0, 3.0)]
+        assert efficiency_for_intensity(50.0, table=custom) == pytest.approx(2.0)
+        assert efficiency_for_intensity(0.0, table=custom) == pytest.approx(1.0)
+        assert efficiency_for_intensity(100.0, table=custom) == pytest.approx(3.0)
+        assert efficiency_for_intensity(200.0, table=custom) == pytest.approx(3.0)

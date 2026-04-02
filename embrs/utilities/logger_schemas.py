@@ -74,6 +74,7 @@ class CellLogEntry:
     arrival_time: float
     suppression_count: int = 0
     n_disabled_locs: int = 0
+    water_applied_kJ: float = 0.0
 
     def to_dict(self) -> dict:
         """Convert entry to dictionary for serialization."""
