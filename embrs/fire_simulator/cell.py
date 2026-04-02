@@ -1315,7 +1315,8 @@ class Cell:
             retardant=self._retardant,
             arrival_time=self._arrival_time,
             suppression_count=self._suppression_count,
-            n_disabled_locs=self.n_disabled_locs
+            n_disabled_locs=self.n_disabled_locs,
+            water_applied_kJ=self.water_applied_kJ
         )
 
         return entry

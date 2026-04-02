@@ -1,8 +1,30 @@
 """Van Wagner & Taylor (2022) energy-balance water suppression model.
 
-Implements "Theoretical Amounts of Water to Put Out Forest Fires" equations
-for computing the energy required to extinguish a fire and the corresponding
-moisture injection from applied water.
+Implements a **binary-threshold** suppression model based on
+"Theoretical Amounts of Water to Put Out Forest Fires" (Van Wagner &
+Taylor 2022, Information Report BC-X-458).
+
+Water drops accumulate cooling energy (``water_applied_kJ``) that decays
+exponentially over time. Each simulation tick, the energy required for
+extinguishment is computed from the current fire state using Van Wagner's
+Eq. 7b (flame quenching) and Eq. 10b (fuel cooling), with an
+intensity-dependent efficiency multiplier. When the accumulated energy
+meets or exceeds the extinguishment threshold the cell's dead fuel
+moisture is pushed to the extinction value, zeroing the rate of spread
+via Rothermel's moisture damping. Fire burns completely unperturbed
+until that threshold is crossed -- there is no intermediate moisture
+injection or partial suppression from water.
+
+Key functions:
+    - ``heat_absorbed_per_kg_water`` (Eq. 1a/1b)
+    - ``water_depth_quench_flame_mm`` (Eq. 7b)
+    - ``water_depth_cool_fuel_mm`` (Eq. 10b)
+    - ``heat_to_extinguish_kJ`` -- full pipeline
+    - ``flame_depth_m`` (Eq. 2a-2b, Thomas 1963)
+    - ``burning_zone_area_m2`` -- active flame strip area
+    - ``efficiency_for_intensity`` -- piecewise-linear lookup table
+    - ``volume_L_to_energy_kJ`` -- water volume to cooling energy
+    - ``compute_suppression_ratio`` -- ratio of applied to needed energy
 
 All functions are pure math with no simulation dependencies.
 
