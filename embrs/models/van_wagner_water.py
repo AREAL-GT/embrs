@@ -86,6 +86,91 @@ def water_depth_combined_mm(I_kW_m: float, W_1_kg_m2: float) -> float:
     return water_depth_quench_flame_mm(I_kW_m) + water_depth_cool_fuel_mm(W_1_kg_m2)
 
 
+def flame_depth_m(I_kcal_s_m: float) -> float:
+    """Flame depth from Thomas' correlation (Van Wagner Eq. 2a-2b).
+
+    L = 0.0792 × I^(2/3)  [m]  (Eq. 2b, Thomas 1963)
+    D = L / 2              [m]  (Eq. 2a)
+
+    This uses Van Wagner's specific parameterization of Thomas (1963),
+    which is coupled to the water depth equations (Eq. 7b, 10b).
+    Do NOT substitute other flame length correlations (e.g. Brown &
+    Davis 1973 from rothermel.calc_flame_len) — the suppression
+    energy balance depends on internal consistency with Eq. 2b.
+
+    Args:
+        I_kcal_s_m: Fireline intensity in kcal/(s·m).
+            Convert from BTU/(ft·min) via BTU_ft_min_to_kcal_s_m().
+
+    Returns:
+        Flame depth in meters. Returns 0.0 if I_kcal_s_m <= 0.
+    """
+    if I_kcal_s_m <= 0.0:
+        return 0.0
+    L = 0.0792 * I_kcal_s_m ** (2.0 / 3.0)
+    return L / 2.0
+
+
+def burning_zone_area_m2(I_kcal_s_m: float, front_length_m: float) -> float:
+    """Area of the active burning zone (flame depth x fire front length).
+
+    The burning zone is the strip of actively flaming fuel behind the
+    fire front, with depth D from Thomas' correlation (Eq. 2a-2b).
+
+    Args:
+        I_kcal_s_m: Fireline intensity in kcal/(s·m).
+        front_length_m: Length of fire front in meters.
+
+    Returns:
+        Burning zone area in m². Returns 0.0 if either input is <= 0.
+    """
+    if I_kcal_s_m <= 0.0 or front_length_m <= 0.0:
+        return 0.0
+    return flame_depth_m(I_kcal_s_m) * front_length_m
+
+
+# Default intensity-efficiency breakpoints (kW/m, efficiency_multiplier).
+# Sources: Van Wagner Table 4 (<350), Plucinski 2019 (350-2000),
+# Andrews 2018 RMRS-GTR-371 (2000-3500), NWCG (>3500).
+_DEFAULT_EFFICIENCY_TABLE = [
+    (0.0,    2.0),
+    (350.0,  2.5),
+    (2000.0, 5.0),
+    (3500.0, 8.0),
+]
+
+def efficiency_for_intensity(I_kW_m: float,
+                             table: list = None) -> float:
+    """Piecewise-linear efficiency multiplier based on fireline intensity.
+
+    Args:
+        I_kW_m: Fireline intensity in kW/m. This function uses kW/m
+            because the suppression literature (Andrews 2018, Plucinski
+            2019) reports thresholds in kW/m.
+        table: List of (intensity_kW_m, efficiency) breakpoints, sorted
+            by intensity ascending. If None, uses default table.
+
+    Returns:
+        Interpolated efficiency multiplier.
+    """
+    if table is None:
+        table = _DEFAULT_EFFICIENCY_TABLE
+
+    if I_kW_m <= table[0][0]:
+        return table[0][1]
+    if I_kW_m >= table[-1][0]:
+        return table[-1][1]
+
+    for i in range(len(table) - 1):
+        I_lo, e_lo = table[i]
+        I_hi, e_hi = table[i + 1]
+        if I_lo <= I_kW_m <= I_hi:
+            t = (I_kW_m - I_lo) / (I_hi - I_lo)
+            return e_lo + t * (e_hi - e_lo)
+
+    return table[-1][1]
+
+
 def heat_to_extinguish_kJ(I_kW_m: float, W_1_kg_m2: float,
                            fire_area_m2: float, efficiency: float = 2.5,
                            T_a: float = 20.0) -> float:
@@ -147,25 +232,3 @@ def compute_suppression_ratio(water_applied_kJ: float,
     if heat_to_extinguish <= 0.0:
         return 1.0
     return min(water_applied_kJ / heat_to_extinguish, 1.0)
-
-
-def compute_moisture_injection(current_fmois: np.ndarray, dead_mx: float,
-                                suppression_ratio: float) -> np.ndarray:
-    """Compute moisture injection toward extinction for dead fuel classes.
-
-    Dead fuel classes (indices 0–3) are pushed toward dead_mx proportionally
-    to suppression_ratio. Live fuel classes (indices 4–5) are unchanged.
-
-    Args:
-        current_fmois: Current fuel moisture array, shape (6,).
-        dead_mx: Dead fuel moisture of extinction (fraction).
-        suppression_ratio: Ratio in [0, 1] from compute_suppression_ratio().
-
-    Returns:
-        New moisture array (copy; input is not modified).
-    """
-    new_fmois = current_fmois.copy()
-    # Dead fuel classes: indices 0, 1, 2, 3
-    for i in range(min(4, len(new_fmois))):
-        new_fmois[i] = current_fmois[i] + suppression_ratio * (dead_mx - current_fmois[i])
-    return new_fmois

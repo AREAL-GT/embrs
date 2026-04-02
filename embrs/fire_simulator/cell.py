@@ -143,6 +143,8 @@ class Cell:
         # Van Wagner energy-balance water suppression (Van Wagner & Taylor 2022)
         self.water_applied_kJ = 0.0   # Cumulative cooling energy from water drops
         self._vw_efficiency = 2.5     # Application efficiency multiplier (Table 4)
+        self._vw_tau = None               # Read from parent on first decay call
+        self._vw_last_decay_time_s = 0.0  # Last time decay was applied
 
         # Width in meters of any fuel discontinuity within cell (road or firebreak)
         self._break_width = 0 
@@ -227,6 +229,8 @@ class Cell:
         self.local_rain = 0.0
         self.water_applied_kJ = 0.0
         self._vw_efficiency = 2.5
+        self._vw_tau = None
+        self._vw_last_decay_time_s = 0.0
         self._break_width = 0
         self.breached = True
         self.lofted = False
@@ -322,6 +326,8 @@ class Cell:
         # Clear VW water suppression state
         self.water_applied_kJ = 0.0
         self._vw_efficiency = 2.5
+        self._vw_tau = None
+        self._vw_last_decay_time_s = 0.0
 
         # Restore full neighbor set
         self._burnable_neighbors = dict(self._neighbors)
@@ -1020,18 +1026,20 @@ class Cell:
 
         self.has_steady_state = False
 
-    def water_drop_vw(self, volume_L: float, efficiency: float = 2.5,
+    def water_drop_vw(self, volume_L: float, efficiency: float = None,
                        T_a: float = 20.0):
         """Apply water using Van Wagner (2022) energy-balance model.
 
         Converts water volume to cooling energy (Eq. 1b) and accumulates in
-        water_applied_kJ. Moisture injection is applied during iterate() by
-        apply_vw_suppression().
+        water_applied_kJ. Extinguishment is checked during iterate() by
+        check_vw_extinguishment().
 
         Args:
             volume_L: Water volume in liters (1 L = 1 kg).
-            efficiency: Application efficiency multiplier (Table 4, Van Wagner
-                2022). Typical range 2.0–4.0. Default 2.5.
+            efficiency: Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table (Van Wagner Table 4,
+                Plucinski 2019, Andrews 2018). Pass a specific float to
+                override (e.g. 2.5 for backward-compatible behavior).
             T_a: Ambient air temperature in °C. Default 20.
 
         Raises:
@@ -1045,62 +1053,117 @@ class Cell:
 
         from embrs.models.van_wagner_water import volume_L_to_energy_kJ
 
-        self._vw_efficiency = efficiency
+        self._vw_efficiency = efficiency  # None = use table in check method
         energy_kJ = volume_L_to_energy_kJ(volume_L, T_a)
         self.water_applied_kJ += energy_kJ
-        self.has_steady_state = False
 
-    def apply_vw_suppression(self):
-        """Apply moisture injection from accumulated Van Wagner water energy.
+        # Initialize decay tracking from first drop
+        if self._vw_last_decay_time_s == 0.0 and self._parent is not None:
+            parent = self._parent()
+            if parent is not None:
+                self._vw_last_decay_time_s = parent.curr_time_s
 
-        Called by iterate() for cells with water_applied_kJ > 0. Computes
-        suppression ratio from current fire state, then injects moisture
-        toward dead_mx proportionally.
+    def decay_water_energy(self, current_time_s: float):
+        """Apply exponential decay to accumulated water cooling energy.
 
-        Uses:
-            - I_ss (BTU/ft/min) converted to kW/m
-            - fuel.w_n_dead + w_n_live (lb/ft²) converted to kg/m²
-            - fire_area_m2 property
-            - self._vw_efficiency (stored from water_drop_vw call)
-            - heat_to_extinguish_kJ() (Eq. 7b + 10b + Table 4)
-            - compute_suppression_ratio()
-            - compute_moisture_injection()
+        Models evaporation of applied water over time. Called each tick
+        for cells with water_applied_kJ > 0.
+
+        Args:
+            current_time_s: Current simulation time in seconds.
 
         Side Effects:
-            - Modifies self.fmois
-            - Sets self.has_steady_state = False
+            - Reduces self.water_applied_kJ by exp(-dt/tau)
+            - Updates self._vw_last_decay_time_s
+            - Clears water_applied_kJ to 0 if decayed below threshold
+        """
+        import math
+        dt = current_time_s - self._vw_last_decay_time_s
+        if dt <= 0.0:
+            return
+        self._vw_last_decay_time_s = current_time_s
+
+        # Read tau from parent on first call, then use cached value
+        if self._vw_tau is None:
+            parent = self._parent()
+            if parent is not None and hasattr(parent, '_vw_decay_tau'):
+                self._vw_tau = parent._vw_decay_tau
+            else:
+                self._vw_tau = 120.0  # fallback default
+
+        self.water_applied_kJ *= math.exp(-dt / self._vw_tau)
+
+        # Clear negligible residual energy to avoid infinite tailing
+        if self.water_applied_kJ < 1.0:  # < 1 kJ is negligible
+            self.water_applied_kJ = 0.0
+
+    def check_vw_extinguishment(self) -> bool:
+        """Check if accumulated water energy meets the extinguishment threshold.
+
+        Computes heat_needed from current fire state using Van Wagner
+        Eq. 7b + 10b with intensity-dependent efficiency. Uses
+        max(burning_zone_area, fire_area_m2) as the effective area.
+
+        Returns:
+            True if suppression_ratio >= 1.0 (cell should be extinguished).
         """
         from embrs.models.van_wagner_water import (
             heat_to_extinguish_kJ, compute_suppression_ratio,
-            compute_moisture_injection
+            burning_zone_area_m2, efficiency_for_intensity,
         )
-        from embrs.utilities.unit_conversions import BTU_ft_min_to_kW_m, Lbsft2_to_KiSq
+        from embrs.utilities.unit_conversions import (
+            BTU_ft_min_to_kW_m, BTU_ft_min_to_kcal_s_m, Lbsft2_to_KiSq,
+        )
 
-        # Convert fireline intensity from BTU/(ft·min) to kW/m
-        # I_t is a numpy array; use head-fire value (max)
+        if self.water_applied_kJ <= 0.0:
+            return False
+
+        # Fireline intensity (head-fire value) in Rothermel's native BTU/(ft·min)
         I_btu = max(self.I_t) if len(self.I_t) > 0 else 0.0
+
+        # Convert to both unit systems using existing converters:
+        #   - kcal/(s·m) for Van Wagner flame depth (Eq. 2b)
+        #   - kW/m for heat_to_extinguish_kJ (Eq. 7b, 10b) and efficiency table
+        I_kcal_s_m = BTU_ft_min_to_kcal_s_m(I_btu)
         I_kW_m = BTU_ft_min_to_kW_m(I_btu)
 
-        # Dead fuel loading in kg/m² (w_n_dead is in lb/ft²)
+        # Dead fuel loading
         W_1_kg_m2 = Lbsft2_to_KiSq(self.fuel.w_n_dead)
 
-        # Current fire area
-        area_m2 = self.fire_area_m2
+        # Effective area: max of burning zone and actual fire area
+        bz_area = burning_zone_area_m2(I_kcal_s_m, self.fire_front_length_m)
+        effective_area = max(bz_area, self.fire_area_m2)
 
-        # Compute energy needed to extinguish
+        # Efficiency: use stored override or intensity-dependent table
+        if self._vw_efficiency is not None:
+            efficiency = self._vw_efficiency
+        else:
+            efficiency = efficiency_for_intensity(I_kW_m)
+
+        # Compute energy needed (heat_to_extinguish_kJ uses kW/m internally)
         heat_needed = heat_to_extinguish_kJ(
-            I_kW_m, W_1_kg_m2, area_m2,
-            efficiency=self._vw_efficiency
+            I_kW_m, W_1_kg_m2, effective_area,
+            efficiency=efficiency
         )
 
-        # Suppression ratio
+        # Check threshold
         ratio = compute_suppression_ratio(self.water_applied_kJ, heat_needed)
+        return ratio >= 1.0
 
-        # Inject moisture into dead fuel classes toward extinction
-        self.fmois = compute_moisture_injection(
-            self.fmois, self.fuel.dead_mx, ratio
-        )
+    def extinguish_vw(self):
+        """Push dead fuel moisture to extinction, triggering ROS = 0.
 
+        Called when check_vw_extinguishment() returns True. Sets dead
+        fuel classes (indices 0-3) to dead_mx so that Rothermel's
+        moisture damping zeros the reaction intensity.
+
+        Side Effects:
+            - Sets dead fuel moisture classes to dead_mx
+            - Sets has_steady_state = False
+        """
+        dead_mx = self.fuel.dead_mx
+        for i in range(min(4, len(self.fmois))):
+            self.fmois[i] = dead_mx
         self.has_steady_state = False
 
     def __str__(self) -> str:
@@ -1399,6 +1462,55 @@ class Cell:
         area *= 0.25 * (np.pi / 180)
 
         return min(area, self._cell_area)
+
+    @property
+    def fire_front_length_m(self) -> float:
+        """Approximate fire front length within cell.
+
+        For center ignition (n_loc=0): full perimeter of fire spread polygon
+        via chord-length summation. No artificial floor — center ignitions
+        (spot fires, starting ignitions) are genuinely small local fires
+        with no backing fire behind them.
+
+        For boundary ignition (n_loc=1-12): perimeter of the arc sector,
+        floored at cell_size. The fire front entering from a neighbor is
+        at least as wide as the cell edge, backed by the neighbor's fire.
+
+        Returns 0.0 for non-burning cells or cells with no spread data.
+        """
+        if self._state != CellStates.FIRE or len(self.fire_spread) == 0:
+            return 0.0
+        if self._ign_n_loc is None:
+            return 0.0
+
+        fs = self.fire_spread
+        dirs_rad = np.deg2rad(self.directions)
+        n = len(fs)
+
+        if n < 2:
+            # Boundary ignition with minimal data — use cell edge
+            if self._ign_n_loc != 0:
+                return self._cell_size
+            return 0.0
+
+        perimeter = 0.0
+        for i in range(n - 1):
+            # Chord length between adjacent spread tips
+            dx = fs[i+1] * np.cos(dirs_rad[i+1]) - fs[i] * np.cos(dirs_rad[i])
+            dy = fs[i+1] * np.sin(dirs_rad[i+1]) - fs[i] * np.sin(dirs_rad[i])
+            perimeter += np.sqrt(dx*dx + dy*dy)
+
+        # Close the polygon for center ignition
+        if self._ign_n_loc == 0:
+            dx = fs[0] * np.cos(dirs_rad[0]) - fs[-1] * np.cos(dirs_rad[-1])
+            dy = fs[0] * np.sin(dirs_rad[0]) - fs[-1] * np.sin(dirs_rad[-1])
+            perimeter += np.sqrt(dx*dx + dy*dy)
+            # No floor for center ignitions — spot fires are genuinely small
+            return perimeter
+
+        # Boundary ignition: floor at cell_size (fire front is at least
+        # one cell edge wide, backed by neighbor's fire)
+        return max(perimeter, self._cell_size)
 
     @property
     def x_pos(self) -> float:

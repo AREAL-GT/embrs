@@ -581,11 +581,11 @@ class TestWaterDropVW:
         with pytest.raises(ValueError, match="Water volume must be >= 0"):
             burnable_cell.water_drop_vw(-1.0)
 
-    def test_sets_has_steady_state_false(self, burnable_cell):
-        """water_drop_vw should invalidate steady state."""
+    def test_does_not_change_has_steady_state(self, burnable_cell):
+        """water_drop_vw should NOT change steady state (binary threshold model)."""
         burnable_cell.has_steady_state = True
         burnable_cell.water_drop_vw(10.0)
-        assert burnable_cell.has_steady_state is False
+        assert burnable_cell.has_steady_state is True
 
     def test_reset_to_fuel_clears_water_applied_kJ(self, burnable_cell):
         """reset_to_fuel should reset water_applied_kJ to 0."""
