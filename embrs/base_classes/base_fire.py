@@ -602,6 +602,7 @@ class BaseFireSim:
         self.wind_forecast = self._weather_manager.wind_forecast
 
         self._burn_area_threshold = getattr(sim_params, 'burn_area_threshold', 0.75)
+        self._vw_decay_tau = getattr(sim_params, 'vw_decay_tau', 120.0)
 
         self.model_spotting = sim_params.model_spotting
         self._spot_ign_prob = 0.0
@@ -922,11 +923,15 @@ class BaseFireSim:
     def _update_active_water_drops(self):
         """Update active water drops and remove those whose effect has diminished.
 
-        Removes cells from active water drops when their moisture content
-        falls below 50% of their fuel's extinction moisture.
+        Keeps cells that have either:
+        - Elevated moisture from rain/moisture-bump drops (dead_mf >= 50% of dead_mx)
+        - Undecayed VW cooling energy (water_applied_kJ > 0)
         """
         def should_keep_water_drop(cell) -> bool:
-            """Check if water drop effect should continue."""
+            # VW energy still active
+            if cell.water_applied_kJ > 0.0:
+                return True
+            # Rain/moisture-bump pathway: moisture still elevated
             if self.is_firesim():
                 cell._update_moisture(self._curr_weather_idx, self._weather_stream)
             dead_mf, _ = get_characteristic_moistures(cell.fuel, cell.fmois)
@@ -1512,14 +1517,15 @@ class BaseFireSim:
         self._control_handler.water_drop_at_cell_as_moisture_bump(cell, moisture_inc)
 
     def water_drop_at_xy_vw(self, x_m: float, y_m: float, volume_L: float,
-                             efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                             efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop at the specified coordinates.
 
         Args:
             x_m (float): X position in meters.
             y_m (float): Y position in meters.
             volume_L (float): Water volume in liters (1 L = 1 kg).
-            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency (float): Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a (float): Ambient air temperature in °C. Default 20.
 
         Note: This method delegates to ControlActionHandler.water_drop_at_xy_vw().
@@ -1527,14 +1533,15 @@ class BaseFireSim:
         self._control_handler.water_drop_at_xy_vw(x_m, y_m, volume_L, efficiency, T_a)
 
     def water_drop_at_indices_vw(self, row: int, col: int, volume_L: float,
-                                  efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                                  efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop at the specified grid indices.
 
         Args:
             row (int): Row index in the cell grid.
             col (int): Column index in the cell grid.
             volume_L (float): Water volume in liters (1 L = 1 kg).
-            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency (float): Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a (float): Ambient air temperature in °C. Default 20.
 
         Note: This method delegates to ControlActionHandler.water_drop_at_indices_vw().
@@ -1542,13 +1549,14 @@ class BaseFireSim:
         self._control_handler.water_drop_at_indices_vw(row, col, volume_L, efficiency, T_a)
 
     def water_drop_at_cell_vw(self, cell: 'Cell', volume_L: float,
-                               efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                               efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop to the specified cell.
 
         Args:
             cell (Cell): Cell to apply water to.
             volume_L (float): Water volume in liters (1 L = 1 kg).
-            efficiency (float): Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency (float): Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a (float): Ambient air temperature in °C. Default 20.
 
         Raises:

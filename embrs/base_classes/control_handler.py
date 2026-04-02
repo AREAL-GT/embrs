@@ -279,14 +279,15 @@ class ControlActionHandler:
             self._updated_cells[cell.id] = cell
 
     def water_drop_at_xy_vw(self, x_m: float, y_m: float, volume_L: float,
-                             efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                             efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop at the specified coordinates.
 
         Args:
             x_m: X position in meters.
             y_m: Y position in meters.
             volume_L: Water volume in liters (1 L = 1 kg).
-            efficiency: Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency: Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a: Ambient air temperature in °C. Default 20.
         """
         cell = self._grid_manager.get_cell_from_xy(x_m, y_m, oob_ok=True)
@@ -294,21 +295,22 @@ class ControlActionHandler:
             self.water_drop_at_cell_vw(cell, volume_L, efficiency, T_a)
 
     def water_drop_at_indices_vw(self, row: int, col: int, volume_L: float,
-                                  efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                                  efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop at the specified grid indices.
 
         Args:
             row: Row index in the cell grid.
             col: Column index in the cell grid.
             volume_L: Water volume in liters (1 L = 1 kg).
-            efficiency: Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency: Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a: Ambient air temperature in °C. Default 20.
         """
         cell = self._grid_manager.get_cell_from_indices(row, col)
         self.water_drop_at_cell_vw(cell, volume_L, efficiency, T_a)
 
     def water_drop_at_cell_vw(self, cell: 'Cell', volume_L: float,
-                               efficiency: float = 2.5, T_a: float = 20.0) -> None:
+                               efficiency: float = None, T_a: float = 20.0) -> None:
         """Apply Van Wagner energy-balance water drop to the specified cell.
 
         Only applies to burnable cells. Adds cell to active water drops
@@ -317,7 +319,8 @@ class ControlActionHandler:
         Args:
             cell: Cell to apply water to.
             volume_L: Water volume in liters (1 L = 1 kg).
-            efficiency: Application efficiency multiplier (Table 4). Default 2.5.
+            efficiency: Application efficiency multiplier. If None (default),
+                uses intensity-dependent lookup table. Pass a float to override.
             T_a: Ambient air temperature in °C. Default 20.
 
         Raises:

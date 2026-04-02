@@ -62,7 +62,7 @@ class MockCell:
         """Mock moisture bump."""
         pass
 
-    def water_drop_vw(self, volume_L, efficiency=2.5, T_a=20.0):
+    def water_drop_vw(self, volume_L, efficiency=None, T_a=20.0):
         """Mock Van Wagner water drop."""
         from embrs.models.van_wagner_water import volume_L_to_energy_kJ
         self._vw_efficiency = efficiency

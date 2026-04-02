@@ -118,10 +118,14 @@ class FireSim(BaseFireSim):
             if needs_update:
                 cell._update_moisture(weather_idx, weather_stream)
 
-            # Van Wagner moisture injection (after DFM update, before surface_fire)
+            # Van Wagner binary-threshold suppression check
             if cell.water_applied_kJ > 0:
-                cell.apply_vw_suppression()
-                needs_update = True
+                cell.decay_water_energy(self._curr_time_s)
+                if cell.water_applied_kJ > 0 and cell.check_vw_extinguishment():
+                    cell.extinguish_vw()
+                    needs_update = True
+                    # ROS will be zero after surface_fire recompute;
+                    # propagate_fire handles suppress_to_fuel
 
             if needs_update:
                 update_steady(cell)
