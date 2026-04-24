@@ -31,13 +31,13 @@ import pickle
 import json
 
 # Change case number to run different validation case:
-case_num = 2
+case_num = 1
 
 # Spacing of the evaluation grid in metres. 10 m matches ata_validation.py.
 eval_spacing = 10
 
 # Maximum simulated duration in hours (matches ata_validation.py default).
-max_time_hr = 72
+max_time_hr = 60
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +198,20 @@ with open(map_params_path, "rb") as f:
 bounding_box = map_params.geo_info.bounds
 sim_bounds = (bounding_box.left, bounding_box.bottom, bounding_box.right, bounding_box.top)
 
+# Load metadata for the initial ignition polygon(s).
+# (extract_sim_hexagons_and_times also reads this file for cell_size; the
+# double-read is cheap and avoids reshaping its return signature.)
+with open(metadata_path, "r") as f:
+    _metadata = json.load(f)
+# Note: the metadata key is the typoed "initial_igntion" — match the
+# spelling that EMBRS actually writes. Fall back to the corrected spelling
+# in case it ever gets fixed upstream.
+ignition_geoms = (
+    _metadata["map"]["map contents"].get("initial_igntion")
+    or _metadata["map"]["map contents"].get("initial_ignition")
+    or []
+)
+
 # Load EMBRS hexagons + arrival times
 hexes, times, final_time_sim = extract_sim_hexagons_and_times(
     log_file, metadata_path, max_time_hr=max_time_hr, sim_bounds=sim_bounds,
@@ -250,10 +264,14 @@ only_ref = ref_burned & ~sim_burned
 diff = np.full_like(sim_grid, np.nan, dtype=np.float64)
 diff[both_burned] = sim_grid[both_burned] - ref_grid[both_burned]
 
-# Symmetric colormap range, robust to outliers via 98th percentile
+# Symmetric colormap range. The 95th percentile keeps the typical-cell color
+# pale (visually reinforcing the "good agreement" message that the metrics
+# carry) while still bounding the long tail from leading-edge outliers, which
+# would otherwise stretch the colormap and wash everything else out. Cells
+# beyond this clip will saturate at the colormap extremes.
 finite_diff = diff[np.isfinite(diff)]
 if finite_diff.size > 0:
-    abs_limit = float(np.percentile(np.abs(finite_diff), 98))
+    abs_limit = float(np.percentile(np.abs(finite_diff), 95))
     abs_limit = max(abs_limit, 1.0)  # avoid degenerate zero range
 else:
     abs_limit = 1.0
@@ -263,6 +281,25 @@ median_abs_diff = float(np.nanmedian(np.abs(finite_diff))) if finite_diff.size e
 
 extent = (x_min, x_min + nx * eval_spacing,
           y_min, y_min + ny * eval_spacing)
+
+# Compute a tight crop window around the union of burned cells so that the
+# figure isn't dominated by empty domain. A small margin (in cells) is added
+# so the burn isn't flush against the axes.
+burned_any = sim_burned | ref_burned
+if burned_any.any():
+    ys_idx, xs_idx = np.where(burned_any)
+    margin_cells = max(int(0.05 * max(nx, ny)), 5)
+    x_lo_idx = max(int(xs_idx.min()) - margin_cells, 0)
+    x_hi_idx = min(int(xs_idx.max()) + margin_cells, nx - 1)
+    y_lo_idx = max(int(ys_idx.min()) - margin_cells, 0)
+    y_hi_idx = min(int(ys_idx.max()) + margin_cells, ny - 1)
+    crop_xlim = (x_min + x_lo_idx * eval_spacing,
+                 x_min + (x_hi_idx + 1) * eval_spacing)
+    crop_ylim = (y_min + y_lo_idx * eval_spacing,
+                 y_min + (y_hi_idx + 1) * eval_spacing)
+else:
+    crop_xlim = (x_min, x_min + nx * eval_spacing)
+    crop_ylim = (y_min, y_min + ny * eval_spacing)
 
 # ---------------------------------------------------------------------------
 # Plot
@@ -285,7 +322,7 @@ ax.imshow(
     cmap=overlay_cmap,
     norm=overlay_norm,
     interpolation="nearest",
-    alpha=0.55,
+    alpha=0.35,
 )
 
 # Main signed difference layer
@@ -299,13 +336,58 @@ diff_im = ax.imshow(
     interpolation="nearest",
 )
 
+# Overlay the initial ignition polygon(s) so the reader has a spatial anchor
+# for spread direction. Coordinates in the metadata are in the local sim
+# frame (origin at the SW corner of the domain), so they are translated to
+# UTM by adding sim_bounds[0:2], matching the hexagon translation in
+# extract_sim_hexagons_and_times.
+from matplotlib.patches import Polygon as MplPolygon
+
+drew_ignition = False
+for geom in ignition_geoms:
+    if geom.get("type") != "Polygon":
+        continue
+    rings = geom.get("coordinates", [])
+    if not rings:
+        continue
+    outer_ring = [
+        (x + sim_bounds[0], y + sim_bounds[1]) for x, y in rings[0]
+    ]
+    ax.add_patch(
+        MplPolygon(
+            outer_ring,
+            closed=True,
+            fill=False,
+            edgecolor="black",
+            linewidth=2.0,
+            zorder=10,
+        )
+    )
+    drew_ignition = True
+
 ax.set_aspect("equal")
+ax.set_xlim(crop_xlim)
+ax.set_ylim(crop_ylim)
 ax.set_xlabel("Easting (m)")
 ax.set_ylabel("Northing (m)")
-ax.set_title(
-    f"Arrival Time Difference (EMBRS − FARSITE)  |  Case {case_num}\n"
+
+# Disable the floating 1e6 offset label on the UTM tick axes — full tick
+# labels are cleaner for a publication figure even if slightly longer.
+ax.ticklabel_format(useOffset=False, style="plain")
+ax.tick_params(axis="x", labelrotation=15)
+
+# Use fig-level title so the metrics line isn't clipped by the colorbar
+# (ax.set_title is constrained to the axes width, which the colorbar steals
+# half a column from).
+suptitle_obj = fig.suptitle(
+    f"Arrival Time Difference (EMBRS − FARSITE)  |  Case {case_num}  ({max_time_hr:.0f} h)",
+    fontsize=13, fontweight="bold", y=0.945,
+)
+metrics_text = fig.text(
+    0.5, 0.905,
     f"ATA: {ata_score:.3f}    Final Jaccard: {jaccard_score:.3f}    "
-    f"Mean |Δt|: {mean_abs_diff:.0f} min    Median |Δt|: {median_abs_diff:.0f} min"
+    f"Mean |Δt|: {mean_abs_diff:.0f} min    Median |Δt|: {median_abs_diff:.0f} min",
+    ha="center", va="center", fontsize=10,
 )
 
 cbar = fig.colorbar(diff_im, ax=ax, fraction=0.046, pad=0.04)
@@ -313,12 +395,30 @@ cbar.set_label("EMBRS − FARSITE arrival time (minutes)")
 
 # Legend for the categorical disagreement regions
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 legend_handles = [
-    Patch(facecolor="#d7191c", alpha=0.55, label="EMBRS only (over-extent)"),
-    Patch(facecolor="#2c7bb6", alpha=0.55, label="FARSITE only (under-extent)"),
+    Patch(facecolor="#d7191c", alpha=0.35, label="EMBRS only (over-extent)"),
+    Patch(facecolor="#2c7bb6", alpha=0.35, label="FARSITE only (under-extent)"),
 ]
-ax.legend(handles=legend_handles, loc="upper right", framealpha=0.9, fontsize=9)
+if drew_ignition:
+    legend_handles.append(
+        Line2D([0], [0], color="black", lw=2.0, label="Initial ignition")
+    )
+ax.legend(handles=legend_handles, loc="lower right", framealpha=0.95, fontsize=9)
 
-plt.tight_layout()
-plt.savefig(f"arrival_time_diff_case_{case_num}.png", dpi=200, bbox_inches="tight")
+# Reserve top space for the two-line figure-level title (suptitle + metrics).
+plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.88))
+
+# Re-center the title and metrics line on the axes (not the whole figure).
+# fig.suptitle / fig.text default to x=0.5, which is the figure's geometric
+# center — but the colorbar sits to the right of the axes, so the figure
+# center is shifted right of the burned region. Pulling the x to the axes
+# midpoint after tight_layout has finalized positions puts the title where
+# the reader expects it.
+ax_pos = ax.get_position()
+ax_center_x = 0.5 * (ax_pos.x0 + ax_pos.x1)
+suptitle_obj.set_x(ax_center_x)
+metrics_text.set_x(ax_center_x)
+
+plt.savefig(f"embrs/arrival_time_diff_case_{case_num}.png", dpi=200, bbox_inches="tight")
 plt.show()
