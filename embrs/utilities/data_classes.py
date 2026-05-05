@@ -384,6 +384,11 @@ class SimParams:
         user_path (str): Path to user control module.
         user_class (str): Name of user control class.
         write_logs (bool): Whether to write log files.
+        seed (Optional[int]): Master seed for reproducibility. When set, all
+            stochastic subsystems derive their RNG state from this single
+            integer via ``BaseFireSim.child_seed_sequence``. ``None`` (default)
+            preserves the legacy non-deterministic behavior. See the
+            seed-determinism work plan and ``tests/test_no_global_rng.py``.
     """
 
     map_params: Optional[MapParams] = None
@@ -410,6 +415,7 @@ class SimParams:
     burn_area_threshold: Optional[float] = 0.75
     vw_decay_tau: Optional[float] = 120.0
     write_logs: Optional[bool] = None
+    seed: Optional[int] = None
 
 
 @dataclass

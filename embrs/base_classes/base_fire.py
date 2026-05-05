@@ -13,12 +13,13 @@ Classes:
 
 from shapely.geometry import Point, Polygon, LineString
 from shapely import polygons as shapely_polygons, linearrings as shapely_linearrings
-from typing import Tuple, Union, List, Dict
+from typing import Tuple, Union, List, Dict, Optional
 from tqdm import tqdm
 import numpy as np
 import math as _math
 import pickle
 import copy
+import hashlib
 import os
 
 from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
@@ -141,6 +142,15 @@ class BaseFireSim:
         # Constant parameters
         self.display_frequency = 300
         self._sim_params = sim_params
+
+        # Master seed plumbing. SeedSequence(None) draws fresh OS entropy, so
+        # the legacy non-deterministic behavior is preserved when sim_params.seed
+        # is unset. Subsystems must call child_generator(name) / child_rng_seed(name)
+        # rather than touching np.random directly.
+        master_seed = getattr(sim_params, "seed", None)
+        self._master_seed = master_seed
+        self._seed_sequence = np.random.SeedSequence(master_seed)
+        self._child_seq_cache: Dict[str, np.random.SeedSequence] = {}
 
         # Weather manager placeholder (initialized in _parse_sim_params after weather data is loaded)
         self._weather_manager = None
@@ -292,6 +302,65 @@ class BaseFireSim:
         self._set_roads()
         
         print("Base initialization complete...")
+
+    # -------------------------------------------------------------------------
+    # Seed-determinism API
+    # -------------------------------------------------------------------------
+    #
+    # Subsystems that need randomness should call ``child_generator(name)`` to
+    # obtain a Generator seeded deterministically from the master seed and the
+    # subsystem name. Use a stable string identifier per subsystem (e.g.
+    # "embrs.fire", "embrs.embers", "firefighting"); the same name+master_seed
+    # combo always returns the same RNG state. Never call np.random directly —
+    # see ``tests/test_no_global_rng.py``.
+
+    @property
+    def master_seed(self) -> Optional[int]:
+        """Return the master seed passed via ``SimParams.seed`` (or None)."""
+        return self._master_seed
+
+    @property
+    def seed_sequence(self) -> np.random.SeedSequence:
+        """Return the master ``np.random.SeedSequence``.
+
+        ControlClass implementations and embedded subsystems should generally
+        call ``child_seed_sequence(name)`` instead so that adding/removing
+        consumers does not perturb other subsystems.
+        """
+        return self._seed_sequence
+
+    def child_seed_sequence(self, name: str) -> np.random.SeedSequence:
+        """Return a stable child ``SeedSequence`` for the given subsystem name.
+
+        The ``(master_seed, name)`` pair always maps to the same SeedSequence
+        for the lifetime of this FireSim. Different names produce statistically
+        independent sequences via the ``spawn_key`` mechanism.
+
+        The mapping from name to spawn_key uses BLAKE2b so it is independent
+        of PYTHONHASHSEED.
+        """
+        if name not in self._child_seq_cache:
+            digest = hashlib.blake2b(name.encode("utf-8"), digest_size=4).digest()
+            spawn_key_int = int.from_bytes(digest, "big")
+            self._child_seq_cache[name] = np.random.SeedSequence(
+                entropy=self._seed_sequence.entropy,
+                spawn_key=self._seed_sequence.spawn_key + (spawn_key_int,),
+            )
+        return self._child_seq_cache[name]
+
+    def child_rng_seed(self, name: str) -> int:
+        """Return a deterministic 64-bit int seed for the named subsystem.
+
+        Convenience wrapper around ``child_seed_sequence(name)`` for callers
+        (e.g. legacy APIs that take an ``int`` seed). New code should prefer
+        ``child_generator`` or ``child_seed_sequence``.
+        """
+        state = self.child_seed_sequence(name).generate_state(2, dtype=np.uint32)
+        return int(state[0]) | (int(state[1]) << 32)
+
+    def child_generator(self, name: str) -> np.random.Generator:
+        """Return a ``numpy.random.Generator`` seeded from the named subsystem."""
+        return np.random.default_rng(self.child_seed_sequence(name))
 
     def _create_cell(self, cell_id: int, col: int, row: int) -> Cell:
         """Factory method to create and initialize a cell.
