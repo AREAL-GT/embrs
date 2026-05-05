@@ -97,7 +97,12 @@ def main() -> int:
         return EXIT_COULD_NOT_RUN
 
     try:
-        weather = WeatherStream(sim_params)
+        # Mirror the construction in BaseFireSim._parse_sim_params (base_fire.py:573).
+        weather = WeatherStream(
+            sim_params.weather_input,
+            sim_params.map_params.geo_info,
+            use_gsi=not sim_params.fms_has_live,
+        )
     except Exception as e:
         print(f"[COULD-NOT-RUN] could not build WeatherStream: {e}", file=sys.stderr)
         traceback.print_exc()
