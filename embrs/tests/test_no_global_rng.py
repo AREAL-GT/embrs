@@ -161,9 +161,13 @@ def _collect_violations() -> List[Tuple[Path, int, str, str]]:
     return rows
 
 
-@pytest.mark.xfail(reason="populating allowlist through Phase 5", strict=False)
 def test_no_global_rng_in_production_code():
-    """Hard enforcement: fail on any non-allowlisted global-RNG/UUID4/time.time call."""
+    """Hard enforcement: fail on any non-allowlisted global-RNG/UUID4/time.time call.
+
+    EMBRS reached zero violations at the end of Phase 3 (predictor + forecast
+    pool RNG plumbing). The single ALLOWLIST entry is the Numba JIT kernel in
+    dead_fuel_moisture.py — see the ALLOWLIST comment for the rationale.
+    """
     rows = _collect_violations()
     if rows:
         pytest.fail(_format_violations(rows), pytrace=False)

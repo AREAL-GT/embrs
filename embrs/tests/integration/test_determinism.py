@@ -29,9 +29,10 @@ if str(_HELPERS_PATH) not in sys.path and _HELPERS_PATH.exists():
     sys.path.insert(0, str(_HELPERS_PATH))
 
 try:
-    from _determinism_helpers import hash_fire_grid  # type: ignore
+    from _determinism_helpers import hash_fire_grid, hash_prediction_output  # type: ignore
 except Exception:  # pragma: no cover — skip below
     hash_fire_grid = None  # type: ignore
+    hash_prediction_output = None  # type: ignore
 
 
 # Cfgs whose external assets (map dir, weather file) we expect to be present
@@ -117,6 +118,104 @@ def test_same_seed_same_outcome():
         f"  run A: {h_a}\n"
         f"  run B: {h_b}"
     )
+
+
+def _build_state_estimate(fire):
+    """Build a tiny StateEstimate for predictor.run() — uses the fire's
+    current burning + burnt cells. No-op if there's nothing burning."""
+    from embrs.utilities.data_classes import StateEstimate
+    from embrs.utilities.fire_util import UtilFuncs
+    burning = UtilFuncs.get_cell_polygons(fire._burning_cells)
+    burnt = UtilFuncs.get_cell_polygons(fire._burnt_cells)
+    return StateEstimate(burnt_polys=burnt, burning_polys=burning, start_time_s=None)
+
+
+def _run_predictor(fire, time_horizon_hr: float = 0.5):
+    """Construct a FirePredictor, run it once, return the PredictionOutput."""
+    from embrs.tools.fire_predictor import FirePredictor
+    from embrs.utilities.data_classes import PredictorParams
+
+    params = PredictorParams(
+        time_horizon_hr=time_horizon_hr,
+        time_step_s=30,
+        cell_size_m=fire.cell_size,
+        dead_mf=0.08,
+        live_mf=0.30,
+        model_spotting=False,
+    )
+    pred = FirePredictor(params, fire)
+    return pred.run(fire_estimate=_build_state_estimate(fire), visualize=False)
+
+
+@pytest.mark.slow
+def test_predictor_same_seed_same_outcome():
+    """Same master seed -> identical PredictionOutput from FirePredictor.run().
+
+    Exercises the seeded paths added in Phase 3:
+      - FirePredictor._rng_breach (firebreak Bernoulli)
+      - FirePredictor._rng_spot   (spot ignition Bernoulli)
+      - FirePredictor._rng_wind   (perturbed weather seeds)
+      - PerrymanSpotting._rng     (spawn off the embers SeedSequence)
+    Single-process (no run_ensemble); the worker-path is exercised by the
+    full-stack firefighting test in Phase 4+.
+    """
+    if hash_prediction_output is None:
+        pytest.skip("ra-cbba-core determinism helpers not on this machine")
+    cfg = _locate_runnable_cfg()
+    if cfg is None:
+        pytest.skip("no EMBRS cfg with locally-available map+weather assets")
+
+    fire_a = _build_fire(cfg, seed=42)
+    _run_n_iters(fire_a, _N_ITERS)
+    out_a = _run_predictor(fire_a)
+    h_a = hash_prediction_output(out_a)
+
+    fire_b = _build_fire(cfg, seed=42)
+    _run_n_iters(fire_b, _N_ITERS)
+    out_b = _run_predictor(fire_b)
+    h_b = hash_prediction_output(out_b)
+
+    assert h_a == h_b, (
+        f"hash_prediction_output differs between two predictor runs with the same seed.\n"
+        f"  run A: {h_a}\n"
+        f"  run B: {h_b}"
+    )
+
+
+@pytest.mark.slow
+def test_predictor_different_seed_different_outcome():
+    """Different master seeds -> different per-stream RNG state in the predictor.
+
+    Same sanity-check pattern as test_different_seed_changes_rng_state, but
+    on the predictor's owned generators.
+    """
+    if hash_prediction_output is None:
+        pytest.skip("ra-cbba-core determinism helpers not on this machine")
+    cfg = _locate_runnable_cfg()
+    if cfg is None:
+        pytest.skip("no EMBRS cfg with locally-available map+weather assets")
+
+    from embrs.tools.fire_predictor import FirePredictor
+    from embrs.utilities.data_classes import PredictorParams
+
+    fire_a = _build_fire(cfg, seed=42)
+    fire_b = _build_fire(cfg, seed=42)
+    fire_c = _build_fire(cfg, seed=99)
+
+    params = PredictorParams(
+        time_horizon_hr=0.5, time_step_s=30, cell_size_m=fire_a.cell_size,
+        dead_mf=0.08, live_mf=0.30, model_spotting=False,
+    )
+    pred_a = FirePredictor(params, fire_a)
+    pred_b = FirePredictor(params, fire_b)
+    pred_c = FirePredictor(params, fire_c)
+
+    for name in ("_rng_breach", "_rng_spot", "_rng_wind"):
+        a = float(getattr(pred_a, name).random())
+        b = float(getattr(pred_b, name).random())
+        c = float(getattr(pred_c, name).random())
+        assert a == b, f"same seed produced different {name} draws"
+        assert a != c, f"different seeds produced identical {name} draws"
 
 
 @pytest.mark.slow

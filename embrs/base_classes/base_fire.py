@@ -258,10 +258,16 @@ class BaseFireSim:
                 )
 
             else:
-                # PerrymanSpotting on the predictor side stays unseeded in
-                # Phase 2; Phase 3 wires it from a spawn off the embers
-                # SeedSequence (per the seed-determinism plan).
-                self.embers = PerrymanSpotting(self._spot_delay_s, limits)
+                # PerrymanSpotting (predictor side). Seed source is a spawn
+                # off the embers SeedSequence — per the seed-determinism plan,
+                # spotting is a sub-component of ember behavior so we keep
+                # the streams independent without inflating the top-level
+                # subsystem list.
+                perryman_ss = self.child_seed_sequence("embrs.embers").spawn(1)[0]
+                self.embers = PerrymanSpotting(
+                    self._spot_delay_s, limits,
+                    rng=np.random.default_rng(perryman_ss),
+                )
 
 
         # Store references needed by the cell factory
