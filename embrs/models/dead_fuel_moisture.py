@@ -15,7 +15,8 @@ Performance Note:
 import math
 import numpy as np
 import datetime
-import random
+from collections import OrderedDict
+from typing import Any, Dict
 
 from embrs.utilities.numba_utils import njit_if_enabled, NUMBA_AVAILABLE
 
@@ -443,6 +444,11 @@ def _update_internal_loop(
 
             if continuousLiquid:
                 if perturbate:
+                    # Known O(1e-4) nondeterminism: this np.random.uniform call
+                    # lives inside a Numba @njit kernel where threading an
+                    # explicit Generator through is non-trivial. Accepted as
+                    # a small nondeterminism source and ALLOWLISTed in
+                    # tests/test_no_global_rng.py.
                     for i in range(m_nodes):
                         random_vals[i] = np.random.uniform(-0.0001, 0.0001)
                     _update_moisture_continuous(
@@ -870,10 +876,94 @@ class DeadFuelMoisture:
         ]
         return states[self.m_state]
 
-    @staticmethod
-    def uniformRandom(min_val, max_val):
-        """Generate uniform random value in range."""
-        return (max_val - min_val) * random.random() + min_val
+    def state_dict(self) -> Dict[str, Any]:
+        """Return the evolving state of this DFM instance for hashing.
+
+        Used by determinism regression tests (see ``hash_fire_grid`` in
+        ``applications/firefighting/tests/_determinism_helpers.py``).
+
+        **Dtype contract**: every numpy array in the returned dict is
+        ``float64``. The kernel initializes its node arrays
+        (``m_t``, ``m_s``, ``m_d``, ``m_w``) with explicit
+        ``dtype=np.float64`` (see :py:meth:`initializeStick`). If a future
+        change introduces a different dtype, this method coerces to
+        ``float64`` defensively so the hash output stays stable.
+
+        **What is in scope** (Group A — kernel-mutated and time-evolving):
+            - Stick arrays: ``m_t``, ``m_s``, ``m_d``, ``m_w``.
+            - Surface state: ``m_hf``, ``m_wfilm``, ``m_wsa``.
+            - Environmental window (previous/current pairs): ``m_ta0/1``,
+              ``m_ha0/1``, ``m_sv0/1``, ``m_rc0/1``, ``m_ra0/1``,
+              ``m_bp0/1``.
+            - Time accounting: ``m_et``, ``m_semTime``, ``m_rdur``.
+            - State machine: ``m_state``, ``m_sem``, ``m_pptrate``.
+            - Time-step caches written mid-loop: ``m_mdt``, ``m_mdt_2``,
+              ``m_ddt``, ``m_sf``.
+            - Init flag: ``m_init``.
+
+        **What is NOT in scope** (handled by other tests; see
+        ``INTENTIONALLY_NOT_HASHED`` in the test helper module):
+            - Mutable configuration (``m_radius``, ``m_wmx``, ``m_density``,
+              setter-targets, behavioral flags). Rationale: defensive hashing
+              of config creates false confidence — a future setter wouldn't
+              automatically be covered. Config equality is asserted
+              separately by the test harness before the grid hash compare.
+            - Init-derived caches (``m_dx``, ``m_x``, ``m_v``, ``m_hwf``,
+              etc.) — deterministic functions of mutable config.
+            - Scratch buffers (``m_Twold``, ``m_Ttold``, ``m_Tsold``,
+              ``m_Tv``, ``m_To``, ``m_Tg``) — overwritten before being
+              read across step boundaries (see
+              ``_compute_environment_change_coeffs`` lines 69–75).
+
+        Returns:
+            OrderedDict mapping field name to value. Scalar floats are
+            kept native (caller rounds per ``FLOAT_HASH_DECIMALS``). Arrays
+            are coerced to ``np.ndarray`` of dtype ``float64`` (caller
+            calls ``.tobytes()`` after rounding).
+        """
+        def _f64(arr):
+            a = np.asarray(arr)
+            return a if a.dtype == np.float64 else a.astype(np.float64)
+
+        return OrderedDict([
+            # Stick arrays (load-bearing per-node state)
+            ("m_t", _f64(self.m_t)),
+            ("m_s", _f64(self.m_s)),
+            ("m_d", _f64(self.m_d)),
+            ("m_w", _f64(self.m_w)),
+            # Surface / film state
+            ("m_hf", float(self.m_hf)),
+            ("m_wfilm", float(self.m_wfilm)),
+            ("m_wsa", float(self.m_wsa)),
+            # Environmental window
+            ("m_ta0", float(self.m_ta0)),
+            ("m_ta1", float(self.m_ta1)),
+            ("m_ha0", float(self.m_ha0)),
+            ("m_ha1", float(self.m_ha1)),
+            ("m_sv0", float(self.m_sv0)),
+            ("m_sv1", float(self.m_sv1)),
+            ("m_rc0", float(self.m_rc0)),
+            ("m_rc1", float(self.m_rc1)),
+            ("m_ra0", float(self.m_ra0)),
+            ("m_ra1", float(self.m_ra1)),
+            ("m_bp0", float(self.m_bp0)),
+            ("m_bp1", float(self.m_bp1)),
+            # Time accounting
+            ("m_et", float(getattr(self, "m_et", 0.0))),
+            ("m_semTime", self.m_semTime),  # may be None or a datetime
+            ("m_rdur", float(self.m_rdur)),
+            # State machine + dependent caches
+            ("m_state", int(getattr(self, "m_state", 0))),
+            ("m_sem", float(getattr(self, "m_sem", 0.0))),
+            ("m_pptrate", float(getattr(self, "m_pptrate", 0.0))),
+            # Time-step caches written mid-loop
+            ("m_mdt", float(getattr(self, "m_mdt", 0.0))),
+            ("m_mdt_2", float(getattr(self, "m_mdt_2", 0.0))),
+            ("m_ddt", float(getattr(self, "m_ddt", 0.0))),
+            ("m_sf", float(getattr(self, "m_sf", 0.0))),
+            # Init flag
+            ("m_init", bool(self.m_init)),
+        ])
 
     def update(self, year: int, month: int, day: int, hour: int,
                minute: int, second: int, at: float, rh: float,

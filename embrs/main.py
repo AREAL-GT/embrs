@@ -359,6 +359,12 @@ def load_sim_params(cfg_path: str) -> SimParams:
         user_class = ""
         user_path = ""
 
+    # Master reproducibility seed. None preserves legacy non-deterministic
+    # behavior; an integer makes all derived RNG state stable across runs
+    # via BaseFireSim.child_seed_sequence.
+    seed_str = config["Simulation"].get("seed", None)
+    seed = int(seed_str) if seed_str not in (None, "") else None
+
     sim_params = SimParams(
         map_params=map_params,
         log_folder=log_folder,
@@ -382,7 +388,8 @@ def load_sim_params(cfg_path: str) -> SimParams:
         num_runs=config["Simulation"].getint("num_runs", 1),
         user_path=user_path,
         user_class=user_class,
-        write_logs=write_logs
+        write_logs=write_logs,
+        seed=seed,
     )
 
     return sim_params

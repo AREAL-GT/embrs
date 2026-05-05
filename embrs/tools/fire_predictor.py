@@ -89,6 +89,19 @@ class FirePredictor(BaseFireSim):
 
         self.set_params(params)
 
+        # Seeded RNGs for the four predictor-owned consumers. set_params()
+        # has already run super().__init__() (which builds the seed sequence
+        # from sim_params.seed copied off the parent fire). In worker
+        # processes, _run_ensemble_member_worker overwrites these from the
+        # per-member seed before predictor.run() is called.
+        self._rng_breach = self.child_generator("embrs.predictor.breach")
+        self._rng_spot = self.child_generator("embrs.predictor.spot")
+        self._rng_wind = self.child_generator("embrs.predictor.wind")
+        # Member metadata used to build deterministic worker IDs in
+        # _predict_wind (replaces the old uuid.uuid4() worker_id).
+        self._member_idx: int = 0
+        self._member_seed: int = 0
+
     def set_params(self, params: PredictorParams) -> None:
         """Configure predictor parameters and optionally regenerate cell grid.
 
@@ -436,6 +449,16 @@ class FirePredictor(BaseFireSim):
 
         num_workers = num_workers or mp.cpu_count()
 
+        # Derive per-member seeds from a single SeedSequence rooted at the
+        # parent fire's master seed (or fall back to caller-supplied seeds).
+        # This makes the ensemble byte-reproducible across runs and platforms.
+        if random_seeds is None:
+            predictor_ss = np.random.SeedSequence(
+                self.fire.child_rng_seed("embrs.predictor") if self.fire is not None else None
+            )
+            member_ss_list = predictor_ss.spawn(n_ensemble)
+            random_seeds = [int(ss.generate_state(1, dtype=np.uint32)[0]) for ss in member_ss_list]
+
         print(f"Running ensemble prediction:")
         print(f"  - {n_ensemble} ensemble members")
         print(f"  - {num_workers} parallel workers")
@@ -454,15 +477,21 @@ class FirePredictor(BaseFireSim):
             forecast_indices=forecast_indices
         )
 
-        # Run predictions in parallel
-        predictions = []
+        # Run predictions in parallel.
+        # mp_context="spawn" pins worker startup behavior across platforms:
+        # macOS/Windows already default to spawn, but Linux defaults to fork
+        # (which would inherit the parent's np.random global state — a hidden
+        # determinism hazard). spawn means each worker gets a fresh interpreter
+        # with no inherited RNG state.
+        predictions: List[Optional[PredictionOutput]] = [None] * n_ensemble
         failed_count = 0
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        spawn_ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=num_workers, mp_context=spawn_ctx) as executor:
             # Submit all jobs
             futures = {}
             for i, state_est in enumerate(state_estimates):
-                seed = random_seeds[i] if random_seeds else None
+                seed = random_seeds[i]
                 member_params = predictor_params_list[i] if predictor_params_list else None
 
                 # Store member index for forecast assignment in worker
@@ -475,12 +504,17 @@ class FirePredictor(BaseFireSim):
                     self,
                     state_est,
                     seed,
+                    i,                # member_idx — used for deterministic worker IDs
                     member_params
                 )
                 futures[future] = i  # Track member index
 
-            # Collect results with progress bar
-            collected_forecast_indices = []
+            # Collect results in submission order, not completion order. The
+            # tqdm iterator still consumes futures as they finish (so progress
+            # is responsive), but we slot each result into predictions[i] so
+            # downstream consumers see a stable order regardless of which
+            # worker happens to finish first.
+            collected_forecast_indices: List[int] = [-1] * n_ensemble if forecast_indices is not None else []
             for future in tqdm(as_completed(futures),
                               total=n_ensemble,
                               desc="Ensemble predictions",
@@ -490,11 +524,16 @@ class FirePredictor(BaseFireSim):
                     result = future.result()
                     if forecast_indices is not None:
                         result.forecast_index = forecast_indices[member_idx]
-                        collected_forecast_indices.append(forecast_indices[member_idx])
-                    predictions.append(result)
+                        collected_forecast_indices[member_idx] = forecast_indices[member_idx]
+                    predictions[member_idx] = result
                 except Exception as e:
                     failed_count += 1
                     print(f"Warning: Member {member_idx} failed: {e}")
+
+        # Drop failed slots (None entries) while preserving submission order.
+        predictions = [p for p in predictions if p is not None]
+        if forecast_indices is not None:
+            collected_forecast_indices = [i for i in collected_forecast_indices if i != -1]
 
         # Check failure rate
         if len(predictions) == 0:
@@ -562,6 +601,13 @@ class FirePredictor(BaseFireSim):
         """
         if self.fire is None:
             raise RuntimeError("Cannot generate forecast pool without fire reference")
+
+        # If the caller didn't provide an explicit override, inherit the
+        # forecast-pool seed from the parent FireSim's master seed so that
+        # the entire ensemble pipeline is reproducible from a single
+        # SimParams.seed at the top.
+        if random_seed is None:
+            random_seed = int(self.fire.child_rng_seed("embrs.forecast_pool"))
 
         # Delegate to ForecastPool.generate() which owns the pool generation process
         return ForecastPool.generate(
@@ -710,7 +756,7 @@ class FirePredictor(BaseFireSim):
                 if cell._break_width > 0:
                     # Determine if fire will breach fireline contained within cell
                     hold_prob = cell.calc_hold_prob(flame_len_m)
-                    rand = np.random.random()
+                    rand = self._rng_breach.random()
                     cell.breached = rand > hold_prob
 
                     self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
@@ -875,7 +921,14 @@ class FirePredictor(BaseFireSim):
                         self._scheduled_spot_fires[ign_time_s] = cells_at_time
 
                 if not self.model_spotting:
-                    self.embers = PerrymanSpotting(0, (self.x_lim, self.y_lim))
+                    # Placeholder spotting model when scheduled ignitions are
+                    # supplied without model_spotting. Seed from a spawn off the
+                    # embers SeedSequence (same convention as base_fire.py:255).
+                    perryman_ss = self.child_seed_sequence("embrs.embers").spawn(1)[0]
+                    self.embers = PerrymanSpotting(
+                        0, (self.x_lim, self.y_lim),
+                        rng=np.random.default_rng(perryman_ss),
+                    )
 
     # =========================================================================
     # Weather & Wind
@@ -1000,13 +1053,15 @@ class FirePredictor(BaseFireSim):
                 f"time_horizon_hr now {self.time_horizon_hr:.2f}."
             )
 
-        # Delegate perturbation to ForecastPool (single source of truth)
+        # Delegate perturbation to ForecastPool (single source of truth).
+        # Seeds are drawn from our owned wind RNG so that two predictor runs
+        # with the same master seed produce identical wind perturbations.
         new_weather_stream, _, _ = ForecastPool._perturb_weather_stream(
             weather_stream=source_stream,
             start_idx=curr_idx,
             num_indices=num_indices,
-            speed_seed=None,
-            dir_seed=None,
+            speed_seed=int(self._rng_wind.integers(0, 2**31)),
+            dir_seed=int(self._rng_wind.integers(0, 2**31)),
             beta=self.beta,
             wnd_spd_std=self.wnd_spd_std,
             wnd_dir_std=self.wnd_dir_std,
@@ -1017,9 +1072,12 @@ class FirePredictor(BaseFireSim):
         # Get map params from fire or from serialized sim_params
         map_params = self.fire._sim_params.map_params if self.fire is not None else self._sim_params.map_params
 
-        # Generate unique temp directory for this worker to avoid race conditions
-        # when multiple ensemble members run in parallel
-        worker_id = uuid.uuid4().hex[:8]
+        # Deterministic worker ID for the per-member temp directory. Replaces
+        # uuid.uuid4(); built from (member_idx, member_seed) injected by
+        # _run_ensemble_member_worker. Falls back to (0, 0) for single-process
+        # callers (predictor.run() outside run_ensemble), in which case there
+        # is no parallelism to disambiguate.
+        worker_id = f"m{self._member_idx:04d}_s{self._member_seed:08x}"
         custom_temp = os.path.join(temp_file_path, f"worker_{worker_id}")
 
         self.wind_forecast = run_windninja(new_weather_stream, map_params, custom_temp)
@@ -1111,7 +1169,7 @@ class FirePredictor(BaseFireSim):
 
             for cell_id in list(landings.keys()):
                 # Determine if the cell will ignite
-                rand = np.random.random()
+                rand = self._rng_spot.random()
                 if rand < (1 - landings[cell_id]):
                     # Schedule ignition
                     ign_time = self._curr_time_s + self._spot_delay_s
@@ -1435,7 +1493,8 @@ class FirePredictor(BaseFireSim):
 def _run_ensemble_member_worker(
     predictor: 'FirePredictor',
     state_estimate: StateEstimate,
-    seed: Optional[int] = None,
+    seed: int,
+    member_idx: int,
     member_params: Optional[PredictorParams] = None
 ) -> PredictionOutput:
     """Execute a single ensemble member prediction in a worker process.
@@ -1452,8 +1511,13 @@ def _run_ensemble_member_worker(
         predictor (FirePredictor): Deserialized predictor instance.
         state_estimate (StateEstimate): Initial fire state for this member.
             May include start_time_s for future-time predictions.
-        seed (int): Random seed for reproducibility. If None, uses default
-            random state.
+        seed (int): Per-member RNG seed. The worker constructs a fresh
+            Generator from this seed, spawns four sub-streams (breach, spot,
+            perryman, wind), and assigns them to the predictor before running.
+            No global ``np.random`` state is mutated.
+        member_idx (int): Index of this ensemble member in the parent's
+            submission order. Used to build a deterministic worker ID in
+            ``_predict_wind`` (replaces the legacy non-deterministic ID).
         member_params (PredictorParams): Optional per-member parameters.
             If provided, applies these params before running prediction.
 
@@ -1466,9 +1530,25 @@ def _run_ensemble_member_worker(
         Exception: Any errors during prediction are logged and re-raised
             for the executor to handle.
     """
-    # Set random seed if provided
-    if seed is not None:
-        np.random.seed(seed)
+    # Build the four sub-streams for this worker, one per RNG consumer
+    # reachable from predictor.run() in the worker code path:
+    #   breach   - fire_predictor.py:713 (firebreak breach Bernoulli)
+    #   spot     - fire_predictor.py:1114 (spot fire ignition Bernoulli)
+    #   perryman - perryman_spot.py:163, 184 (lognormal/normal landings)
+    #   wind     - fire_predictor.py:1004 (perturbed weather stream seeds)
+    #
+    # We spawn off the worker's seed (rather than reusing the parent's
+    # SeedSequence) because the parent passes seeds across the pickle
+    # boundary as ints, not as SeedSequences — by design.
+    rng = np.random.default_rng(seed)
+    r_breach, r_spot, r_perryman, r_wind = rng.spawn(4)
+    predictor._rng_breach = np.random.default_rng(r_breach)
+    predictor._rng_spot = np.random.default_rng(r_spot)
+    predictor._rng_wind = np.random.default_rng(r_wind)
+    predictor._member_idx = int(member_idx)
+    predictor._member_seed = int(seed)
+    if getattr(predictor, "embers", None) is not None and hasattr(predictor.embers, "_rng"):
+        predictor.embers._rng = np.random.default_rng(r_perryman)
 
     # Apply member-specific params if provided
     if member_params is not None:

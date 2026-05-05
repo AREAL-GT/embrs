@@ -241,8 +241,10 @@ def _generate_single_forecast(task: _ForecastGenerationTask) -> ForecastData:
     """
     from embrs.models.wind_forecast import run_windninja, temp_file_path
 
-    # Create unique temp directory for this forecast to avoid conflicts
-    worker_id = f"pool_{task.forecast_id}_{uuid.uuid4().hex[:6]}"
+    # Create unique temp directory for this forecast to avoid conflicts.
+    # forecast_id is unique per task within a pool (one task per forecast),
+    # so it alone disambiguates parallel workers — no need for uuid.uuid4.
+    worker_id = f"pool_{task.forecast_id:04d}"
     custom_temp = os.path.join(temp_file_path, worker_id)
 
     # Run WindNinja with num_workers=1 to disable internal parallelization
@@ -474,15 +476,16 @@ class ForecastPool:
         effective_speed_bias = wind_speed_bias * max_wind_speed_bias
         effective_dir_bias = wind_dir_bias * max_wind_dir_bias
 
-        # Set up reproducible seeds if requested
-        if random_seed is not None:
-            base_rng = np.random.default_rng(random_seed)
-            seeds = [
-                (int(base_rng.integers(0, 2**31)), int(base_rng.integers(0, 2**31)))
-                for _ in range(n_forecasts)
-            ]
-        else:
-            seeds = [(None, None) for _ in range(n_forecasts)]
+        # Set up reproducible seeds. random_seed=None falls through to a
+        # SeedSequence-derived RNG (system entropy) so we always pass real
+        # ints to _perturb_weather_stream — no global np.random state. To
+        # opt into determinism, pass an explicit random_seed (typically
+        # derived from FireSim.child_rng_seed("embrs.forecast_pool")).
+        base_rng = np.random.default_rng(np.random.SeedSequence(random_seed))
+        seeds = [
+            (int(base_rng.integers(0, 2**31)), int(base_rng.integers(0, 2**31)))
+            for _ in range(n_forecasts)
+        ]
 
         # Get current state from fire simulation
         curr_weather_idx = fire._curr_weather_idx
@@ -540,7 +543,11 @@ class ForecastPool:
         if verbose:
             print(f"Generating forecast pool: {n_forecasts} forecasts using {num_workers} workers...")
 
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        # Pin spawn context for the same reason as run_ensemble: avoid the
+        # Linux-default fork mode inheriting parent np.random global state.
+        import multiprocessing as _mp
+        spawn_ctx = _mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=num_workers, mp_context=spawn_ctx) as executor:
             future_to_idx = {
                 executor.submit(_generate_single_forecast, task): task.forecast_id
                 for task in tasks
@@ -624,11 +631,17 @@ class ForecastPool:
             )
             end_idx = stream_len
 
-        # Generate seeds if not provided
-        if speed_seed is None:
-            speed_seed = np.random.randint(0, 2**31)
-        if dir_seed is None:
-            dir_seed = np.random.randint(0, 2**31)
+        # Both seeds must be supplied by the caller. The previous unseeded
+        # fallback (np.random.randint) was removed because it pulled from
+        # the global np.random state. Callers that want non-deterministic
+        # behavior should pass seeds derived from SeedSequence(None);
+        # see ForecastPool.generate.
+        if speed_seed is None or dir_seed is None:
+            raise ValueError(
+                "ForecastPool._perturb_weather_stream requires explicit speed_seed "
+                "and dir_seed; pass ints derived from the parent FireSim or from "
+                "SeedSequence(None)."
+            )
 
         # Create separate RNGs for reproducibility
         speed_rng = np.random.default_rng(speed_seed)

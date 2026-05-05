@@ -15,7 +15,7 @@ References:
 from embrs.utilities.fire_util import CrownStatus, CanopySpecies, CellStates
 from embrs.utilities.unit_conversions import *
 from embrs.fire_simulator.cell import Cell
-from typing import Callable, Tuple, Set
+from typing import Callable, Optional, Tuple, Set
 
 import numpy as np
 
@@ -38,7 +38,8 @@ class Embers:
 
     def __init__(self, ign_prob: float, species: int, dbh: float,
                  min_spot_dist: float, limits: Tuple[float, float],
-                 get_cell_from_xy: Callable[[float, float], Cell]):
+                 get_cell_from_xy: Callable[[float, float], Cell],
+                 rng: Optional[np.random.Generator] = None):
         """Initialize the ember model.
 
         Args:
@@ -52,6 +53,12 @@ class Embers:
                 domain bounds (meters).
             get_cell_from_xy (Callable): Callback to retrieve a Cell from
                 spatial coordinates.
+            rng (np.random.Generator, optional): Generator used for the
+                per-firebrand ignition probability check in :py:meth:`loft`.
+                If ``None``, a fresh ``np.random.default_rng()`` is created
+                (unseeded, system-entropy default — preserves legacy behavior
+                without touching global ``np.random`` state). Pass an
+                explicit Generator to make spotting deterministic.
 
         Raises:
             ValueError: If ``species`` is not in ``CanopySpecies``.
@@ -77,6 +84,10 @@ class Embers:
         self.dbh = dbh # cm
 
         self.embers = []
+
+        # Owned RNG. None falls back to a fresh default_rng (unseeded,
+        # but no global state pollution).
+        self._rng = rng if rng is not None else np.random.default_rng()
 
     def loft(self, cell: Cell, sim_time_m: float):
         """Loft firebrands from a torching cell.
@@ -105,7 +116,7 @@ class Embers:
             diameter = 0.005 * count
 
             # Only loft embers that pass probability check
-            prob_spot = np.random.random() # [0, 1]
+            prob_spot = self._rng.random() # [0, 1]
             if prob_spot > self.ign_prob:
                 continue
 
