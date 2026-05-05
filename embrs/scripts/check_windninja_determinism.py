@@ -1,9 +1,10 @@
 """Pre-flight check: is WindNinja deterministic given byte-identical inputs?
 
-The seed-determinism plan assumes WindNinja, when given identical weather
-and terrain inputs, produces identical output bytes. This script verifies
-that assumption by running ``run_windninja`` twice with the same inputs
-and comparing SHA-256 hashes of the resulting forecast arrays.
+Seed-determinism for the EMBRS+firefighting stack assumes WindNinja, when
+given identical weather and terrain inputs, produces identical output
+bytes. This script verifies that assumption by running ``run_windninja``
+twice with the same inputs and comparing SHA-256 hashes of the resulting
+forecast arrays.
 
 Exit codes:
     0  PASS — outputs are byte-identical, WindNinja is in-contract.

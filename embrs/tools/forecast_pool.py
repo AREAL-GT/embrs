@@ -631,15 +631,16 @@ class ForecastPool:
             )
             end_idx = stream_len
 
-        # Both seeds must be supplied by the caller — the unseeded fallback
-        # (np.random.randint) was removed in the seed-determinism Phase 3.
-        # Callers that want non-determinism should pass seeds derived from
-        # SeedSequence(None); see ForecastPool.generate.
+        # Both seeds must be supplied by the caller. The previous unseeded
+        # fallback (np.random.randint) was removed because it pulled from
+        # the global np.random state. Callers that want non-deterministic
+        # behavior should pass seeds derived from SeedSequence(None);
+        # see ForecastPool.generate.
         if speed_seed is None or dir_seed is None:
             raise ValueError(
                 "ForecastPool._perturb_weather_stream requires explicit speed_seed "
-                "and dir_seed (Phase 3 seed-determinism); pass ints derived from "
-                "the parent FireSim or from SeedSequence(None)."
+                "and dir_seed; pass ints derived from the parent FireSim or from "
+                "SeedSequence(None)."
             )
 
         # Create separate RNGs for reproducibility

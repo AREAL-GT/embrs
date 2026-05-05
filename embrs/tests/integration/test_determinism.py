@@ -1,17 +1,19 @@
 """Seed-determinism regression tests for EMBRS (no firefighting controller).
 
-Two integration tests, both ``@pytest.mark.slow`` because each constructs
-a FireSim from a real scenario cfg (which invokes WindNinja). They skip
-gracefully if the required external assets (WindNinja CLI, map data,
-weather file) are missing on this machine.
+These integration tests are all ``@pytest.mark.slow`` because each
+constructs a FireSim from a real scenario cfg (which invokes WindNinja).
+They skip gracefully if the required external assets (WindNinja CLI,
+map data, weather file) are missing on this machine.
 
-Phase 2 status: tests now exercise the seeded paths owned by Phase 2
-(``FireSim._breach_rng``, ``Embers._rng``). The grid hash is computed
-via ``hash_fire_grid`` from the firefighting test helper module.
+Coverage:
+    - ``FireSim._breach_rng`` and ``Embers._rng`` (single-process fire model).
+    - ``FirePredictor`` RNGs in single-process mode (``_rng_breach``,
+      ``_rng_spot``, ``_rng_wind``, ``PerrymanSpotting._rng``).
+    - ``FirePredictor.run_ensemble`` over a ``ProcessPoolExecutor`` with
+      ``mp_context="spawn"`` (multi-process worker contract).
 
-Phases 3+ widen the coverage: predictor RNG, firefighting subsystems,
-deterministic IDs. The same-seed/different-seed assertions here remain
-valid as later phases land — they just exercise more state.
+The grid hash is computed via ``hash_fire_grid`` from the firefighting
+test helper module.
 """
 from __future__ import annotations
 
@@ -151,13 +153,14 @@ def _run_predictor(fire, time_horizon_hr: float = 0.5):
 def test_predictor_same_seed_same_outcome():
     """Same master seed -> identical PredictionOutput from FirePredictor.run().
 
-    Exercises the seeded paths added in Phase 3:
+    Exercises the four predictor-owned seeded RNGs:
       - FirePredictor._rng_breach (firebreak Bernoulli)
       - FirePredictor._rng_spot   (spot ignition Bernoulli)
       - FirePredictor._rng_wind   (perturbed weather seeds)
       - PerrymanSpotting._rng     (spawn off the embers SeedSequence)
-    Single-process (no run_ensemble); the worker-path is exercised by the
-    full-stack firefighting test in Phase 4+.
+    Single-process (no run_ensemble); the multi-process worker path is
+    exercised by ``test_predictor_run_ensemble_n2_deterministic`` and by
+    the full-stack firefighting tests.
     """
     if hash_prediction_output is None:
         pytest.skip("ra-cbba-core determinism helpers not on this machine")
@@ -222,10 +225,11 @@ def test_predictor_different_seed_different_outcome():
 def test_predictor_run_ensemble_n2_deterministic():
     """Same master seed -> identical EnsemblePredictionOutput from run_ensemble (N=2).
 
-    Closes the Phase 3 gap: the ProcessPoolExecutor / spawn-context worker
-    contract was correct by inspection but not exercised by a passing test.
-    Forces the multi-process path with two ensemble members and asserts
-    byte-equal hashes of each member's PredictionOutput across two runs.
+    Forces the multi-process ``ProcessPoolExecutor`` worker path with two
+    ensemble members and asserts byte-equal hashes of each member's
+    PredictionOutput across two runs. Verifies the spawn-context +
+    per-member-seed contract (each worker reseeds its own predictor from
+    a parent-derived ``SeedSequence``, never touches global ``np.random``).
     """
     if hash_prediction_output is None:
         pytest.skip("ra-cbba-core determinism helpers not on this machine")
@@ -253,9 +257,9 @@ def test_predictor_run_ensemble_n2_deterministic():
             return_individual=True,
             num_workers=2,
         )
-        # Hash each individual prediction in submission order. Phase 3
-        # guaranteed predictions are stored at predictions[member_idx], so
-        # the list order is deterministic regardless of worker completion.
+        # Hash each individual prediction in submission order.
+        # run_ensemble stores results at predictions[member_idx], so the
+        # list order is deterministic regardless of worker completion.
         return [hash_prediction_output(p) for p in ensemble_out.individual_predictions]
 
     h_a = _run(seed=42)

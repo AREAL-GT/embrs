@@ -445,10 +445,9 @@ def _update_internal_loop(
             if continuousLiquid:
                 if perturbate:
                     # Known O(1e-4) nondeterminism: this np.random.uniform call
-                    # lives inside a Numba @njit kernel where threading our
-                    # owned Generator through is non-trivial. Per the
-                    # seed-determinism plan, this is accepted as a small
-                    # nondeterminism source and ALLOWLISTed in
+                    # lives inside a Numba @njit kernel where threading an
+                    # explicit Generator through is non-trivial. Accepted as
+                    # a small nondeterminism source and ALLOWLISTed in
                     # tests/test_no_global_rng.py.
                     for i in range(m_nodes):
                         random_vals[i] = np.random.uniform(-0.0001, 0.0001)

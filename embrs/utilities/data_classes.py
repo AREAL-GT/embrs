@@ -387,8 +387,9 @@ class SimParams:
         seed (Optional[int]): Master seed for reproducibility. When set, all
             stochastic subsystems derive their RNG state from this single
             integer via ``BaseFireSim.child_seed_sequence``. ``None`` (default)
-            preserves the legacy non-deterministic behavior. See the
-            seed-determinism work plan and ``tests/test_no_global_rng.py``.
+            preserves the legacy non-deterministic behavior. The lint test at
+            ``tests/test_no_global_rng.py`` enforces that no production code
+            bypasses this seed sequence by calling global ``np.random``.
     """
 
     map_params: Optional[MapParams] = None

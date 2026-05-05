@@ -17,9 +17,6 @@ Advisory rule (warn-only, separate test):
     a loop body that draws from RNG can make output depend on PYTHONHASHSEED.
     Wrap such loops with ``sorted(...)``. The advisory regex is heuristic — it
     is meant to surface candidates for review, not to fail CI.
-
-Marked xfail until Phases 2–5 close out the existing violations. Remove the
-xfail marker once the inventory is empty (or only contains ALLOWLIST entries).
 """
 from __future__ import annotations
 
@@ -79,9 +76,9 @@ TIME_TIME_RE = re.compile(r"\btime\.time\(\)")
 # justification comment immediately above it.
 ALLOWLIST: set[str] = {
     # Numba @njit kernel: threading our owned Generator into the JIT-compiled
-    # hot path is non-trivial. Per the seed-determinism plan, this O(1e-4)
-    # perturbation is accepted as known small nondeterminism. Phase 2.
-    "embrs/models/dead_fuel_moisture.py:454:np.random.*",
+    # hot path is non-trivial. This O(1e-4) perturbation is accepted as a
+    # known small nondeterminism source.
+    "embrs/models/dead_fuel_moisture.py:453:np.random.*",
 }
 
 
@@ -164,8 +161,7 @@ def _collect_violations() -> List[Tuple[Path, int, str, str]]:
 def test_no_global_rng_in_production_code():
     """Hard enforcement: fail on any non-allowlisted global-RNG/UUID4/time.time call.
 
-    EMBRS reached zero violations at the end of Phase 3 (predictor + forecast
-    pool RNG plumbing). The single ALLOWLIST entry is the Numba JIT kernel in
+    The single ALLOWLIST entry is the Numba JIT kernel in
     dead_fuel_moisture.py — see the ALLOWLIST comment for the rationale.
     """
     rows = _collect_violations()

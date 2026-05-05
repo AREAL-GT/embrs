@@ -259,10 +259,9 @@ class BaseFireSim:
 
             else:
                 # PerrymanSpotting (predictor side). Seed source is a spawn
-                # off the embers SeedSequence — per the seed-determinism plan,
-                # spotting is a sub-component of ember behavior so we keep
-                # the streams independent without inflating the top-level
-                # subsystem list.
+                # off the embers SeedSequence: spotting is a sub-component
+                # of ember behavior, and spawning keeps the streams
+                # independent without inflating the top-level subsystem list.
                 perryman_ss = self.child_seed_sequence("embrs.embers").spawn(1)[0]
                 self.embers = PerrymanSpotting(
                     self._spot_delay_s, limits,

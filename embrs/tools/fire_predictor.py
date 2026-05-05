@@ -1530,8 +1530,8 @@ def _run_ensemble_member_worker(
         Exception: Any errors during prediction are logged and re-raised
             for the executor to handle.
     """
-    # Build the four sub-streams for this worker. Order matches the consumer
-    # enumeration in the run_ensemble call path (see Phase 3 audit):
+    # Build the four sub-streams for this worker, one per RNG consumer
+    # reachable from predictor.run() in the worker code path:
     #   breach   - fire_predictor.py:713 (firebreak breach Bernoulli)
     #   spot     - fire_predictor.py:1114 (spot fire ignition Bernoulli)
     #   perryman - perryman_spot.py:163, 184 (lognormal/normal landings)
