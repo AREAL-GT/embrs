@@ -95,7 +95,7 @@ def crown_fire(cell: Cell, fmc: float):
         R_0 = I_o * (R/I_t) # m/min
 
         # Surface fuel consumed 
-        sfc = I_t / (300 * R) # kg/m^2
+        sfc = I_t / (300 * (R + 1e-6)) # kg/m^2
 
         # CFB scaling exponent
         a_c = -math.log(0.1) / (0.9 * (rac - R_0))

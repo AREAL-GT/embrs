@@ -818,6 +818,9 @@ class FirePredictor(BaseFireSim):
                 cell.reset_to_fuel()
                 cell.set_parent(self)
 
+        # Re-apply fire breaks (reset_to_fuel zeros _break_width on all cells)
+        self._set_firebreaks()
+
         self._burnt_cells = []
         self._burning_cells = []
         self._updated_cells = {}

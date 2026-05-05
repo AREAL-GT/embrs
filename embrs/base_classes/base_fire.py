@@ -704,7 +704,7 @@ class BaseFireSim:
             r_t, cell.r_ss, self._iters != 0, new_ixn_buf
         )
 
-        if result == -1:
+        if result == -1 and cell.water_applied_kJ > 0:
             # All ROS zero — suppression scenario
             fire_area_ratio = cell.fire_area_m2 / cell.cell_area
 
