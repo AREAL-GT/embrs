@@ -219,6 +219,54 @@ def test_predictor_different_seed_different_outcome():
 
 
 @pytest.mark.slow
+def test_predictor_run_ensemble_n2_deterministic():
+    """Same master seed -> identical EnsemblePredictionOutput from run_ensemble (N=2).
+
+    Closes the Phase 3 gap: the ProcessPoolExecutor / spawn-context worker
+    contract was correct by inspection but not exercised by a passing test.
+    Forces the multi-process path with two ensemble members and asserts
+    byte-equal hashes of each member's PredictionOutput across two runs.
+    """
+    if hash_prediction_output is None:
+        pytest.skip("ra-cbba-core determinism helpers not on this machine")
+    cfg = _locate_runnable_cfg()
+    if cfg is None:
+        pytest.skip("no EMBRS cfg with locally-available map+weather assets")
+
+    from embrs.tools.fire_predictor import FirePredictor
+    from embrs.utilities.data_classes import PredictorParams
+
+    def _run(seed: int):
+        fire = _build_fire(cfg, seed=seed)
+        _run_n_iters(fire, _N_ITERS)
+        params = PredictorParams(
+            time_horizon_hr=0.25, time_step_s=30, cell_size_m=fire.cell_size,
+            dead_mf=0.08, live_mf=0.30, model_spotting=False,
+        )
+        pred = FirePredictor(params, fire)
+        # Two state estimates from the current fire — forces N=2 workers
+        # and exercises the spawn-context ProcessPoolExecutor path.
+        state_a = _build_state_estimate(fire)
+        state_b = _build_state_estimate(fire)
+        ensemble_out = pred.run_ensemble(
+            state_estimates=[state_a, state_b],
+            return_individual=True,
+            num_workers=2,
+        )
+        # Hash each individual prediction in submission order. Phase 3
+        # guaranteed predictions are stored at predictions[member_idx], so
+        # the list order is deterministic regardless of worker completion.
+        return [hash_prediction_output(p) for p in ensemble_out.individual_predictions]
+
+    h_a = _run(seed=42)
+    h_b = _run(seed=42)
+    assert h_a == h_b, (
+        f"run_ensemble N=2 produced different hashes across same-seed runs.\n"
+        f"  run A: {h_a}\n  run B: {h_b}"
+    )
+
+
+@pytest.mark.slow
 def test_different_seed_changes_rng_state():
     """Different master seeds -> different seeded RNG state.
 

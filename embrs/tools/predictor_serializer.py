@@ -336,6 +336,44 @@ class PredictorSerializer:
             cell_size=predictor._cell_size
         )
 
+        # Initialize control action handler. Workers skip BaseFireSim.__init__
+        # to avoid the expensive cell-creation loop, but `_set_states` (which
+        # runs each prediction) calls `_set_firebreaks` → `_apply_firebreak`
+        # → `self._control_handler._apply_firebreak(...)`. Without the
+        # handler initialized here, the worker raises AttributeError on the
+        # first prediction call. Mirrors BaseFireSim.__init__ lines 196-219.
+        from embrs.base_classes.control_handler import ControlActionHandler
+        predictor._control_handler = ControlActionHandler(
+            grid_manager=predictor._grid_manager,
+            cell_size=predictor._cell_size,
+            time_step=predictor._time_step,
+            fuel_class_factory=predictor.FuelClass,
+        )
+        predictor._control_handler.set_updated_cells_ref(predictor._updated_cells)
+        predictor._control_handler.set_time_accessor(lambda: predictor._curr_time_s)
+        predictor._control_handler.logger = predictor.logger
+        predictor._control_handler._visualizer = predictor._visualizer
+
+        # Transfer scenario fire-break data into the handler so
+        # `_apply_firebreak` finds something to act on.
+        for fire_break, width, fb_id in predictor._fire_breaks:
+            predictor._control_handler._fire_breaks.append((fire_break, width, fb_id))
+            predictor._control_handler._fire_break_dict[fb_id] = (fire_break, width)
+
+        # Re-point the backward-compat references that BaseFireSim.__init__
+        # lines 213-219 would normally set. The bare attributes already
+        # exist (set above as empty containers) but they're decoupled from
+        # the handler's containers, so any handler-side mutation wouldn't
+        # be visible. Aliasing them keeps the predictor consistent with a
+        # fresh FireSim's view.
+        predictor._long_term_retardants = predictor._control_handler.long_term_retardants
+        predictor._active_water_drops = predictor._control_handler.active_water_drops
+        predictor._fire_break_cells = predictor._control_handler.fire_break_cells
+        predictor._active_firelines = predictor._control_handler.active_firelines
+        predictor._new_fire_break_cache = predictor._control_handler.new_fire_break_cache
+        predictor._fire_breaks = predictor._control_handler.fire_breaks
+        predictor.fire_break_dict = predictor._control_handler.fire_break_dict
+
         # Check for pooled forecast mode
         predictor._use_pooled_forecast = data.get('use_pooled_forecast', False)
         predictor._wind_forecast_assigned = False
