@@ -45,7 +45,7 @@ class FireSim(BaseFireSim):
                 wind conditions, and ignition points.
         """
         print("Fire Simulation Initializing...")
-        
+
         # Variable to store tqdm progress bar
         self.progress_bar = None
 
@@ -60,6 +60,11 @@ class FireSim(BaseFireSim):
         self.curr_prediction = None
 
         super().__init__(sim_params)
+
+        # Owned RNG for the firebreak-breach Bernoulli check in iterate().
+        # Derived deterministically from the master seed; sim_params.seed=None
+        # falls through to OS entropy via the SeedSequence.
+        self._breach_rng = self.child_generator("embrs.fire")
 
         # Log frequency (set to 1 hour by default)
         self._log_freq = int(np.floor(3600 / self._time_step))
@@ -247,7 +252,7 @@ class FireSim(BaseFireSim):
 
                     hold_prob = cell.calc_hold_prob(flame_len_m)
                     
-                    rand = np.random.random()
+                    rand = self._breach_rng.random()
 
                     cell.breached = rand > hold_prob
 

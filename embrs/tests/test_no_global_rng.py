@@ -74,10 +74,15 @@ STDLIB_RANDOM_IMPORT_RE = re.compile(
 UUID4_RE = re.compile(r"\buuid\.uuid4\b")
 TIME_TIME_RE = re.compile(r"\btime\.time\(\)")
 
-# Allowlist for narrow, justified exemptions — populate as Phase 4 lands the
-# Numba kernel exemption and any test-only fixtures that legitimately must
-# stay nondeterministic. Format: "<repo-relative path>:<line>:<rule>".
-ALLOWLIST: set[str] = set()
+# Allowlist for narrow, justified exemptions. Format:
+# "<repo-relative path>:<line>:<rule>". Each entry should carry a one-line
+# justification comment immediately above it.
+ALLOWLIST: set[str] = {
+    # Numba @njit kernel: threading our owned Generator into the JIT-compiled
+    # hot path is non-trivial. Per the seed-determinism plan, this O(1e-4)
+    # perturbation is accepted as known small nondeterminism. Phase 2.
+    "embrs/models/dead_fuel_moisture.py:454:np.random.*",
+}
 
 
 def _iter_python_files(roots: Iterable[Path]) -> Iterable[Path]:

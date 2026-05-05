@@ -248,10 +248,19 @@ class BaseFireSim:
             # Limits to pass into spotting models
             limits = (self.x_lim, self.y_lim)
             if not prediction:
-                # Spot fire modelling class
-                self.embers = Embers(self._spot_ign_prob, self._canopy_species, self._dbh_cm, self._min_spot_distance, limits, self.get_cell_from_xy)
+                # Spot fire modelling class. Pass a deterministic Generator
+                # derived from the master seed; legacy (sim_params.seed=None)
+                # falls through to OS entropy via SeedSequence.
+                self.embers = Embers(
+                    self._spot_ign_prob, self._canopy_species, self._dbh_cm,
+                    self._min_spot_distance, limits, self.get_cell_from_xy,
+                    rng=self.child_generator("embrs.embers"),
+                )
 
             else:
+                # PerrymanSpotting on the predictor side stays unseeded in
+                # Phase 2; Phase 3 wires it from a spawn off the embers
+                # SeedSequence (per the seed-determinism plan).
                 self.embers = PerrymanSpotting(self._spot_delay_s, limits)
 
 

@@ -15,6 +15,7 @@ References:
 
 from embrs.fire_simulator.cell import Cell
 from embrs.utilities.unit_conversions import *
+from typing import Optional
 
 import numpy as np
 
@@ -39,18 +40,33 @@ class PerrymanSpotting:
             (seconds).
     """
 
-    def __init__(self, spot_delay_s: float, limits: tuple):
+    def __init__(self, spot_delay_s: float, limits: tuple,
+                 rng: Optional[np.random.Generator] = None):
         """Initialize the Perryman spotting model.
 
         Args:
             spot_delay_s (float): Spot fire ignition delay (seconds).
             limits (tuple): ``(x_lim, y_lim)`` simulation domain bounds
                 (meters).
+            rng (np.random.Generator, optional): Generator used for the
+                downwind (lognormal) and crosswind (normal) firebrand
+                landing-distance samples in
+                :py:meth:`compute_parallel_distances` and
+                :py:meth:`compute_perp_distances`. If ``None``, a fresh
+                ``np.random.default_rng()`` is created (unseeded,
+                system-entropy default — preserves legacy behavior without
+                touching global ``np.random`` state). The conventional seed
+                source is a spawn off the embers SeedSequence, since
+                Perryman spotting is a sub-component of ember behavior.
         """
         self.embers = []
         self.spot_delay_s = spot_delay_s
 
         self.x_lim, self.y_lim = limits
+
+        # Owned RNG. None falls back to a fresh default_rng (unseeded,
+        # but no global state pollution).
+        self._rng = rng if rng is not None else np.random.default_rng()
 
     def loft(self, cell: Cell):
         """Sample firebrand landing locations from a burning cell.
@@ -160,8 +176,8 @@ class PerrymanSpotting:
             mu =    1.32 * (I_f_kW_m**(0.26)*u_h**(0.11)) - 0.02
 
         # Sample distances for firebrands
-        parallel_distances = np.random.lognormal(mean=mu, sigma=sigma, size=num_firebrands)
-        
+        parallel_distances = self._rng.lognormal(mean=mu, sigma=sigma, size=num_firebrands)
+
         return parallel_distances
 
     def compute_perp_distances(self, cell: Cell) -> np.ndarray:
@@ -181,6 +197,6 @@ class PerrymanSpotting:
         flat_to_flat = cell.cell_size * (np.sqrt(3)/2)
         sv = flat_to_flat / 2
 
-        perp_distances = np.random.normal(loc=0, scale=sv, size=num_firebrands)
+        perp_distances = self._rng.normal(loc=0, scale=sv, size=num_firebrands)
 
         return perp_distances
