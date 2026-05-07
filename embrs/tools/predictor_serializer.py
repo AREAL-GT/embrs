@@ -264,6 +264,16 @@ class PredictorSerializer:
         # Pre-allocated buffer for propagate_fire JIT kernel
         predictor._new_ixn_buf = np.empty(12, dtype=np.int64)
 
+        # Seed-determinism scaffolding. BaseFireSim.__init__ would normally
+        # populate these (base_fire.py:151-153); since workers bypass __init__,
+        # restore them here so child_seed_sequence(...) works during _set_states.
+        # _run_ensemble_member_worker overwrites _master_seed and _seed_sequence
+        # from the per-member seed, making child_seed_sequence deterministic
+        # against the worker seed.
+        predictor._master_seed = None
+        predictor._seed_sequence = np.random.SeedSequence(None)
+        predictor._child_seq_cache = {}
+
         # Empty containers (will be populated by _set_states)
         predictor._updated_cells = {}
         predictor._cell_dict = {}

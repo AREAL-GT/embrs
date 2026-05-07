@@ -1547,6 +1547,17 @@ def _run_ensemble_member_worker(
     predictor._rng_wind = np.random.default_rng(r_wind)
     predictor._member_idx = int(member_idx)
     predictor._member_seed = int(seed)
+
+    # Re-anchor the seed-determinism API to the worker's per-member seed.
+    # PredictorSerializer.set_state initialised these to fresh-entropy
+    # defaults; here we tie them to the worker seed so any
+    # child_seed_sequence(name) call inside predictor.run() (e.g. the
+    # placeholder PerrymanSpotting branch in _set_states for scheduled
+    # ignitions without model_spotting) is deterministic across runs with
+    # the same master seed.
+    predictor._master_seed = int(seed)
+    predictor._seed_sequence = np.random.SeedSequence(seed)
+    predictor._child_seq_cache = {}
     if getattr(predictor, "embers", None) is not None and hasattr(predictor.embers, "_rng"):
         predictor.embers._rng = np.random.default_rng(r_perryman)
 
