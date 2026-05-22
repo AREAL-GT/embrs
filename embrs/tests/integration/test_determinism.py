@@ -271,6 +271,79 @@ def test_predictor_run_ensemble_n2_deterministic():
 
 
 @pytest.mark.slow
+def test_same_seed_same_outcome_cross_process():
+    """Same master seed -> identical fire grid hash across *separate* Python
+    processes (i.e. with differing PYTHONHASHSEED).
+
+    The single-process ``test_same_seed_same_outcome`` shares its hash
+    seed between both runs, so it cannot detect a bug whose symptom is
+    PYTHONHASHSEED-dependent set/dict-of-strings iteration order. This
+    test launches each run in its own subprocess with a pinned
+    PYTHONHASHSEED so any such non-determinism surfaces.
+
+    Pure-EMBRS audit (Cell hashes via ``_hash``, frontier sets are over
+    int IDs, ``starting_ignitions`` tuple-of-(Cell, loc) hashes are
+    deterministic) suggests this should already pass; the test exists
+    as a regression guard for future EMBRS changes.
+    """
+    if hash_fire_grid is None:
+        pytest.skip("ra-cbba-core determinism helpers not on this machine")
+    cfg = _locate_runnable_cfg()
+    if cfg is None:
+        pytest.skip("no EMBRS cfg with locally-available map+weather assets")
+
+    import os
+    import subprocess
+
+    # Inline driver: load_sim_params -> FireSim(seed=42) -> iterate N
+    # times -> print hash_fire_grid(fire) to stdout. Inline so the test
+    # has no extra files to maintain; the snippet is small.
+    snippet = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {repr(str(_HELPERS_PATH))})\n"
+        "from _determinism_helpers import hash_fire_grid\n"
+        "from embrs.main import load_sim_params\n"
+        "from embrs.fire_simulator.fire import FireSim\n"
+        "sp = load_sim_params(sys.argv[1])\n"
+        "sp.seed = int(sys.argv[2])\n"
+        "fire = FireSim(sp)\n"
+        f"for _ in range({_N_ITERS}):\n"
+        "    if fire.finished: break\n"
+        "    fire.iterate()\n"
+        "print(hash_fire_grid(fire))\n"
+    )
+
+    def _run(seed_env: str) -> str:
+        env = os.environ.copy()
+        env["PYTHONHASHSEED"] = seed_env
+        proc = subprocess.run(
+            [sys.executable, "-c", snippet, str(cfg), "42"],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        assert proc.returncode == 0, (
+            f"driver exited {proc.returncode} under PYTHONHASHSEED={seed_env}\n"
+            f"stderr:\n{proc.stderr}"
+        )
+        # The grid hash is the last non-empty stdout line; FireSim init
+        # prints a tqdm progress line we want to ignore.
+        lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+        assert lines, f"driver produced no stdout under PYTHONHASHSEED={seed_env}"
+        return lines[-1]
+
+    h_a = _run("0")
+    h_b = _run("1")
+    assert h_a == h_b, (
+        "hash_fire_grid differs across same-seed runs in separate processes "
+        "(distinct PYTHONHASHSEED). A set/dict-of-strings or "
+        "set-of-Shapely-objects iteration is leaking PYTHONHASHSEED into "
+        "EMBRS evolution.\n"
+        f"  PYTHONHASHSEED=0: {h_a}\n"
+        f"  PYTHONHASHSEED=1: {h_b}"
+    )
+
+
+@pytest.mark.slow
 def test_different_seed_changes_rng_state():
     """Different master seeds -> different seeded RNG state.
 

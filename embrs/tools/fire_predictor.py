@@ -1548,6 +1548,20 @@ def _run_ensemble_member_worker(
     predictor._member_idx = int(member_idx)
     predictor._member_seed = int(seed)
 
+    # Re-resolve the per-member forecast using the authoritative member_idx
+    # argument. run_ensemble mutates `self._serialization_data['member_index']`
+    # in a loop before each ProcessPoolExecutor.submit, but submit pickles
+    # lazily — by the time a worker is actually pickled, the loop may have
+    # already overwritten member_index, so __setstate__'s
+    # _restore_pooled_forecast assigns a stale forecast. The function-arg
+    # `member_idx` is passed by value and is always correct, so we re-run
+    # the assignment here to pin the right forecast.
+    if getattr(predictor, '_use_pooled_forecast', False):
+        from embrs.tools.predictor_serializer import PredictorSerializer
+        PredictorSerializer._restore_pooled_forecast(
+            predictor, predictor._serialization_data, member_idx=int(member_idx)
+        )
+
     # Re-anchor the seed-determinism API to the worker's per-member seed.
     # PredictorSerializer.set_state initialised these to fresh-entropy
     # defaults; here we tie them to the worker seed so any

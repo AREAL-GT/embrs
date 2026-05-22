@@ -452,16 +452,27 @@ class PredictorSerializer:
             predictor.embers = PerrymanSpotting(predictor._spot_delay_s, size)
 
     @staticmethod
-    def _restore_pooled_forecast(predictor: 'FirePredictor', data: Dict[str, Any]) -> None:
+    def _restore_pooled_forecast(
+        predictor: 'FirePredictor',
+        data: Dict[str, Any],
+        member_idx: Optional[int] = None,
+    ) -> None:
         """Restore wind forecast from a pre-computed forecast pool.
 
         Args:
             predictor: FirePredictor instance to update.
             data: Serialization data dictionary.
+            member_idx: Authoritative ensemble member index to use when looking
+                up the forecast. When ``None`` (the __setstate__ path),
+                falls back to ``data['member_index']`` — but that field is
+                race-prone (see ``_run_ensemble_member_worker`` for details),
+                so call sites that have a known-good value should pass it
+                explicitly to override.
         """
         forecast_pool = data['forecast_pool']
         forecast_indices = data['forecast_indices']
-        member_idx = data.get('member_index', 0)
+        if member_idx is None:
+            member_idx = data.get('member_index', 0)
 
         # Get the assigned forecast for this member
         forecast_idx = forecast_indices[member_idx]
