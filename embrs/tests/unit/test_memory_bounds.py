@@ -157,7 +157,9 @@ class TestFirePredictorMemoryCleanup:
         predictor.fli_kw_m = {0: 100.0, 100: 200.0}
         predictor.ros_ms = {0: 0.5, 100: 0.6}
         predictor.spread_dir = {(1.0, 2.0): 45, (3.0, 4.0): 90}
-        predictor.crown_fire = {0: True}
+        predictor.all_crown_fire = {(1.0, 2.0): 0}
+        predictor.active_crown_fire = {0: [((1.0, 2.0), 'active')]}
+        predictor.end_active_crown = {(1.0, 2.0): 100}
         predictor.hold_probs = {0: 0.8}
         predictor.breaches = {0: False}
         predictor._updated_cells = {1: MagicMock(), 2: MagicMock()}
@@ -172,7 +174,9 @@ class TestFirePredictorMemoryCleanup:
         assert len(predictor.fli_kw_m) == 0
         assert len(predictor.ros_ms) == 0
         assert len(predictor.spread_dir) == 0
-        assert len(predictor.crown_fire) == 0
+        assert len(predictor.all_crown_fire) == 0
+        assert len(predictor.active_crown_fire) == 0
+        assert len(predictor.end_active_crown) == 0
         assert len(predictor.hold_probs) == 0
         assert len(predictor.breaches) == 0
         assert len(predictor._updated_cells) == 0
@@ -195,7 +199,9 @@ class TestFirePredictorMemoryCleanup:
         predictor.fli_kw_m = {}
         predictor.ros_ms = {}
         predictor.spread_dir = {}
-        predictor.crown_fire = {}
+        predictor.all_crown_fire = {}
+        predictor.active_crown_fire = {}
+        predictor.end_active_crown = {}
         predictor.hold_probs = {}
         predictor.breaches = {}
         predictor._updated_cells = {}

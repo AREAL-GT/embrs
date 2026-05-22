@@ -14,8 +14,8 @@ from embrs.tools.fire_predictor import _aggregate_ensemble_predictions
 
 
 def _make_prediction(spread, flame_len_m=None, fli_kw_m=None, ros_ms=None,
-                     spread_dir=None, crown_fire=None, hold_probs=None,
-                     breaches=None):
+                     spread_dir=None, all_crown_fire=None, active_crown_fire=None,
+                     end_active_crown=None, hold_probs=None, breaches=None):
     """Helper to build a PredictionOutput with sensible defaults."""
     all_locs = set()
     for locs in spread.values():
@@ -29,8 +29,12 @@ def _make_prediction(spread, flame_len_m=None, fli_kw_m=None, ros_ms=None,
         ros_ms = {loc: 0.5 for loc in all_locs}
     if spread_dir is None:
         spread_dir = {loc: 0.0 for loc in all_locs}
-    if crown_fire is None:
-        crown_fire = {}
+    if all_crown_fire is None:
+        all_crown_fire = {}
+    if active_crown_fire is None:
+        active_crown_fire = {}
+    if end_active_crown is None:
+        end_active_crown = {}
     if hold_probs is None:
         hold_probs = {}
     if breaches is None:
@@ -42,7 +46,9 @@ def _make_prediction(spread, flame_len_m=None, fli_kw_m=None, ros_ms=None,
         fli_kw_m=fli_kw_m,
         ros_ms=ros_ms,
         spread_dir=spread_dir,
-        crown_fire=crown_fire,
+        all_crown_fire=all_crown_fire,
+        active_crown_fire=active_crown_fire,
+        end_active_crown=end_active_crown,
         hold_probs=hold_probs,
         breaches=breaches,
         active_fire_front={},

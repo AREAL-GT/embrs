@@ -394,9 +394,11 @@ class TestBurnThresholdAndAutoBurnt:
     def test_high_fire_area_becomes_burnt(self, cell_30, mock_sim):
         """Cell with fire_area >= threshold should become BURNT (fully_burning)."""
         _ignite_cell(cell_30, 0)
-        # Make all ROS zero (suppression) and fake large fire area
+        # Make all ROS zero and apply water: propagate_fire only treats a
+        # zero-ROS result as a suppression scenario when water_applied_kJ > 0.
         cell_30.r_t[:] = 0.0
         cell_30.r_ss[:] = 0.0
+        cell_30.water_applied_kJ = 1000.0
         # Simulate large spread so fire_area_m2 / cell_area >= 0.75
         cell_30.fire_spread[:] = cell_30.cell_size * 0.9  # Large spread
 
@@ -409,6 +411,7 @@ class TestBurnThresholdAndAutoBurnt:
         _ignite_cell(cell_30, 2)  # Corner ignition
         cell_30.r_t[:] = 0.0
         cell_30.r_ss[:] = 0.0
+        cell_30.water_applied_kJ = 1000.0  # Required to enter suppression branch
         # Very small spread
         cell_30.fire_spread[:] = 0.1
 
@@ -421,6 +424,7 @@ class TestBurnThresholdAndAutoBurnt:
         _ignite_cell(cell_30, 1)  # Edge midpoint → 11 directions
         cell_30.r_t[:] = 0.0
         cell_30.r_ss[:] = 0.0
+        cell_30.water_applied_kJ = 1000.0  # Required to enter suppression branch
         cell_30.fire_spread[:] = 0.1  # Small area
         # Pre-disable 10 locs (entry 1 + boundary locs 2-10)
         cell_30.disabled_locs = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
@@ -437,6 +441,7 @@ class TestBurnThresholdAndAutoBurnt:
         _ignite_cell(cell_30, 0)
         cell_30.r_t[:] = 0.0
         cell_30.r_ss[:] = 0.0
+        cell_30.water_applied_kJ = 1000.0  # Required to enter suppression branch
         # Moderate spread for ~50% coverage
         cell_30.fire_spread[:] = cell_30.cell_size * 0.7
 
