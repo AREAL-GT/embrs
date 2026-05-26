@@ -1,0 +1,76 @@
+# Example weather_candidate_search config — one (region, volatility) cell.
+#
+# Run with:
+#   python -m embrs.weather_candidate_search --config configs/example.yaml
+#
+# CLI flags override anything set here.
+
+# -------- Required inputs --------
+
+landscape_tif: /Users/rjdp3/Documents/Research/embrs_map/scenario_4/cropped_lcp.tif
+year: 2023
+
+fire_season_start_month: 5          # May (Northern Hemisphere only)
+fire_season_end_month: 10           # October inclusive
+
+scenario_length_hours: 168           # Required — no default (qa H3)
+
+bi_target_band: [60, 80]            # (min, max) for this volatility cell
+
+output_dir: /Users/rjdp3/Documents/Research/embrs/embrs/weather_candidate_search/search_outputs
+region_tag: scenario_4             # Free-form label for {output_dir}/{region}_{vol}/
+volatility_class: moderate          # Free-form, no enum validation (qa G1)
+
+
+# -------- Optional top-level knobs --------
+
+n_candidates: 5
+cache_dir: ./.openmeteo_cache/
+conditioning_days: 30               # BI spin-up buffer pulled before scenario
+window_stride_hours: 1              # Sliding window stride
+
+# Greedy temporal non-maximum suppression: forbid two selected candidates
+# whose starts are closer than this many hours apart. Without it, top-N
+# collapses onto a single weather episode (5 windows 1 h apart). Omit (or
+# set null) to use `scenario_length_hours` — selected windows never
+# overlap. Set 0 to disable. Common alternatives: half the window length
+# (50% max overlap), or one day (24).
+# min_candidate_separation_hours: null
+
+
+# -------- Lull detection (qa E1/E2/E3) --------
+
+lull:
+  wind_threshold_mph: 10.0
+  rh_threshold_pct: 15.0
+  min_consecutive_hours: 2
+  tolerance_hours: 0                # Strict by default; raise to allow gust gaps
+
+
+# -------- Composite scoring (qa F1) --------
+
+scoring:
+  bi_distance_weight: 1.0
+  lulls_weight: 0.5
+  lull_hours_weight: 0.05
+
+
+# -------- Wind-height correction (qa B4) --------
+
+wind_conversion:
+  enabled: true                     # 10 m → 20 ft log-profile correction
+  surface_roughness_m: 0.06         # Grass-shrub default; tune per region
+
+
+# -------- BI pipeline pass-through (qa A4) --------
+# Every field below maps 1:1 to embrs.fire_danger.Config.
+# Omit any field to use the BI pipeline's own default.
+
+bi:
+  min_area_frac: 0.05
+  # slope_class: null               # Auto-derived from LANDFIRE slope band
+  # lat_override: null              # Auto-derived from raster centroid
+  reg_obs_hr: 13
+  cloud_scale: percent
+  snow_mode: none
+  # avg_ann_precip_in: null         # Auto-fetched from Open-Meteo (1991–2020)

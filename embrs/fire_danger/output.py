@@ -25,7 +25,7 @@ def write_csv(result: TrajectoryResult, path: str) -> None:
     df.to_csv(path, index=True)
 
 
-_NOON_HOUR: int = 12
+_REG_OBS_HOUR: int = 13   # NFDRS regular observation hour (1 PM local)
 
 
 def _plot_hourly(ax, result: TrajectoryResult) -> None:
@@ -59,59 +59,61 @@ def _plot_hourly(ax, result: TrajectoryResult) -> None:
     ax.grid(True, alpha=0.3)
 
 
-def _plot_daily_noon(ax, result: TrajectoryResult) -> None:
-    """Bottom panel — one BI value per day, sampled at 12:00 local.
+def _plot_daily_reg_obs(ax, result: TrajectoryResult) -> None:
+    """Bottom panel — one BI value per day at the NFDRS regular obs hour.
 
-    Mirrors how NFDRS BI is normally read: a single afternoon value per day
-    rather than the hourly saw-tooth driven by the diurnal MC1 cycle.
-    Days where no 12:00 row is present in the trajectory are dropped.
+    Sampled at 13:00 local (1 PM). Mirrors how NFDRS BI is operationally
+    reported: a single afternoon value per day, stripping the diurnal
+    saw-tooth driven by the 1-hr fuel moisture cycle. Days where no
+    13:00 row is present in the trajectory are dropped.
     """
     df = result.df
-    noon_df = df[df.index.hour == _NOON_HOUR]
-    if noon_df.empty:
-        ax.text(0.5, 0.5, "(no rows at 12:00 — skipping noon plot)",
+    daily_df = df[df.index.hour == _REG_OBS_HOUR]
+    if daily_df.empty:
+        ax.text(0.5, 0.5, "(no rows at 13:00 — skipping daily-1pm plot)",
                 ha="center", va="center", transform=ax.transAxes)
         ax.set_xticks([])
         ax.set_yticks([])
         return
 
-    for col in noon_df.columns:
+    for col in daily_df.columns:
         if col.startswith("BI_") and col != "BI_area_weighted":
-            ax.plot(noon_df.index, noon_df[col].to_numpy(),
+            ax.plot(daily_df.index, daily_df[col].to_numpy(),
                     linewidth=1.0, alpha=0.6, marker="o", markersize=3,
                     label=col)
 
-    ax.plot(noon_df.index, noon_df["BI_area_weighted"].to_numpy(),
+    ax.plot(daily_df.index, daily_df["BI_area_weighted"].to_numpy(),
             linewidth=2.2, color="black", marker="o", markersize=4,
-            label="BI_area_weighted (noon)")
+            label="BI_area_weighted (1 PM)")
 
-    conditioning = noon_df.index[noon_df["phase"] == "conditioning"]
+    conditioning = daily_df.index[daily_df["phase"] == "conditioning"]
     if len(conditioning) > 0:
         ax.axvspan(conditioning.min(), conditioning.max(),
                    alpha=0.10, color="gray")
 
     ax.set_xlabel("Date (local)")
-    ax.set_ylabel("Burning Index (noon)")
-    ax.set_title("Daily noon BI — one sample per day at 12:00 local")
+    ax.set_ylabel("Burning Index (1 PM)")
+    ax.set_title("Daily 1 PM BI — one sample per day at the NFDRS RegObsHr")
     ax.legend(loc="upper left", fontsize=8, ncol=2)
     ax.grid(True, alpha=0.3)
 
 
 def plot_trajectory(result: TrajectoryResult, path: str) -> None:
-    """Two-panel plot: hourly BI (top) and daily noon BI (bottom).
+    """Two-panel plot: hourly BI (top) and daily 1 PM BI (bottom).
 
     - **Top**: ``BI_area_weighted`` plus per-model thin lines at hourly
       resolution. Conditioning period shaded gray. Horizontal marker at
       ``peak_bi`` (97th percentile of scenario hours).
-    - **Bottom**: one BI value per day sampled at 12:00 local — easier to
-      read for tuning since it strips the diurnal MC1-driven saw-tooth.
+    - **Bottom**: one BI value per day sampled at 13:00 local — the NFDRS
+      regular observation hour. Strips the diurnal MC1-driven saw-tooth
+      and matches how operational fire-danger reports describe a period.
     """
     fig, (ax_top, ax_bot) = plt.subplots(
         nrows=2, ncols=1, figsize=(11, 8), sharex=True,
         gridspec_kw={"height_ratios": [3, 2]},
     )
     _plot_hourly(ax_top, result)
-    _plot_daily_noon(ax_bot, result)
+    _plot_daily_reg_obs(ax_bot, result)
 
     fig.autofmt_xdate()
     fig.tight_layout()
