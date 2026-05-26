@@ -12,6 +12,40 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 
+# Valid values for ``Config.bi_filter_mode``. See the field's docstring for
+# semantics; ``columns_for_bi_filter_mode`` and ``score_distance_column_for_mode``
+# below resolve a mode to the ranking-layer columns.
+BI_FILTER_MODES: frozenset[str] = frozenset(("mean_only", "dual", "peak_only"))
+
+
+def columns_for_bi_filter_mode(mode: str) -> Tuple[str, ...]:
+    """Filter columns for ``ranking.filter_by_target_band`` per mode."""
+    if mode == "mean_only":
+        return ("mean_daily_1pm_bi",)
+    if mode == "dual":
+        return ("peak_bi", "mean_daily_1pm_bi")
+    if mode == "peak_only":
+        return ("peak_bi",)
+    raise ValueError(f"unknown bi_filter_mode: {mode!r}")
+
+
+def score_distance_column_for_mode(mode: str) -> str:
+    """The column used for the BI-distance term in the composite score.
+
+    Score uses the same metric the filter selects on (so we don't filter on
+    one and rank by another). Exception: ``dual`` mode uses the mean — it
+    varies smoothly across overlapping windows while the 97th-pct peak
+    flat-lines.
+    """
+    if mode == "mean_only":
+        return "mean_daily_1pm_bi"
+    if mode == "dual":
+        return "mean_daily_1pm_bi"
+    if mode == "peak_only":
+        return "peak_bi"
+    raise ValueError(f"unknown bi_filter_mode: {mode!r}")
+
+
 @dataclass(frozen=True)
 class LullConfig:
     """Lull-detection thresholds (plan §4.1; qa E1/E2/E3)."""
@@ -104,6 +138,23 @@ class Config:
     # candidates share ≥ 99% of their data. Set to 0 to disable NMS entirely.
     min_candidate_separation_hours: Optional[int] = None
 
+    # BI band-match metric (added 2026-05-26 after the Flint Hills run showed
+    # that dual ``(peak_bi, mean_daily_1pm_bi)`` is structurally
+    # unsatisfiable in grass fuels where peak and mean are systematically
+    # offset by 30+ BI units).
+    #
+    #   "mean_only" — filter and score on ``mean_daily_1pm_bi`` (the NFDRS
+    #                  daily afternoon mean over the window). The recommended
+    #                  cross-region equivalence metric: a "moderate" window
+    #                  in any region is one whose characteristic daily 1 PM
+    #                  BI mean lands in the target band. Peak is reported as
+    #                  descriptive metadata only.
+    #   "dual"      — filter requires BOTH peak_bi AND mean_daily_1pm_bi in
+    #                  band; score uses the mean. Stricter, often empty for
+    #                  high-diurnal-swing regions.
+    #   "peak_only" — legacy filter+score on ``peak_bi`` (97th-pct hourly).
+    bi_filter_mode: str = "mean_only"
+
     lull: LullConfig = field(default_factory=LullConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     wind_conversion: WindConversionConfig = field(default_factory=WindConversionConfig)
@@ -157,6 +208,11 @@ class Config:
             raise ValueError(
                 f"min_candidate_separation_hours must be >= 0 or None, "
                 f"got {self.min_candidate_separation_hours}"
+            )
+        if self.bi_filter_mode not in BI_FILTER_MODES:
+            raise ValueError(
+                f"bi_filter_mode must be one of {sorted(BI_FILTER_MODES)}, "
+                f"got {self.bi_filter_mode!r}"
             )
         if not self.region_tag:
             raise ValueError("region_tag must be a non-empty string")

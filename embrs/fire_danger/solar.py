@@ -17,6 +17,8 @@ using the Ineichen model (no extra inputs required).
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pvlib
@@ -24,6 +26,8 @@ import pytz
 
 from embrs.fire_danger.config import HourlyWeather
 from embrs.utilities.data_classes import GeoInfo
+
+logger = logging.getLogger(__name__)
 
 _VALID_CLOUD_SCALES = {"percent", "fraction", "okta", "tenths"}
 
@@ -81,8 +85,24 @@ def synthesize_solar(
         local_tz = pytz.timezone(geo.timezone)
         df.index = df.index.tz_localize(local_tz, nonexistent="shift_forward",
                                         ambiguous="NaT")
-        # Drop any NaT rows produced by DST gaps (rare for hourly RAWS data).
-        df.dropna(how="all", inplace=True)
+        # Drop rows whose index became NaT after DST localization.
+        # ``ambiguous="NaT"`` marks the fall-back duplicate hour (e.g.
+        # 01:00 local on the autumn DST transition in IANA tz's that observe
+        # DST) as NaT in the index. ``dropna(how="all")`` only drops rows
+        # whose columns are all NaN — NaT in the *index* is invisible to
+        # it, so we filter explicitly here. Without this, downstream
+        # consumers like ``kbdi.compute_kbdi_series`` blow up when they
+        # try to read ``.year`` off a NaT day.
+        nat_mask = df.index.isna()
+        if nat_mask.any():
+            logger.warning(
+                "synthesize_solar: dropping %d ambiguous DST-fall-back row(s) "
+                "from weather frame (tz=%s).",
+                int(nat_mask.sum()),
+                geo.timezone,
+            )
+            df = df.loc[~nat_mask]
+            weather.df = df
 
     loc = pvlib.location.Location(
         latitude=geo.center_lat,

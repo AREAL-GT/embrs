@@ -1,20 +1,21 @@
 """Filter candidate windows by target BI band and apply a composite score.
 
-Dual BI match (per user direction 2026-05-26): a window must pass BOTH
+Default filter is **mean-only** (``mean_daily_1pm_bi`` in band): the NFDRS
+daily afternoon mean over the window is the recommended cross-region
+equivalence metric. The peak (97th-pct hourly) is reported as descriptive
+metadata but does not gate selection. See ``config.BI_FILTER_MODES`` and
+the field docstring on ``Config.bi_filter_mode`` for the rationale.
 
-    peak_bi             ∈ [band[0], band[1]]      # 97th-pct hourly
-    mean_daily_1pm_bi   ∈ [band[0], band[1]]      # NFDRS afternoon mean
+Composite score:
 
-before it can be ranked. The composite score then uses the NFDRS
-afternoon mean as the BI signal (smoother across overlapping windows than
-the hourly 97th pct):
-
-    bi_distance     = |mean_daily_1pm_bi - center(band)| / half_width(band)
+    bi_distance     = |<score_distance_column> - center(band)| / half_width(band)
     score           = -bi_distance_weight * bi_distance
                        + lulls_weight       * n_lulls
                        + lull_hours_weight  * total_lull_hours
 
-Higher score wins; tie-break by earliest window start (qa F2).
+Higher score wins; tie-break by earliest window start (qa F2). The
+distance column matches the filter metric except in ``dual`` mode where
+both metrics are filtered but only the smoother (mean) is scored.
 
 Plan §4.9.
 """
@@ -69,7 +70,7 @@ def _band_geometry(band: Tuple[float, float]) -> Tuple[float, float]:
     return center, half_width
 
 
-_DEFAULT_BAND_FILTER_COLS: Tuple[str, ...] = ("peak_bi", "mean_daily_1pm_bi")
+_DEFAULT_BAND_FILTER_COLS: Tuple[str, ...] = ("mean_daily_1pm_bi",)
 
 
 def filter_by_target_band(

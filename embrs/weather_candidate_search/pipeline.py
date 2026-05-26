@@ -20,7 +20,11 @@ from embrs.weather_candidate_search.bi_search import (
     per_window_peaks,
     run_bi,
 )
-from embrs.weather_candidate_search.config import Config
+from embrs.weather_candidate_search.config import (
+    Config,
+    columns_for_bi_filter_mode,
+    score_distance_column_for_mode,
+)
 from embrs.weather_candidate_search.geo import LandscapeGeo, load_landscape_geo
 from embrs.weather_candidate_search.lull_detection import Lull, detect_lulls
 from embrs.weather_candidate_search.openmeteo_client import (
@@ -259,9 +263,20 @@ def run_candidate_search(cfg: Config) -> int:
     for w in windows:
         lulls_by_window[w.window_id] = detect_lulls(w.df, cfg.lull)
 
-    # 11. Filter + score + select
-    filtered = filter_by_target_band(per_window, cfg.bi_target_band)
-    scored = score_windows(filtered, lulls_by_window, cfg.bi_target_band, cfg.scoring)
+    # 11. Filter + score + select (per cfg.bi_filter_mode)
+    filter_columns = columns_for_bi_filter_mode(cfg.bi_filter_mode)
+    score_distance_column = score_distance_column_for_mode(cfg.bi_filter_mode)
+    logger.info(
+        "BI filter mode = %r (filter on %s, score distance on %r).",
+        cfg.bi_filter_mode, list(filter_columns), score_distance_column,
+    )
+    filtered = filter_by_target_band(
+        per_window, cfg.bi_target_band, columns=filter_columns
+    )
+    scored = score_windows(
+        filtered, lulls_by_window, cfg.bi_target_band, cfg.scoring,
+        bi_distance_column=score_distance_column,
+    )
     selected = select_top_n(
         scored,
         lulls_by_window,

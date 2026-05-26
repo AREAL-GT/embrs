@@ -73,6 +73,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "windows never overlap). Set 0 to disable."
         ),
     )
+    p.add_argument(
+        "--bi-filter-mode",
+        choices=("mean_only", "dual", "peak_only"),
+        default=_SENTINEL,
+        help=(
+            "Which BI metric(s) the band filter applies to. "
+            "'mean_only' (default) filters on the NFDRS daily 1 PM mean; "
+            "'dual' requires both peak (97th pct hourly) and the mean in "
+            "band; 'peak_only' is the legacy peak filter."
+        ),
+    )
 
     # Most-frequently-tuned nested fields surfaced as flags (plan §4.2).
     p.add_argument("--wind-threshold-mph", type=float, default=_SENTINEL)
@@ -246,6 +257,9 @@ def config_from_namespace(ns: argparse.Namespace) -> Config:
             ns.min_candidate_separation_hours,
             y("min_candidate_separation_hours"),
             None,
+        ),
+        bi_filter_mode=str(
+            _coalesce(ns.bi_filter_mode, y("bi_filter_mode"), "mean_only")
         ),
         lull=_build_lull(yaml_cfg.get("lull", {}) or {}, ns),
         scoring=_build_scoring(yaml_cfg.get("scoring", {}) or {}),

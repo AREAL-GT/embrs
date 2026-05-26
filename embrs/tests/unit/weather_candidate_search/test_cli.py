@@ -102,6 +102,28 @@ def test_cli_min_candidate_separation_hours_round_trip(tmp_path):
     assert cfg.effective_min_separation_hours == 24
 
 
+def test_cli_bi_filter_mode_default_and_override(tmp_path):
+    base_argv = [
+        "--landscape-tif", "/tmp/foo.tif",
+        "--year", "2024",
+        "--fire-season-start-month", "5",
+        "--fire-season-end-month", "10",
+        "--scenario-length-hours", "168",
+        "--bi-target-band", "60", "80",
+        "--output-dir", str(tmp_path),
+        "--region-tag", "r1",
+        "--volatility-class", "moderate",
+    ]
+    cfg = config_from_namespace(_parse(base_argv))
+    assert cfg.bi_filter_mode == "mean_only"
+
+    cfg_dual = config_from_namespace(_parse(base_argv + ["--bi-filter-mode", "dual"]))
+    assert cfg_dual.bi_filter_mode == "dual"
+
+    cfg_peak = config_from_namespace(_parse(base_argv + ["--bi-filter-mode", "peak_only"]))
+    assert cfg_peak.bi_filter_mode == "peak_only"
+
+
 def test_cli_min_separation_default_is_window_length(tmp_path):
     argv = [
         "--landscape-tif", "/tmp/foo.tif",

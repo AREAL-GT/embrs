@@ -47,26 +47,37 @@ def _per_window(rows, mean_daily_1pm_bi=None):
     return df
 
 
-def test_filter_by_target_band_dual():
-    """Default dual filter: BOTH peak_bi and mean_daily_1pm_bi must be in band."""
+def test_filter_by_target_band_default_is_mean_only():
+    """Default filter checks ``mean_daily_1pm_bi`` alone."""
     df = _per_window([("a", 0, 30, 20), ("b", 1, 70, 50), ("c", 2, 90, 60)])
-    # With the helper's default mean_daily_1pm_bi = peak_bi, only b's peak
-    # (70) is in [60, 80] AND its mean_daily_1pm_bi (70) is in [60, 80].
+    # Helper defaults mean_daily_1pm_bi = peak_bi → only b lands in [60, 80].
     out = filter_by_target_band(df, (60, 80))
     assert list(out.index) == ["b"]
 
 
-def test_filter_by_target_band_rejects_peak_in_band_mean_out():
-    """A window whose peak hits the band but mean is below it is dropped."""
+def test_filter_by_target_band_default_ignores_peak():
+    """A window whose peak is wildly out of band but mean is inside passes."""
+    df = _per_window(
+        [("calm_mean_high_peak", 0, 200, 50)],
+        mean_daily_1pm_bi={"calm_mean_high_peak": 70.0},
+    )
+    out = filter_by_target_band(df, (60, 80))
+    assert list(out.index) == ["calm_mean_high_peak"]
+
+
+def test_filter_by_target_band_dual_mode_requires_both():
+    """Explicit dual mode requires BOTH metrics in band."""
     df = _per_window(
         [("spike", 0, 70, 30)],
         mean_daily_1pm_bi={"spike": 30.0},
     )
-    out = filter_by_target_band(df, (60, 80))
+    out = filter_by_target_band(
+        df, (60, 80), columns=("peak_bi", "mean_daily_1pm_bi")
+    )
     assert out.empty
 
 
-def test_filter_by_target_band_legacy_single_column():
+def test_filter_by_target_band_peak_only_legacy():
     """``columns=("peak_bi",)`` recovers the pre-dual-metric behaviour."""
     df = _per_window(
         [("spike", 0, 70, 30)],
