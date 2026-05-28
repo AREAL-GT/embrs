@@ -7,7 +7,6 @@ import sys
 import copy
 import json
 import os
-import pickle
 from typing import Tuple, Dict, List
 from tqdm import tqdm
 import argparse
@@ -19,7 +18,7 @@ from embrs.fire_simulator.fire import FireSim
 from embrs.utilities.file_io import SimFolderSelector, LoaderWindow, read_fms_file
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.base_classes.control_base import ControlClass
-from embrs.utilities.data_classes import SimParams, WeatherParams
+from embrs.utilities.data_classes import SimParams, WeatherParams, MapParams
 
 def initialize(sim_params: SimParams) -> Tuple[FireSim, bool, RealTimeVisualizer]:
     """Initializes a fireSim object and a Visualizer(if selected) based on user inputs
@@ -230,8 +229,7 @@ def load_sim_params(cfg_path: str) -> SimParams:
         print(f"pkl_path: {pkl_path}")
 
         if os.path.exists(pkl_path):
-            with open(pkl_path, "rb") as f:
-                map_params = pickle.load(f)
+            map_params = MapParams.load(folder)
         else:
             raise FileNotFoundError(f"Error in {cfg_path}: MapParams file not found in '{folder}'. Ensure 'map_params.pkl' exists.")
     else:

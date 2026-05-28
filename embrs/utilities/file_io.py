@@ -41,7 +41,6 @@ import tkinter as tk
 import numpy as np
 import importlib
 import inspect
-import pickle
 import json
 import sys
 import os
@@ -515,8 +514,7 @@ class SimFolderSelector(FileSelectBase):
             window.destroy()
             return
 
-        with open(os.path.join(self.map_folder.get(), "map_params.pkl"), "rb") as f:
-            map_params = pickle.load(f)
+        map_params = MapParams.load(self.map_folder.get())
 
         fuel_map = map_params.lcp_data.fuel_map
         unique_fuels = np.unique(fuel_map.astype(int))
@@ -883,8 +881,7 @@ class SimFolderSelector(FileSelectBase):
                                 "Start date and time must be before the end date and time, and the end date must be in the past.")
 
         else:
-            with open(os.path.join(self.map_folder.get(), "map_params.pkl"), "rb") as f:
-                map_params = pickle.load(f)
+            map_params = MapParams.load(self.map_folder.get())
 
             weather_input = WeatherParams(
                 input_type = "OpenMeteo" if self.use_open_meteo.get() else "File",
