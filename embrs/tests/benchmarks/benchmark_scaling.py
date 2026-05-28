@@ -60,15 +60,14 @@ def build_sim_params(
     conditioning_start: str,
 ):
     """Build a SimParams object programmatically (no .cfg file needed)."""
-    from embrs.utilities.data_classes import SimParams, WeatherParams
+    from embrs.utilities.data_classes import SimParams, WeatherParams, MapParams
 
     # Load pre-built map params
     pkl_path = os.path.join(map_folder, "map_params.pkl")
     if not os.path.exists(pkl_path):
         raise FileNotFoundError(f"map_params.pkl not found in {map_folder}")
 
-    with open(pkl_path, "rb") as f:
-        map_params = pickle.load(f)
+    map_params = MapParams.load(map_folder)
 
     start = datetime.fromisoformat(start_dt)
     end = datetime.fromisoformat(end_dt)

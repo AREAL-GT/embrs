@@ -28,6 +28,8 @@ Note:
 """
 
 from __future__ import annotations
+import os
+import pickle
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Tuple, TYPE_CHECKING
 import numpy as np
@@ -196,6 +198,36 @@ class MapParams:
         cols = int(np.floor(self.lcp_data.width_m/(np.sqrt(3)*cell_size))) + 1
 
         return (rows, cols)
+
+    @classmethod
+    def load(cls, folder: str) -> "MapParams":
+        """Load a saved map from ``folder``, rebasing machine-specific paths.
+
+        ``folder`` and ``cropped_lcp_path`` are pickled as absolute paths from
+        the machine where the map was generated, so they break when the map
+        folder is copied elsewhere (e.g. a compute cluster). This rebases both
+        onto ``folder`` — the directory the pickle was actually loaded from —
+        so maps are relocatable without editing the pickle. ``cropped_lcp_path``
+        feeds WindNinja's ``--elevation_file`` and ``folder`` is where the
+        logger looks for map metadata.
+
+        Args:
+            folder (str): Directory containing ``map_params.pkl`` (and the
+                ``cropped_lcp.tif`` WindNinja reads for real simulations).
+
+        Returns:
+            MapParams: Loaded map params with ``folder`` and
+                ``cropped_lcp_path`` pointing inside ``folder``.
+        """
+        folder = os.path.abspath(folder)
+        pkl_path = os.path.join(folder, "map_params.pkl")
+        with open(pkl_path, "rb") as f:
+            map_params = pickle.load(f)
+
+        map_params.folder = folder
+        map_params.cropped_lcp_path = os.path.join(folder, "cropped_lcp.tif")
+
+        return map_params
 
 @dataclass
 class PlaybackVisualizerParams:

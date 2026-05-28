@@ -17,12 +17,9 @@ from typing import Tuple, Union, List, Dict, Optional
 from tqdm import tqdm
 import numpy as np
 import math as _math
-import pickle
-import copy
 import hashlib
-import os
 
-from embrs.utilities.fire_util import HexGridMath as hex, UtilFuncs, HexGridMath
+from embrs.utilities.fire_util import HexGridMath
 from embrs.models.wind_forecast import run_windninja
 from embrs.utilities.logger_schemas import ActionsEntry, PredictionEntry
 from embrs.models.fuel_models import Anderson13, ScottBurgan40
@@ -39,7 +36,6 @@ from embrs.fire_simulator.cell import Cell
 from embrs.models.embers import Embers
 from embrs.models.rothermel import *
 from embrs.utilities.numba_utils import njit_if_enabled
-import math
 
 
 @njit_if_enabled(cache=True)
