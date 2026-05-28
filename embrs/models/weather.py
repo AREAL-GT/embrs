@@ -400,9 +400,9 @@ class WeatherStream:
         """Parse a RAWS-format ``.wxs`` weather file and build the stream.
 
         Read weather observations from the file, apply unit conversions
-        (English or Metric to internal units), fetch solar irradiance from
-        Open-Meteo to supplement the file data, compute GSI, and assemble
-        the final weather stream.
+        (English or Metric to internal units), obtain solar irradiance
+        (from Open-Meteo or synthesized offline per ``params.solar_source``),
+        compute GSI, and assemble the final weather stream.
 
         Side Effects:
             Sets ``self.stream``, ``self.stream_times``, ``self.sim_start_idx``,
@@ -483,8 +483,7 @@ class WeatherStream:
         else:
             raise ValueError(f"Unknown units: {units}")
 
-        # ── Step 3: Fetch irradiance from Open-Meteo ─────────────────
-        # Use buffer around sim dates
+        # ── Step 3: Validate sim window and clip the WXS frame ───────
         conditioning_start = local_tz.localize(self.params.conditioning_start)
         start_datetime = local_tz.localize(self.params.start_datetime)
         end_datetime = local_tz.localize(self.params.end_datetime)
@@ -500,59 +499,25 @@ class WeatherStream:
             raise ValueError(f"End datetime {end_datetime} is after WXS data ends at {wxs_end}.")
 
         buffered_start = start_datetime - timedelta(days=56)
-        buffered_end = end_datetime + timedelta(days=1)
-
-        cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
-        retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-        openmeteo = openmeteo_requests.Client(session=retry_session)
-
-        url = "https://archive-api.open-meteo.com/v1/archive"
-        api_input = {
-            "latitude": self.geo.center_lat,
-            "longitude": self.geo.center_lon,
-            "start_date": buffered_start.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
-            "end_date": buffered_end.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
-            "hourly": ["shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
-            "timezone": "auto"
-        }
-
-        responses = openmeteo.weather_api(url, params=api_input)
-        response = responses[0]
-
-        hourly = response.Hourly()
-        hourly_data = {
-            "ghi": hourly.Variables(0).ValuesAsNumpy(),
-            "dhi": hourly.Variables(1).ValuesAsNumpy(),
-            "dni": hourly.Variables(2).ValuesAsNumpy(),
-            "date": pd.date_range(
-                start=pd.to_datetime(hourly.Time(), unit="s"),
-                end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
-                freq=pd.Timedelta(seconds=hourly.Interval()),
-                inclusive="left"
-            ).tz_localize(local_tz)
-        }
-
-        irradiance_df = pd.DataFrame(hourly_data).set_index("date")
-
-        # ── Step 4: Resample Open-Meteo irradiance to WXS resolution ─
-        target_freq = f"{time_step_min}T"
-        if time_step_min < 60:
-            irradiance_df = irradiance_df.resample(target_freq).interpolate(method="linear")
-        elif time_step_min > 60:
-            irradiance_df = irradiance_df.resample(target_freq).mean()
-
-        # ── Step 5: Align WXS and Open-Meteo data on datetime index ──
         df = df.loc[(df.index >= buffered_start) & (df.index <= end_datetime)]
-        irradiance_df = irradiance_df.loc[df.index]
 
-        df["ghi"] = irradiance_df["ghi"].values
-        df["dhi"] = irradiance_df["dhi"].values
-        df["dni"] = irradiance_df["dni"].values
-
-        # ── Step 6: Add solar geometry ───────────────────────────────
+        # ── Step 4: Solar geometry (offline, pvlib) ──────────────────
         solpos = pvlib.solarposition.get_solarposition(df.index, self.geo.center_lat, self.geo.center_lon)
         df["solar_zenith"] = solpos["zenith"].values
         df["solar_azimuth"] = solpos["azimuth"].values
+
+        # ── Step 5: Irradiance components (ghi/dni/dhi) ──────────────
+        solar_source = getattr(self.params, "solar_source", "openmeteo")
+        if solar_source == "offline":
+            ghi, dni, dhi = self._synthesize_irradiance(df, solpos)
+        else:
+            ghi, dni, dhi = self._fetch_irradiance_openmeteo(
+                df.index, local_tz, buffered_start, end_datetime, time_step_min
+            )
+
+        df["ghi"] = ghi
+        df["dni"] = dni
+        df["dhi"] = dhi
 
         if self.use_gsi:
             # Determine how far back we can go
@@ -616,7 +581,88 @@ class WeatherStream:
         self.input_wind_ht_units = "m"
         self.input_wind_vel_units = "mps"
         self.input_temp_units = "F"
- 
+
+    def _fetch_irradiance_openmeteo(self, index, local_tz, buffered_start,
+                                    end_datetime, time_step_min):
+        """Fetch GHI/DNI/DHI from Open-Meteo, aligned to ``index``.
+
+        Requires outbound internet (or a warm requests-cache). Returns three
+        NumPy arrays ordered ``(ghi, dni, dhi)`` matching ``index``.
+        """
+        buffered_end = end_datetime + timedelta(days=1)
+
+        cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
+        retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+        openmeteo = openmeteo_requests.Client(session=retry_session)
+
+        url = "https://archive-api.open-meteo.com/v1/archive"
+        api_input = {
+            "latitude": self.geo.center_lat,
+            "longitude": self.geo.center_lon,
+            "start_date": buffered_start.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
+            "end_date": buffered_end.astimezone(pytz.utc).date().strftime("%Y-%m-%d"),
+            "hourly": ["shortwave_radiation", "diffuse_radiation", "direct_normal_irradiance"],
+            "timezone": "auto"
+        }
+
+        responses = openmeteo.weather_api(url, params=api_input)
+        response = responses[0]
+
+        hourly = response.Hourly()
+        hourly_data = {
+            "ghi": hourly.Variables(0).ValuesAsNumpy(),
+            "dhi": hourly.Variables(1).ValuesAsNumpy(),
+            "dni": hourly.Variables(2).ValuesAsNumpy(),
+            "date": pd.date_range(
+                start=pd.to_datetime(hourly.Time(), unit="s"),
+                end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
+                freq=pd.Timedelta(seconds=hourly.Interval()),
+                inclusive="left"
+            ).tz_localize(local_tz)
+        }
+
+        irradiance_df = pd.DataFrame(hourly_data).set_index("date")
+
+        # Resample Open-Meteo's hourly irradiance to the WXS resolution.
+        target_freq = f"{time_step_min}T"
+        if time_step_min < 60:
+            irradiance_df = irradiance_df.resample(target_freq).interpolate(method="linear")
+        elif time_step_min > 60:
+            irradiance_df = irradiance_df.resample(target_freq).mean()
+
+        irradiance_df = irradiance_df.loc[index]
+        return (irradiance_df["ghi"].values,
+                irradiance_df["dni"].values,
+                irradiance_df["dhi"].values)
+
+    def _synthesize_irradiance(self, df, solpos):
+        """Synthesize GHI/DNI/DHI offline from the .wxs cloud cover.
+
+        Uses a pvlib Ineichen clear-sky model derated by cloud fraction via
+        the Kasten–Czeplak form (matching
+        :func:`embrs.fire_danger.solar.synthesize_solar`), then splits the
+        cloudy GHI into beam/diffuse with the Erbs decomposition so the full
+        triple required by :func:`calc_local_solar_radiation` is available
+        with no network access. Returns ``(ghi, dni, dhi)`` NumPy arrays.
+        """
+        altitude = getattr(self, "ref_elev", None) or 0.0
+        loc = pvlib.location.Location(
+            latitude=self.geo.center_lat,
+            longitude=self.geo.center_lon,
+            tz=self.geo.timezone,
+            altitude=altitude,
+        )
+        clearsky = loc.get_clearsky(df.index, model="ineichen")
+
+        cloud_fraction = np.clip(df["cloud_cover"].to_numpy() / 100.0, 0.0, 1.0)
+        ghi = clearsky["ghi"].to_numpy() * (1.0 - 0.75 * np.power(cloud_fraction, 3.4))
+        ghi = np.clip(ghi, 0.0, None)
+
+        erbs = pvlib.irradiance.erbs(ghi, solpos["zenith"].to_numpy(), df.index)
+        dni = np.nan_to_num(erbs["dni"].to_numpy(), nan=0.0)
+        dhi = np.nan_to_num(erbs["dhi"].to_numpy(), nan=0.0)
+        return ghi, dni, dhi
+
     def generate_stream(self, hourly_data: dict) -> Iterator[WeatherEntry]:
         """Yield full WeatherEntry records from hourly data arrays.
 

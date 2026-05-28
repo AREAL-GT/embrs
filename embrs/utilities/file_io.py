@@ -30,14 +30,28 @@ Functions:
     :members:
 """
 
-from tkinter import BOTH, filedialog
+from __future__ import annotations
+
 from datetime import datetime, time, timedelta
 from typing import Callable, Tuple, Dict, List
-import tkinter.simpledialog as sd
-from tkcalendar import DateEntry
-from tkinter import ttk
 from time import sleep
-import tkinter as tk
+
+# Tk is only needed for the interactive GUI selectors and the progress window.
+# Import it defensively so headless nodes (e.g. PACE compute nodes, where there
+# is no display and possibly no Tk build) can still import this module for the
+# non-GUI helpers like read_fms_file. The GUI classes touch these names only
+# inside their methods, so they raise only if actually instantiated without Tk.
+try:
+    import tkinter as tk
+    import tkinter.simpledialog as sd
+    from tkinter import BOTH, filedialog, ttk
+    from tkcalendar import DateEntry
+except ImportError:  # pragma: no cover - headless without Tk
+    tk = None
+    sd = None
+    BOTH = filedialog = ttk = None
+    DateEntry = None
+
 import numpy as np
 import importlib
 import inspect

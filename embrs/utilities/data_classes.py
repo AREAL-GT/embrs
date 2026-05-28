@@ -380,6 +380,10 @@ class WeatherParams:
         conditioning_start (datetime): Start time for fuel moisture conditioning.
         start_datetime (datetime): Simulation start time.
         end_datetime (datetime): Simulation end time.
+        solar_source (str): How solar irradiance is obtained for 'File'
+            (.wxs) input: 'openmeteo' fetches it from the Open-Meteo API
+            (requires internet), 'offline' synthesizes it locally from the
+            scenario's cloud cover via a pvlib clear-sky model (no network).
     """
 
     input_type: Optional[str] = None
@@ -388,6 +392,7 @@ class WeatherParams:
     conditioning_start: Optional[datetime] = None
     start_datetime: Optional[datetime] = None
     end_datetime: Optional[datetime] = None
+    solar_source: str = "openmeteo"
 
 @dataclass
 class SimParams:
@@ -512,6 +517,7 @@ class WindNinjaTask:
         wind_height_units (str): Units for wind height.
         input_speed_units (str): Units for input wind speed.
         temperature_units (str): Units for temperature.
+        num_threads (int): Threads WindNinja uses for this single run.
     """
 
     index: int
@@ -528,6 +534,7 @@ class WindNinjaTask:
     wind_height_units: str
     input_speed_units: str
     temperature_units: str
+    num_threads: int = 4
 
 
 @dataclass

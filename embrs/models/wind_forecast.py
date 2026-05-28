@@ -22,9 +22,10 @@ import subprocess
 import os
 import shutil
 import numpy as np
-from multiprocessing import cpu_count, Pool
+from multiprocessing import Pool
 from tqdm import tqdm
 from embrs.utilities.data_classes import MapParams, WindNinjaTask
+from embrs.utilities.runtime_env import available_cpus, is_pace
 from embrs.models.weather import WeatherStream
 from datetime import timedelta, datetime
 import pytz
@@ -38,6 +39,21 @@ cli_path = os.getenv("WINDNINJA_CLI_PATH", fallback_cli_path)
 # Get path to the temporary files directory from environment variable or use a fallback
 fallback_temp_file_path = os.path.abspath(os.path.join(PACKAGE_DIR, "../../../wind/build/src/cli/temp"))
 temp_file_path = os.getenv("WINDNINJA_TEMP_PATH", fallback_temp_file_path)
+
+
+def windninja_num_threads() -> int:
+    """Threads each WindNinja invocation uses.
+
+    Effective parallelism is ``num_workers * num_threads``. Defaults to 1
+    under EMBRS_PACE so a multiprocessing pool does not oversubscribe a
+    shared Slurm allocation, otherwise 4. Override with the
+    ``WINDNINJA_NUM_THREADS`` environment variable.
+    """
+    env = os.environ.get("WINDNINJA_NUM_THREADS", "")
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return 1 if is_pace() else 4
+
 
 def run_windninja_single(task: WindNinjaTask):
     """Run WindNinja CLI for a single time step.
@@ -75,7 +91,7 @@ def run_windninja_single(task: WindNinjaTask):
         "--day", str(curr_datetime.day),
         "--hour", str(curr_datetime.hour),
         "--minute", str(curr_datetime.minute),
-        "--num_threads", "4",
+        "--num_threads", str(task.num_threads),
         "--output_wind_height", "6.1",
         "--units_output_wind_height", "m",
         "--output_speed_units", "mps",
@@ -118,8 +134,8 @@ def run_windninja(weather: WeatherStream, map: MapParams,
             avoid race conditions. Uses module-level ``temp_file_path``
             if None.
         num_workers (int, optional): Number of worker processes. Defaults
-            to ``min(cpu_count(), num_tasks)``. Set to 1 for sequential
-            execution.
+            to ``min(available_cpus(), num_tasks)`` (scheduler-aware on
+            Slurm). Set to 1 for sequential execution.
 
     Returns:
         np.ndarray: Wind forecast array of shape
@@ -158,6 +174,10 @@ def run_windninja(weather: WeatherStream, map: MapParams,
                 # Use shutil.rmtree to handle arbitrarily nested directories
                 shutil.rmtree(file_path)
 
+    # Threads per WindNinja invocation; combined with the pool size below this
+    # determines total load (workers * threads).
+    num_threads = windninja_num_threads()
+
     # Prepare arguments for parallel execution
     tasks = [
         WindNinjaTask(
@@ -174,7 +194,8 @@ def run_windninja(weather: WeatherStream, map: MapParams,
             wind_height=wind_height,
             wind_height_units=wind_height_units,
             input_speed_units=input_speed_units,
-            temperature_units=temperature_units
+            temperature_units=temperature_units,
+            num_threads=num_threads
         )
         for i, entry in enumerate(weather.stream[weather.sim_start_idx:])
     ]
@@ -188,7 +209,7 @@ def run_windninja(weather: WeatherStream, map: MapParams,
         )
     # Use provided num_workers, or auto-detect based on CPU cores
     if num_workers is None:
-        num_workers = min(cpu_count(), num_tasks)  # Limit workers to available CPU cores
+        num_workers = min(available_cpus(), num_tasks)  # Limit to scheduler-allocated CPUs
     else:
         num_workers = min(num_workers, num_tasks)  # Don't use more workers than tasks
 
