@@ -37,6 +37,17 @@ window_stride_hours: 1              # Sliding window stride
 # (50% max overlap), or one day (24).
 # min_candidate_separation_hours: null
 
+# BI band-match metric.
+#   mean_only (default) — filter + rank on the NFDRS daily 1 PM BI mean
+#       over the window. The recommended cross-region equivalence
+#       metric: a "moderate" window is one whose characteristic daily
+#       afternoon load lands in the target band. The 97th-pct hourly
+#       peak is reported as descriptive metadata only.
+#   dual    — require BOTH peak_bi AND mean_daily_1pm_bi in band.
+#       Stricter; can be structurally empty in grass / high-diurnal-swing
+#       regions where the two metrics are systematically offset.
+#   peak_only — legacy 97th-pct-hourly filter.
+bi_filter_mode: mean_only
 
 # -------- Lull detection (qa E1/E2/E3) --------
 
