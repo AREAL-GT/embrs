@@ -38,8 +38,9 @@ import time as time_module
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
-from multiprocessing import cpu_count
 from typing import List, Optional, TYPE_CHECKING
+
+from embrs.utilities.runtime_env import available_cpus
 
 import numpy as np
 
@@ -459,7 +460,7 @@ class ForecastPool:
         except ImportError:
             use_tqdm = False
 
-        num_workers = num_workers or min(cpu_count(), n_forecasts)
+        num_workers = num_workers or min(available_cpus(), n_forecasts)
 
         # Compute AR(1) parameters from predictor_params
         max_beta = predictor_params.max_beta

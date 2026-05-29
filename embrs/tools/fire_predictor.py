@@ -16,8 +16,9 @@ import numpy as np
 import os
 import uuid
 import time as time_module
-from multiprocessing import cpu_count
 from typing import List, Optional, Tuple, TYPE_CHECKING
+
+from embrs.utilities.runtime_env import available_cpus
 
 from embrs.base_classes.base_fire import BaseFireSim
 from embrs.fire_simulator.fire import FireSim
@@ -447,7 +448,7 @@ class FirePredictor(BaseFireSim):
                         f"Invalid start_time_s for state_estimate[{i}]: {e}"
                     )
 
-        num_workers = num_workers or mp.cpu_count()
+        num_workers = num_workers or available_cpus()
 
         # Derive per-member seeds from a single SeedSequence rooted at the
         # parent fire's master seed (or fall back to caller-supplied seeds).
