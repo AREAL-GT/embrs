@@ -1,0 +1,45 @@
+# EMBRS conda environment for Georgia Tech PACE (linux-64, headless).
+#
+# Bundles the WindNinja CLI from conda-forge into the same env, so the
+# executable lands at $CONDA_PREFIX/bin/WindNinja_cli (already on PATH).
+# GUI deps (PyQt5, tkcalendar) are intentionally omitted — PACE compute
+# nodes are headless. file_io imports Tk defensively, so the core sim
+# path (`python -m embrs.main --config ...`) imports fine without them.
+#
+# Create:   conda env create -f environment-pace.yml
+# Activate: conda activate embrs
+# Then:     pip install -e .   (installs the embrs package itself, no deps)
+name: embrs
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  # --- external wind model (provides $CONDA_PREFIX/bin/WindNinja_cli) ---
+  - windninja
+  # --- core / numerics ---
+  - numpy
+  - numba>=0.57.0
+  - pyarrow
+  - msgpack-python
+  - pvlib
+  # --- geospatial (binary stack: GDAL/PROJ/GEOS via conda-forge) ---
+  - shapely
+  - geopandas
+  - pyproj
+  - rasterio
+  - utm
+  - timezonefinder
+  # --- io / misc ---
+  - requests
+  - requests-cache
+  - tqdm
+  - pytz
+  # matplotlib-base avoids pulling in Qt on a headless node
+  - matplotlib-base
+  # --- pure-Python deps not reliably packaged on conda-forge ---
+  - pip
+  - pip:
+      - openmeteo-requests
+      - retry-requests
+      - alphashape
