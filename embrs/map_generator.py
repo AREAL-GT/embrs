@@ -25,6 +25,7 @@ from embrs.utilities.map_drawer import PolygonDrawer, CropTiffTool
 from embrs.utilities.fire_util import RoadConstants as rc
 from embrs.models.fuel_models import FuelConstants as fc
 from embrs.utilities.data_classes import MapParams, MapDrawerData, GeoInfo, LandscapeData
+from embrs.exceptions import ExternalServiceError
 
 PX_RES = 30
 DATA_RES = 10
@@ -412,7 +413,11 @@ def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Dict[str,
         List[Dict]: List of dictionaries containing road coordinates, type, and width-related metadata.
     """
     left, bottom, right, top = bounds
-    overpass_url = "http://overpass-api.de/api/interpreter"
+    overpass_url = "https://overpass-api.de/api/interpreter"
+
+    # Overpass rejects the default python-requests User-Agent (HTTP 406), so
+    # identify the client explicitly per Overpass usage policy.
+    headers = {"User-Agent": "EMBRS-map-generator/1.0 (https://github.com/embrs)"}
 
     overpass_query = f"""
     [out:json];
@@ -425,13 +430,33 @@ def fetch_osm_roads(bounds: Tuple[float, float, float, float]) -> List[Dict[str,
     """
 
     print(f"Querying OSM for road data in bounds: {bounds}")
-    response = requests.get(overpass_url, params={'data': overpass_query})
 
-    if response.status_code != 200:
-        print(f"WARNING: Request failed with status {response.status_code}")
-        return []
+    # POST with the query in the body is the Overpass-recommended submission
+    # method and avoids URL-length / content-negotiation issues seen with GET.
+    try:
+        response = requests.post(
+            overpass_url,
+            data={'data': overpass_query},
+            headers=headers,
+            timeout=180,
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise ExternalServiceError(
+            "Failed to fetch road data from the OpenStreetMap Overpass API",
+            service="OpenStreetMap Overpass API",
+            original_error=e,
+        ) from e
 
-    osm_data = response.json()
+    try:
+        osm_data = response.json()
+    except ValueError as e:
+        raise ExternalServiceError(
+            "Received an invalid (non-JSON) response from the OpenStreetMap "
+            "Overpass API",
+            service="OpenStreetMap Overpass API",
+            original_error=e,
+        ) from e
 
     # Extract node coordinates
     nodes = {elem['id']: (elem['lon'], elem['lat']) for elem in osm_data['elements'] if elem['type'] == 'node'}
