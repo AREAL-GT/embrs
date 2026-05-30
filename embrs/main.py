@@ -20,7 +20,7 @@ from embrs.utilities.file_io import read_fms_file
 from embrs.utilities.fire_util import UtilFuncs
 from embrs.base_classes.control_base import ControlClass
 from embrs.utilities.data_classes import SimParams, WeatherParams, MapParams
-from embrs.utilities.runtime_env import default_solar_source, is_headless
+from embrs.utilities.runtime_env import default_solar_source, is_headless, is_pace
 
 
 class ConsoleLoader:
@@ -338,6 +338,23 @@ def load_sim_params(cfg_path: str) -> SimParams:
         end_datetime=end_datetime,
         solar_source=solar_source
     )
+
+    # Pre-flight checks: fail fast at config load instead of hanging or raising
+    # deep in the sim. On a headless HPC node (PACE) a config that reaches the
+    # network would hang on a socket timeout and waste the whole allocation; a
+    # missing weather file otherwise raises confusingly later in WeatherStream.
+    if weather_input_type == "File" and not os.path.exists(weather_file):
+        raise FileNotFoundError(
+            f"Error in {cfg_path}: weather file not found: '{weather_file}'. "
+            "Stage the .wxs/weather file before running."
+        )
+    if is_pace() and (weather_input_type == "OpenMeteo" or solar_source == "openmeteo"):
+        raise ValueError(
+            f"Error in {cfg_path}: EMBRS_PACE is set but this config requires network "
+            f"access (input_type={weather_input_type!r}, solar_source={solar_source!r}). "
+            "PACE compute nodes have no internet — use input_type=File and "
+            "solar_source=offline."
+        )
 
     fms_path = config["Weather"].get("fuel_moisture_file", None)
     fms_map: Dict[int, List[float]] = {}
