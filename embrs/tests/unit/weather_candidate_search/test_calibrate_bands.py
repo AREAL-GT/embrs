@@ -17,7 +17,7 @@ from rasterio.transform import from_origin
 from embrs.weather_candidate_search.calibrate_bands import (
     CalibrationConfig,
     _default_breakpoints,
-    _extract_daily_1pm_in_season,
+    _extract_daily_max_in_season,
     _rolling_fortnight_mean,
     calibrate_bands,
     parse_months_spec,
@@ -116,22 +116,25 @@ def test_default_breakpoints():
     assert bp["extreme"] == (90.0, 95.0)
 
 
-def test_extract_daily_1pm_in_season_contiguous():
+def test_extract_daily_max_in_season_contiguous():
     idx = pd.date_range("2020-01-01", periods=24 * 365, freq="h", tz="UTC")
     bi = pd.Series(np.linspace(0, 80, len(idx)), index=idx, name="BI_area_weighted")
     phase = pd.Series("scenario", index=idx)
     df = pd.DataFrame({"BI_area_weighted": bi, "phase": phase})
 
-    out = _extract_daily_1pm_in_season(df, fire_season_months=(4, 5, 6, 7, 8, 9, 10))
-    # All values should be from hour=13 and month in {4..10}
-    assert (out.index.hour == 13).all()
+    out = _extract_daily_max_in_season(df, fire_season_months=(4, 5, 6, 7, 8, 9, 10))
+    # One value per calendar day, indexed at the day boundary (midnight).
+    assert (out.index.hour == 0).all()
+    # Monotonic-increasing BI → each day's max is its last (23:00) hour.
+    day0 = bi.loc["2020-04-01"]
+    assert out.loc["2020-04-01"] == pytest.approx(day0.max())
     months = np.asarray(out.index.month)
     assert set(months) <= {4, 5, 6, 7, 8, 9, 10}
     # Roughly 7 months × ~30 days = ~214 daily samples
     assert 200 <= len(out) <= 220
 
 
-def test_extract_daily_1pm_in_season_non_contiguous():
+def test_extract_daily_max_in_season_non_contiguous():
     """Appalachian-style: keep March-May and October-November only."""
     idx = pd.date_range("2020-01-01", periods=24 * 365, freq="h", tz="UTC")
     bi = pd.Series(np.linspace(0, 80, len(idx)), index=idx, name="BI_area_weighted")
@@ -139,8 +142,8 @@ def test_extract_daily_1pm_in_season_non_contiguous():
     df = pd.DataFrame({"BI_area_weighted": bi, "phase": phase})
 
     months_kept = (3, 4, 5, 10, 11)
-    out = _extract_daily_1pm_in_season(df, fire_season_months=months_kept)
-    assert (out.index.hour == 13).all()
+    out = _extract_daily_max_in_season(df, fire_season_months=months_kept)
+    assert (out.index.hour == 0).all()
     months = set(np.asarray(out.index.month).tolist())
     assert months == {3, 4, 5, 10, 11}
     # No values from June..September
@@ -193,7 +196,7 @@ def test_parse_months_spec_rejects_garbage():
 
 
 def test_rolling_fortnight_mean_basic():
-    # Build 30 days of daily 1pm values 0, 1, 2, ..., 29
+    # Build 30 days of daily values 0, 1, 2, ..., 29
     idx = pd.date_range("2024-04-01 13:00", periods=30, freq="D", tz="UTC")
     s = pd.Series(np.arange(30, dtype=float), index=idx)
     rolling = _rolling_fortnight_mean(s, window_days=14)

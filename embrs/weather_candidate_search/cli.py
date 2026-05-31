@@ -75,13 +75,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--bi-filter-mode",
-        choices=("mean_only", "dual", "peak_only"),
+        choices=("mean_daily_peak", "mean_1pm", "peak_only"),
         default=_SENTINEL,
         help=(
-            "Which BI metric(s) the band filter applies to. "
-            "'mean_only' (default) filters on the NFDRS daily 1 PM mean; "
-            "'dual' requires both peak (97th pct hourly) and the mean in "
-            "band; 'peak_only' is the legacy peak filter."
+            "Which BI metric the band filter applies to. "
+            "'mean_daily_peak' (default) filters on the mean of the in-window "
+            "daily maxima; 'mean_1pm' on the NFDRS daily 1 PM mean; "
+            "'peak_only' on the window-level 97th-pct hourly peak."
         ),
     )
 
@@ -259,7 +259,7 @@ def config_from_namespace(ns: argparse.Namespace) -> Config:
             None,
         ),
         bi_filter_mode=str(
-            _coalesce(ns.bi_filter_mode, y("bi_filter_mode"), "mean_only")
+            _coalesce(ns.bi_filter_mode, y("bi_filter_mode"), "mean_daily_peak")
         ),
         lull=_build_lull(yaml_cfg.get("lull", {}) or {}, ns),
         scoring=_build_scoring(yaml_cfg.get("scoring", {}) or {}),

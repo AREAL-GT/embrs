@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 PEAK_PERCENTILE: int = 97   # qa A3 — fixed at 97, no CLI override
 REG_OBS_HOUR: int = 13      # NFDRS regular observation hour (1 PM local)
 
+# A calendar day inside a window contributes a daily-max BI sample only if at
+# least this many of its 24 hours are present (finite) inside the window.
+# A search window starts at an arbitrary hour, so its first/last calendar days
+# are partial; a day that is only a few nighttime hours in-window would
+# otherwise contribute a spuriously low "daily max" that drags the window mean
+# down. Requiring near-complete days drops those thin edge days.
+MIN_HOURS_FOR_DAILY_MAX: int = 20
+
 
 @dataclass
 class BIPipelineResult:
@@ -102,18 +110,26 @@ def per_window_peaks(
     windows: Iterable["WindowSlice"],
     percentile: int = PEAK_PERCENTILE,
     reg_obs_hour: int = REG_OBS_HOUR,
+    min_hours_for_daily_max: int = MIN_HOURS_FOR_DAILY_MAX,
 ) -> pd.DataFrame:
-    """Compute hourly peak/mean BI plus the NFDRS daily-1pm mean per window.
+    """Compute per-window BI summaries, including the daily-max equivalence metric.
 
-    Two BI summaries per window:
+    BI summaries per window:
 
+    - ``mean_daily_peak_bi`` — mean of the per-calendar-day **maxima** of
+      ``BI_area_weighted`` inside the window, over days with at least
+      ``min_hours_for_daily_max`` finite in-window hours. This is the
+      *equivalence* metric used to match a window to a volatility band:
+      a "moderate" window is one whose typical daily peak fire behaviour
+      lands in the band. Calibrated against the same statistic by
+      :mod:`calibrate_bands`.
     - ``peak_bi`` — the ``percentile``-th of hourly ``BI_area_weighted``
-      (default 97th, qa A3). Robust to single-hour spikes; characterizes
-      the window's worst hours.
+      (default 97th, qa A3). A single window-level robust max; reported as
+      a diagnostic.
     - ``mean_daily_1pm_bi`` — mean across the daily 1 PM (or
-      ``reg_obs_hour``) BI values inside the window. This is the NFDRS
-      standard daily summary; it strips the diurnal saw-tooth and is the
-      *equivalence* metric used to match a window to a volatility band.
+      ``reg_obs_hour``) BI values inside the window. The NFDRS RegObsHr
+      daily summary; reported as a diagnostic for NFDRS comparability.
+    - ``mean_bi`` — mean across all valid in-window hours; diagnostic.
 
     Args:
         bi_trajectory: Hourly DataFrame containing at least
@@ -123,10 +139,14 @@ def per_window_peaks(
         percentile: Percentile for ``peak_bi`` (default 97).
         reg_obs_hour: Local hour to sample for the daily afternoon BI
             (default 13 = 1 PM, NFDRS RegObsHr).
+        min_hours_for_daily_max: Minimum finite in-window hours a calendar
+            day needs to contribute a ``mean_daily_peak_bi`` sample
+            (default 20 — drops thin partial edge days).
 
     Returns:
         DataFrame indexed by ``window_id`` with columns ``start``, ``end``,
-        ``peak_bi``, ``time_of_peak``, ``mean_bi``, ``mean_daily_1pm_bi``,
+        ``peak_bi``, ``time_of_peak``, ``mean_bi``, ``mean_daily_peak_bi``,
+        ``n_daily_peak_samples``, ``mean_daily_1pm_bi``,
         ``n_daily_1pm_samples``, ``n_hours``, ``n_valid_hours``.
     """
     if "BI_area_weighted" not in bi_trajectory.columns:
@@ -149,7 +169,7 @@ def per_window_peaks(
         valid = sliced.dropna()
 
         # Daily 1 PM slice (one value per calendar day in the window where
-        # a 13:00 row exists and is finite).
+        # a 13:00 row exists and is finite). Reported as a diagnostic.
         daily_1pm = bi_daily_1pm.loc[
             (bi_daily_1pm.index >= w.start) & (bi_daily_1pm.index < w.end)
         ].dropna()
@@ -157,6 +177,19 @@ def per_window_peaks(
             float(daily_1pm.mean()) if not daily_1pm.empty else float("nan")
         )
         n_daily_1pm_samples = int(len(daily_1pm))
+
+        # Daily-max equivalence metric: the max of each in-window calendar
+        # day's finite hourly BI, averaged over days with >= the minimum
+        # number of in-window hours (drops thin partial edge days).
+        daily_peaks: List[float] = []
+        if not valid.empty:
+            for _, day_vals in valid.groupby(valid.index.normalize()):
+                if len(day_vals) >= min_hours_for_daily_max:
+                    daily_peaks.append(float(day_vals.max()))
+        mean_daily_peak_bi = (
+            float(np.mean(daily_peaks)) if daily_peaks else float("nan")
+        )
+        n_daily_peak_samples = int(len(daily_peaks))
 
         if valid.empty:
             rows.append(
@@ -167,6 +200,8 @@ def per_window_peaks(
                     "peak_bi": float("nan"),
                     "time_of_peak": pd.NaT,
                     "mean_bi": float("nan"),
+                    "mean_daily_peak_bi": mean_daily_peak_bi,
+                    "n_daily_peak_samples": n_daily_peak_samples,
                     "mean_daily_1pm_bi": mean_daily_1pm_bi,
                     "n_daily_1pm_samples": n_daily_1pm_samples,
                     "n_hours": int(len(sliced)),
@@ -188,6 +223,8 @@ def per_window_peaks(
                 "peak_bi": peak,
                 "time_of_peak": time_of_peak,
                 "mean_bi": mean,
+                "mean_daily_peak_bi": mean_daily_peak_bi,
+                "n_daily_peak_samples": n_daily_peak_samples,
                 "mean_daily_1pm_bi": mean_daily_1pm_bi,
                 "n_daily_1pm_samples": n_daily_1pm_samples,
                 "n_hours": int(len(sliced)),
@@ -203,6 +240,8 @@ def per_window_peaks(
                 "peak_bi",
                 "time_of_peak",
                 "mean_bi",
+                "mean_daily_peak_bi",
+                "n_daily_peak_samples",
                 "mean_daily_1pm_bi",
                 "n_daily_1pm_samples",
                 "n_hours",

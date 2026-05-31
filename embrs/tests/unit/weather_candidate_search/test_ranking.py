@@ -13,15 +13,15 @@ from embrs.weather_candidate_search.ranking import (
 )
 
 
-def _per_window(rows, mean_daily_1pm_bi=None):
+def _per_window(rows, mean_daily_peak_bi=None, mean_daily_1pm_bi=None):
     """rows = list of (window_id, start_hour, peak_bi, mean_bi).
 
-    Defaults ``mean_daily_1pm_bi = peak_bi`` so "in-band peak" rows are
-    also "in-band mean" under the dual filter — keeps the legacy tests
-    focused on what they test (filtering, scoring, NMS) without forcing
-    every row to specify both metrics. Override via the
-    ``mean_daily_1pm_bi`` dict ({window_id: value}) when a test needs
-    them to disagree.
+    Defaults both ``mean_daily_peak_bi`` and ``mean_daily_1pm_bi`` to
+    ``peak_bi`` so "in-band peak" rows are also "in-band" under the default
+    daily-peak filter — keeps the tests focused on what they test
+    (filtering, scoring, NMS) without forcing every row to specify the
+    metric. Override via the ``mean_daily_peak_bi`` / ``mean_daily_1pm_bi``
+    dicts ({window_id: value}) when a test needs them to disagree.
     """
     df = pd.DataFrame(
         [
@@ -32,6 +32,12 @@ def _per_window(rows, mean_daily_1pm_bi=None):
                 "peak_bi": peak,
                 "time_of_peak": pd.Timestamp("2024-07-01") + pd.Timedelta(hours=h + 6),
                 "mean_bi": mean,
+                "mean_daily_peak_bi": (
+                    mean_daily_peak_bi[wid]
+                    if mean_daily_peak_bi is not None and wid in mean_daily_peak_bi
+                    else peak
+                ),
+                "n_daily_peak_samples": 1,
                 "mean_daily_1pm_bi": (
                     mean_daily_1pm_bi[wid]
                     if mean_daily_1pm_bi is not None and wid in mean_daily_1pm_bi
@@ -47,41 +53,41 @@ def _per_window(rows, mean_daily_1pm_bi=None):
     return df
 
 
-def test_filter_by_target_band_default_is_mean_only():
-    """Default filter checks ``mean_daily_1pm_bi`` alone."""
+def test_filter_by_target_band_default_is_mean_daily_peak():
+    """Default filter checks ``mean_daily_peak_bi`` alone."""
     df = _per_window([("a", 0, 30, 20), ("b", 1, 70, 50), ("c", 2, 90, 60)])
-    # Helper defaults mean_daily_1pm_bi = peak_bi → only b lands in [60, 80].
+    # Helper defaults mean_daily_peak_bi = peak_bi → only b lands in [60, 80].
     out = filter_by_target_band(df, (60, 80))
     assert list(out.index) == ["b"]
 
 
-def test_filter_by_target_band_default_ignores_peak():
-    """A window whose peak is wildly out of band but mean is inside passes."""
+def test_filter_by_target_band_default_ignores_window_peak():
+    """A window whose 97th-pct peak is out of band but daily-peak mean is inside passes."""
     df = _per_window(
         [("calm_mean_high_peak", 0, 200, 50)],
-        mean_daily_1pm_bi={"calm_mean_high_peak": 70.0},
+        mean_daily_peak_bi={"calm_mean_high_peak": 70.0},
     )
     out = filter_by_target_band(df, (60, 80))
     assert list(out.index) == ["calm_mean_high_peak"]
 
 
-def test_filter_by_target_band_dual_mode_requires_both():
-    """Explicit dual mode requires BOTH metrics in band."""
+def test_filter_by_target_band_multi_column_requires_both():
+    """A multi-column filter requires every named metric in band."""
     df = _per_window(
         [("spike", 0, 70, 30)],
-        mean_daily_1pm_bi={"spike": 30.0},
+        mean_daily_peak_bi={"spike": 30.0},
     )
     out = filter_by_target_band(
-        df, (60, 80), columns=("peak_bi", "mean_daily_1pm_bi")
+        df, (60, 80), columns=("peak_bi", "mean_daily_peak_bi")
     )
     assert out.empty
 
 
-def test_filter_by_target_band_peak_only_legacy():
-    """``columns=("peak_bi",)`` recovers the pre-dual-metric behaviour."""
+def test_filter_by_target_band_peak_only_mode():
+    """``columns=("peak_bi",)`` filters on the window 97th-pct peak alone."""
     df = _per_window(
         [("spike", 0, 70, 30)],
-        mean_daily_1pm_bi={"spike": 30.0},
+        mean_daily_peak_bi={"spike": 30.0},
     )
     out = filter_by_target_band(df, (60, 80), columns=("peak_bi",))
     assert list(out.index) == ["spike"]
@@ -100,7 +106,7 @@ def test_score_increases_with_lulls():
 
 
 def test_score_distance_dominates_lulls_when_band_distance_large():
-    """BI distance (now via daily 1 PM mean) dominates when the gap is wide."""
+    """BI distance (via daily-max mean) dominates when the gap is wide."""
     # a: mean at band center, no lulls. b: mean way off, one lull.
     df = _per_window([("a", 0, 70, 70), ("b", 1, 100, 70)])
     lulls = {
@@ -111,14 +117,14 @@ def test_score_distance_dominates_lulls_when_band_distance_large():
     assert scored.loc["a", "score"] > scored.loc["b", "score"]
 
 
-def test_score_uses_mean_daily_1pm_not_peak():
-    """Two windows with identical peak but different daily-1pm means are
-    ranked by the mean (the new BI-distance column)."""
-    # Both peak=70; window 'centered' has mean=70 (at band center),
-    # 'biased' has mean=80 (off-center).
+def test_score_uses_mean_daily_peak_not_window_peak():
+    """Two windows with identical 97th-pct peak but different daily-peak means
+    are ranked by the daily-peak mean (the BI-distance column)."""
+    # Both peak_bi=70; window 'centered' has daily-peak mean=70 (at band
+    # center), 'biased' has 80 (off-center).
     df = _per_window(
         [("centered", 0, 70, 70), ("biased", 1, 70, 80)],
-        mean_daily_1pm_bi={"centered": 70.0, "biased": 80.0},
+        mean_daily_peak_bi={"centered": 70.0, "biased": 80.0},
     )
     lulls = {"centered": [], "biased": []}
     scored = score_windows(df, lulls, (60, 80), ScoringConfig())

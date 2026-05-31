@@ -115,10 +115,10 @@ def test_cli_bi_filter_mode_default_and_override(tmp_path):
         "--volatility-class", "moderate",
     ]
     cfg = config_from_namespace(_parse(base_argv))
-    assert cfg.bi_filter_mode == "mean_only"
+    assert cfg.bi_filter_mode == "mean_daily_peak"
 
-    cfg_dual = config_from_namespace(_parse(base_argv + ["--bi-filter-mode", "dual"]))
-    assert cfg_dual.bi_filter_mode == "dual"
+    cfg_1pm = config_from_namespace(_parse(base_argv + ["--bi-filter-mode", "mean_1pm"]))
+    assert cfg_1pm.bi_filter_mode == "mean_1pm"
 
     cfg_peak = config_from_namespace(_parse(base_argv + ["--bi-filter-mode", "peak_only"]))
     assert cfg_peak.bi_filter_mode == "peak_only"

@@ -58,6 +58,21 @@ def ensure_cell_dir(cfg: Config) -> str:
     return d
 
 
+def reset_candidates_dir(cfg: Config) -> str:
+    """Remove and recreate the ``candidates/`` directory, returning its path.
+
+    Candidate subdirs are named ``{rank}_{window_id}``; a re-run that selects
+    different windows would otherwise leave the previous run's candidate
+    directories behind, polluting the cell output with stale results. Wiping
+    the directory before writing keeps it in sync with the current run.
+    """
+    d = candidates_dir(cfg)
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Full-season .wxs handling
 # ---------------------------------------------------------------------------
@@ -108,7 +123,8 @@ def build_synoptic_summary(
         f"{mean_wind:.0f} mph" if np.isfinite(mean_wind) else "n/a"
     )
     return (
-        f"Peak BI {candidate.peak_bi:.1f} (97th pct hourly) at hour "
+        f"Mean daily-peak BI {candidate.mean_daily_peak_bi:.1f}; "
+        f"window peak BI {candidate.peak_bi:.1f} (97th pct hourly) at hour "
         f"{hour_of_peak}; mean daily 1 PM BI {candidate.mean_daily_1pm_bi:.1f}; "
         f"{candidate.n_lulls} backburn windows totaling "
         f"{candidate.total_lull_hours} hours; "
@@ -161,6 +177,7 @@ def write_metadata_json(
             "duration_hours": int(cfg.scenario_length_hours),
         },
         "bi": {
+            "mean_daily_peak_bi": float(candidate.mean_daily_peak_bi),
             "peak_bi": float(candidate.peak_bi),
             "peak_percentile": 97,
             "time_of_peak_local": _serialize_ts(candidate.time_of_peak),
@@ -286,9 +303,16 @@ def plot_candidate(
     ax_lull.set_ylabel("Lulls")
     ax_lull.set_xlabel("Local time")
 
-    locator = mdates.AutoDateLocator()
+    # Render the date axis in the data's own (local) timezone. matplotlib
+    # otherwise labels tz-aware timestamps in UTC (rcParams['timezone']),
+    # which shifts an afternoon BI peak ~5-6 h to the right so it appears to
+    # fall near midnight. Passing the index tz keeps the axis in local time.
+    axis_tz = window_df.index.tz
+    locator = mdates.AutoDateLocator(tz=axis_tz)
     ax_lull.xaxis.set_major_locator(locator)
-    ax_lull.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+    ax_lull.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(locator, tz=axis_tz)
+    )
     fig.autofmt_xdate()
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -367,8 +391,9 @@ def write_summary_csv(
     """Write one row per evaluated window with all diagnostics.
 
     Columns: ``window_id, start, end, peak_bi, time_of_peak, mean_bi,
-    n_lulls, total_lull_hours, score, bi_distance_normalized,
-    passed_band_filter, selected, rank``.
+    mean_daily_peak_bi, n_daily_peak_samples, mean_daily_1pm_bi,
+    n_daily_1pm_samples, n_lulls, total_lull_hours, score,
+    bi_distance_normalized, passed_band_filter, selected, rank``.
     """
     out_path = os.path.join(cell_dir(cfg), "summary.csv")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -395,6 +420,8 @@ def write_summary_csv(
                 "peak_bi": float(row["peak_bi"]),
                 "time_of_peak": row["time_of_peak"],
                 "mean_bi": float(row["mean_bi"]),
+                "mean_daily_peak_bi": float(row.get("mean_daily_peak_bi", float("nan"))),
+                "n_daily_peak_samples": int(row.get("n_daily_peak_samples", 0)),
                 "mean_daily_1pm_bi": float(row.get("mean_daily_1pm_bi", float("nan"))),
                 "n_daily_1pm_samples": int(row.get("n_daily_1pm_samples", 0)),
                 "n_lulls": int(n_lulls),
@@ -459,17 +486,17 @@ def write_report_md(
         lines.append("_No candidates passed the BI band filter (qa J2)._")
     else:
         lines.append(
-            "| Rank | Window start | Peak BI (97pct) | Mean 1pm BI | n lulls "
-            "| Lull hours | Score |"
+            "| Rank | Window start | Mean daily-peak BI | Peak BI (97pct) "
+            "| Mean 1pm BI | n lulls | Lull hours | Score |"
         )
         lines.append(
-            "|------|--------------|-----------------|-------------|---------"
-            "|------------|-------|"
+            "|------|--------------|--------------------|-----------------"
+            "|-------------|---------|------------|-------|"
         )
         for c in selected:
             lines.append(
-                f"| {c.rank} | {c.window_id} | {c.peak_bi:.1f} | "
-                f"{c.mean_daily_1pm_bi:.1f} | {c.n_lulls} | "
+                f"| {c.rank} | {c.window_id} | {c.mean_daily_peak_bi:.1f} | "
+                f"{c.peak_bi:.1f} | {c.mean_daily_1pm_bi:.1f} | {c.n_lulls} | "
                 f"{c.total_lull_hours} | {c.score:+.3f} |"
             )
 

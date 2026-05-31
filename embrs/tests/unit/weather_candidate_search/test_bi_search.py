@@ -92,6 +92,38 @@ def test_per_window_peaks_mean_daily_1pm_nan_when_no_1pm_rows():
     assert out.loc["w0", "n_daily_1pm_samples"] == 0
 
 
+def test_per_window_peaks_mean_daily_peak_bi():
+    """Two full 24-h days with daily maxima 60 and 80 → mean_daily_peak_bi = 70."""
+    n = 48
+    idx = pd.date_range("2024-07-01 00:00", periods=n, freq="h", tz="UTC")
+    values = np.zeros(n)
+    values[10] = 60.0   # day-1 max
+    values[34] = 80.0   # day-2 max (hour 10 of day 2)
+    df = pd.DataFrame({"BI_area_weighted": values}, index=idx)
+    end_after_last = idx[-1] + pd.Timedelta(hours=1)
+    win = _StubWindow("w0", idx[0], end_after_last)
+    out = per_window_peaks(df, [win])
+    assert out.loc["w0", "mean_daily_peak_bi"] == pytest.approx(70.0)
+    assert out.loc["w0", "n_daily_peak_samples"] == 2
+
+
+def test_per_window_peaks_daily_peak_drops_partial_edge_day():
+    """A calendar day with < 20 in-window hours contributes no daily-max sample."""
+    # Day 1: full 24 h (00:00..23:00), max 50. Day 2: only 4 h (00:00..03:00),
+    # spuriously high — must be dropped, so the window mean stays 50.
+    n = 28
+    idx = pd.date_range("2024-07-01 00:00", periods=n, freq="h", tz="UTC")
+    values = np.zeros(n)
+    values[12] = 50.0          # day-1 max
+    values[24:28] = 999.0      # day-2 partial hours (00:00..03:00)
+    df = pd.DataFrame({"BI_area_weighted": values}, index=idx)
+    end_after_last = idx[-1] + pd.Timedelta(hours=1)
+    win = _StubWindow("w0", idx[0], end_after_last)
+    out = per_window_peaks(df, [win])
+    assert out.loc["w0", "n_daily_peak_samples"] == 1
+    assert out.loc["w0", "mean_daily_peak_bi"] == pytest.approx(50.0)
+
+
 def test_per_window_peaks_reg_obs_hour_override():
     """The afternoon sampling hour is configurable."""
     n = 24

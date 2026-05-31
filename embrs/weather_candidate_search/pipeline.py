@@ -295,7 +295,9 @@ def run_candidate_search(cfg: Config) -> int:
         )
     n_passing = len(filtered)
 
-    # 12. Artifacts
+    # 12. Artifacts. Wipe any prior run's candidate subdirs first so the
+    # candidates/ directory reflects only this run's selection.
+    artifacts.reset_candidates_dir(cfg)
     selected_by_window = {c.window_id: c for c in selected}
     windows_by_id = {w.window_id: w for w in windows}
     for c in selected:

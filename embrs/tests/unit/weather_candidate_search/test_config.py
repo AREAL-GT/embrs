@@ -84,13 +84,13 @@ def test_other_validation_paths():
         Config(**_minimal_kwargs(window_stride_hours=0))
 
 
-def test_default_bi_filter_mode_is_mean_only():
+def test_default_bi_filter_mode_is_mean_daily_peak():
     cfg = Config(**_minimal_kwargs())
-    assert cfg.bi_filter_mode == "mean_only"
+    assert cfg.bi_filter_mode == "mean_daily_peak"
 
 
 def test_bi_filter_mode_accepts_valid_modes():
-    for mode in ("mean_only", "dual", "peak_only"):
+    for mode in ("mean_daily_peak", "mean_1pm", "peak_only"):
         cfg = Config(**_minimal_kwargs(bi_filter_mode=mode))
         assert cfg.bi_filter_mode == mode
 
@@ -102,8 +102,8 @@ def test_bi_filter_mode_rejects_unknown():
 
 def test_columns_for_bi_filter_mode():
     from embrs.weather_candidate_search.config import columns_for_bi_filter_mode
-    assert columns_for_bi_filter_mode("mean_only") == ("mean_daily_1pm_bi",)
-    assert columns_for_bi_filter_mode("dual") == ("peak_bi", "mean_daily_1pm_bi")
+    assert columns_for_bi_filter_mode("mean_daily_peak") == ("mean_daily_peak_bi",)
+    assert columns_for_bi_filter_mode("mean_1pm") == ("mean_daily_1pm_bi",)
     assert columns_for_bi_filter_mode("peak_only") == ("peak_bi",)
     with pytest.raises(ValueError):
         columns_for_bi_filter_mode("bogus")
@@ -111,8 +111,8 @@ def test_columns_for_bi_filter_mode():
 
 def test_score_distance_column_for_mode():
     from embrs.weather_candidate_search.config import score_distance_column_for_mode
-    assert score_distance_column_for_mode("mean_only") == "mean_daily_1pm_bi"
-    assert score_distance_column_for_mode("dual") == "mean_daily_1pm_bi"
+    assert score_distance_column_for_mode("mean_daily_peak") == "mean_daily_peak_bi"
+    assert score_distance_column_for_mode("mean_1pm") == "mean_daily_1pm_bi"
     assert score_distance_column_for_mode("peak_only") == "peak_bi"
     with pytest.raises(ValueError):
         score_distance_column_for_mode("bogus")

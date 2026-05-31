@@ -1,10 +1,11 @@
 """Filter candidate windows by target BI band and apply a composite score.
 
-Default filter is **mean-only** (``mean_daily_1pm_bi`` in band): the NFDRS
-daily afternoon mean over the window is the recommended cross-region
-equivalence metric. The peak (97th-pct hourly) is reported as descriptive
-metadata but does not gate selection. See ``config.BI_FILTER_MODES`` and
-the field docstring on ``Config.bi_filter_mode`` for the rationale.
+Default filter is **mean-daily-peak** (``mean_daily_peak_bi`` in band): the
+mean of the in-window daily maxima is the recommended cross-region
+equivalence metric. The window-level 97th-pct ``peak_bi`` and the NFDRS
+``mean_daily_1pm_bi`` are reported as diagnostics but do not gate selection
+by default. See ``config.BI_FILTER_MODES`` and the field docstring on
+``Config.bi_filter_mode`` for the rationale.
 
 Composite score:
 
@@ -38,10 +39,10 @@ logger = logging.getLogger(__name__)
 class RankedCandidate:
     """One ranked candidate window with all its diagnostics.
 
-    ``peak_bi`` is the 97th percentile of hourly ``BI_area_weighted`` over
-    the window (BI scope OQ-15); ``mean_daily_1pm_bi`` is the NFDRS
-    standard daily-1 PM mean across the window and is the *equivalence*
-    metric used by the score's BI-distance term.
+    ``mean_daily_peak_bi`` is the mean of the in-window daily maxima and is
+    the *equivalence* metric used by the score's BI-distance term.
+    ``peak_bi`` (window 97th-pct hourly) and ``mean_daily_1pm_bi`` (NFDRS
+    daily-1 PM mean) are reported as diagnostics.
     """
 
     window_id: str
@@ -50,6 +51,7 @@ class RankedCandidate:
     peak_bi: float
     time_of_peak: pd.Timestamp
     mean_bi: float
+    mean_daily_peak_bi: float
     mean_daily_1pm_bi: float
     lulls: List[Lull]
     n_lulls: int
@@ -70,7 +72,7 @@ def _band_geometry(band: Tuple[float, float]) -> Tuple[float, float]:
     return center, half_width
 
 
-_DEFAULT_BAND_FILTER_COLS: Tuple[str, ...] = ("mean_daily_1pm_bi",)
+_DEFAULT_BAND_FILTER_COLS: Tuple[str, ...] = ("mean_daily_peak_bi",)
 
 
 def filter_by_target_band(
@@ -80,10 +82,9 @@ def filter_by_target_band(
 ) -> pd.DataFrame:
     """Keep rows where EVERY ``columns`` value falls in the target band.
 
-    By default this is the dual ``(peak_bi, mean_daily_1pm_bi)`` filter:
-    a window must hit the band on *both* its 97th-pct hourly peak AND its
-    NFDRS-daily-1pm mean. Pass ``columns=("peak_bi",)`` for the legacy
-    peak-only filter.
+    By default this filters on ``mean_daily_peak_bi`` (the mean of the
+    in-window daily maxima). Pass ``columns=("mean_daily_1pm_bi",)`` or
+    ``columns=("peak_bi",)`` for the alternate metrics.
 
     Returns a sub-frame of ``per_window`` (preserves index).
     """
@@ -113,15 +114,15 @@ def score_windows(
     lulls_by_window: Dict[str, List[Lull]],
     target_band: Tuple[float, float],
     scoring: ScoringConfig,
-    bi_distance_column: str = "mean_daily_1pm_bi",
+    bi_distance_column: str = "mean_daily_peak_bi",
 ) -> pd.DataFrame:
     """Add ``score``, ``bi_distance_normalized``, ``n_lulls``,
     ``total_lull_hours`` columns to ``filtered``.
 
     The BI-distance term uses ``bi_distance_column`` (default
-    ``mean_daily_1pm_bi`` — the NFDRS afternoon mean) so the score varies
-    smoothly across overlapping windows. Pass ``"peak_bi"`` to recover
-    the legacy peak-distance behaviour.
+    ``mean_daily_peak_bi`` — the mean of in-window daily maxima) so the
+    score varies smoothly across overlapping windows. Pass
+    ``"mean_daily_1pm_bi"`` or ``"peak_bi"`` for the alternate metrics.
 
     Returns a copy with the new columns plus the existing ones, indexed
     the same way as ``filtered``.
@@ -208,6 +209,7 @@ def select_top_n(
                 peak_bi=float(row["peak_bi"]),
                 time_of_peak=pd.Timestamp(row["time_of_peak"]),
                 mean_bi=float(row["mean_bi"]),
+                mean_daily_peak_bi=float(row.get("mean_daily_peak_bi", float("nan"))),
                 mean_daily_1pm_bi=float(row.get("mean_daily_1pm_bi", float("nan"))),
                 lulls=list(lulls_by_window.get(window_id, [])),
                 n_lulls=int(row["n_lulls"]),

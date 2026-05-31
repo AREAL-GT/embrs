@@ -2,17 +2,19 @@
 
 For one landscape, pull historical Open-Meteo weather over a multi-year
 range, run the EMBRS BI pipeline on each year, build the empirical
-distribution of "rolling-fortnight mean of daily 1 PM BI" over the
+distribution of "rolling-fortnight mean of daily-max BI" over the
 fire-season months, and emit mild/moderate/extreme bands at user-chosen
 percentile breakpoints.
 
 Rationale: NFDRS adjective classes (Low / Moderate / High / Very High /
 Extreme) are conventionally defined as percentile breakpoints of the
 *local* daily BI distribution — they're already climatology-relative.
-This tool lifts that convention from daily-BI to fortnight-mean BI, so
+This tool lifts that convention to the fortnight-mean of daily-max BI, so
 the "moderate" window in one region has the same climatological rarity
 as the "moderate" window in another, even if the absolute BI numbers
-differ. See the methodology discussion in README.md.
+differ. Measuring at the daily peak (rather than a fixed observation
+hour) makes the equivalence insensitive to region-dependent diurnal
+phase. See the methodology discussion in README.md.
 
 Usage:
     # Contiguous fire season (e.g. Sierra timber):
@@ -283,7 +285,7 @@ def _pull_span_for_year(year: int, m_start: int, m_end: int, conditioning_days: 
     the full ``m_start..m_end`` range — including any in-between
     off-season months. BI is computed continuously across the whole
     span so the moisture state stays conditioned across the gap; the
-    climatology filter (applied later in ``_extract_daily_1pm_in_season``)
+    climatology filter (applied later in ``_extract_daily_max_in_season``)
     drops the off-season days from the percentile distribution.
     """
     scenario_start = dt.date(year, m_start, 1)
@@ -373,42 +375,44 @@ def _run_year(
 # ---------------------------------------------------------------------------
 
 
-def _extract_daily_1pm_in_season(
+def _extract_daily_max_in_season(
     bi_traj: pd.DataFrame,
     fire_season_months: Tuple[int, ...],
 ) -> pd.Series:
-    """Return daily 1 PM BI for the scenario period, restricted to in-season months.
+    """Return daily-max BI for the scenario period, restricted to in-season months.
 
-    For non-contiguous seasons (e.g. ``(3, 4, 5, 10, 11)``) off-season
-    days in the middle of the span are dropped here; the subsequent
-    rolling-mean step (``_rolling_fortnight_mean``) then automatically
-    excludes any fortnight that bridges the gap because the resampled
-    daily grid contains NaN on the dropped days.
+    For each scenario calendar day the maximum of that day's hourly
+    ``BI_area_weighted`` is taken (the daily peak fire behaviour). The
+    result is indexed at day boundaries (midnight). For non-contiguous
+    seasons (e.g. ``(3, 4, 5, 10, 11)``) off-season days are dropped here;
+    the subsequent rolling-mean step (``_rolling_fortnight_mean``) then
+    automatically excludes any fortnight that bridges the gap because the
+    resampled daily grid contains NaN on the dropped days.
     """
     scen = bi_traj[bi_traj["phase"] == "scenario"]
-    bi = scen["BI_area_weighted"]
-    daily_1pm = bi[bi.index.hour == REG_OBS_HOUR].dropna()
-    if daily_1pm.empty:
-        return daily_1pm
-    months = np.asarray(daily_1pm.index.month)
+    bi = scen["BI_area_weighted"].dropna()
+    if bi.empty:
+        return bi
+    daily_max = bi.groupby(bi.index.normalize()).max()
+    months = np.asarray(daily_max.index.month)
     in_season = np.isin(months, np.asarray(fire_season_months))
-    return daily_1pm[in_season]
+    return daily_max[in_season]
 
 
 def _rolling_fortnight_mean(
-    daily_1pm: pd.Series, window_days: int
+    daily_max: pd.Series, window_days: int
 ) -> pd.Series:
-    """Trailing N-day rolling mean of a daily 1 PM series.
+    """Trailing N-day rolling mean of a daily series (one value per day).
 
     Resample to a complete daily grid first so .rolling() sees a regular
     cadence (otherwise gaps would let a 14-day window span more than 14
     calendar days). NaN-filled days are excluded from the average via
     ``min_periods=window_days``.
     """
-    if daily_1pm.empty:
-        return daily_1pm
+    if daily_max.empty:
+        return daily_max
     # Normalize index to date-only so resampling lands on day boundaries.
-    s = daily_1pm.copy()
+    s = daily_max.copy()
     s.index = s.index.normalize()
     daily_grid = s.resample("D").mean()
     rolling = daily_grid.rolling(window=window_days, min_periods=window_days).mean()
@@ -448,12 +452,12 @@ def calibrate_bands(cfg: CalibrationConfig) -> CalibrationResult:
             )
             continue
         per_year_daily.append(
-            _extract_daily_1pm_in_season(bi_traj, cfg.fire_season_months)
+            _extract_daily_max_in_season(bi_traj, cfg.fire_season_months)
         )
 
     if not per_year_daily or all(s.empty for s in per_year_daily):
         raise RuntimeError(
-            "No daily-1pm BI values produced across any year in the range. "
+            "No daily-max BI values produced across any year in the range. "
             "Check fire_season months, landscape, and Open-Meteo availability."
         )
 
@@ -594,7 +598,7 @@ def format_summary(result: CalibrationResult) -> str:
         f"lon={md['centroid_lon_wgs84']:.4f} ({md['timezone']})"
     )
     lines.append(
-        f"\n  Distribution of fortnight-mean daily 1 PM BI "
+        f"\n  Distribution of fortnight-mean daily-max BI "
         f"(in-season only):"
     )
     lines.append(
@@ -608,7 +612,7 @@ def format_summary(result: CalibrationResult) -> str:
     for p in sorted(pcts):
         keyline += f"p{int(p):02d}={pcts[p]:.1f}  "
     lines.append(keyline.rstrip())
-    lines.append("\n  Suggested bands (mean_daily_1pm_bi):")
+    lines.append("\n  Suggested bands (mean_daily_peak_bi):")
     for level, (lo, hi) in result.band_breakpoints.items():
         pct_range = result.metadata.get("percentile_breakpoints_used", {})
         lines.append(f"    {level:<10s}= [{lo:6.2f}, {hi:6.2f}]")

@@ -30,7 +30,7 @@ def _minimal_cfg(output_dir):
 
 
 def _stub_candidate(rank=1, peak_bi=70.0, n_lulls=2, total_lull_hours=8,
-                    mean_daily_1pm_bi=65.0):
+                    mean_daily_peak_bi=72.0, mean_daily_1pm_bi=65.0):
     start = pd.Timestamp("2024-07-15 06:00", tz="UTC")
     end = start + pd.Timedelta(hours=12)
     lulls = [
@@ -43,6 +43,7 @@ def _stub_candidate(rank=1, peak_bi=70.0, n_lulls=2, total_lull_hours=8,
         peak_bi=peak_bi,
         time_of_peak=start + pd.Timedelta(hours=6),
         mean_bi=50.0,
+        mean_daily_peak_bi=mean_daily_peak_bi,
         mean_daily_1pm_bi=mean_daily_1pm_bi,
         lulls=lulls,
         n_lulls=n_lulls,
@@ -93,9 +94,11 @@ def test_write_candidate_dir_creates_files(tmp_path):
     assert metadata["window"]["window_id"] == c.window_id
     assert metadata["bi"]["peak_bi"] == 70.0
     assert metadata["bi"]["peak_percentile"] == 97
+    assert metadata["bi"]["mean_daily_peak_bi"] == 72.0
     assert metadata["bi"]["mean_daily_1pm_bi"] == 65.0
     assert len(metadata["lulls"]) == 2
-    assert "Peak BI 70.0" in metadata["synoptic_summary"]
+    assert "Mean daily-peak BI 72.0" in metadata["synoptic_summary"]
+    assert "window peak BI 70.0" in metadata["synoptic_summary"]
     assert "mean daily 1 PM BI 65.0" in metadata["synoptic_summary"]
 
 
@@ -109,6 +112,8 @@ def test_write_summary_csv(tmp_path):
             "peak_bi": [70.0, 40.0],
             "time_of_peak": [pd.Timestamp("2024-07-01 06:00"), pd.Timestamp("2024-07-02 06:00")],
             "mean_bi": [55.0, 30.0],
+            "mean_daily_peak_bi": [72.0, 38.0],
+            "n_daily_peak_samples": [1, 1],
             "mean_daily_1pm_bi": [65.0, 35.0],
             "n_daily_1pm_samples": [1, 1],
             "n_hours": [12, 12],
@@ -126,7 +131,7 @@ def test_write_summary_csv(tmp_path):
             start=per_window.loc["w_in", "start"],
             end=per_window.loc["w_in", "end"],
             peak_bi=70.0, time_of_peak=per_window.loc["w_in", "time_of_peak"],
-            mean_bi=55.0, mean_daily_1pm_bi=65.0,
+            mean_bi=55.0, mean_daily_peak_bi=72.0, mean_daily_1pm_bi=65.0,
             lulls=[], n_lulls=0, total_lull_hours=0,
             score=0.4, bi_distance_normalized=0.5, rank=1,
         )
@@ -140,10 +145,12 @@ def test_write_summary_csv(tmp_path):
     assert bool(in_row["passed_band_filter"]) is True
     assert bool(in_row["selected"]) is True
     assert int(in_row["rank"]) == 1
+    assert in_row["mean_daily_peak_bi"] == 72.0
     assert in_row["mean_daily_1pm_bi"] == 65.0
     out_row = df[df["window_id"] == "w_out"].iloc[0]
     assert bool(out_row["passed_band_filter"]) is False
     assert int(out_row["rank"]) == -1
+    assert out_row["mean_daily_peak_bi"] == 38.0
     assert out_row["mean_daily_1pm_bi"] == 35.0
 
 
