@@ -618,7 +618,7 @@ class WeatherStream:
                 end=pd.to_datetime(hourly.TimeEnd(), unit="s"),
                 freq=pd.Timedelta(seconds=hourly.Interval()),
                 inclusive="left"
-            ).tz_localize(local_tz)
+            ).tz_localize(local_tz, nonexistent='shift_forward', ambiguous='NaT')
         }
 
         irradiance_df = pd.DataFrame(hourly_data).set_index("date")
@@ -630,6 +630,10 @@ class WeatherStream:
         elif time_step_min > 60:
             irradiance_df = irradiance_df.resample(target_freq).mean()
 
+        # DST band-aid: 'shift_forward' collapses the spring-forward hour onto
+        # an existing timestamp, leaving a duplicate label; drop it so the
+        # .loc reindex returns exactly one row per requested timestamp.
+        irradiance_df = irradiance_df[~irradiance_df.index.duplicated(keep="first")]
         irradiance_df = irradiance_df.loc[index]
         return (irradiance_df["ghi"].values,
                 irradiance_df["dni"].values,
