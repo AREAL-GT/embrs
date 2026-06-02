@@ -38,16 +38,17 @@ window_stride_hours: 1              # Sliding window stride
 # min_candidate_separation_hours: null
 
 # BI band-match metric.
-#   mean_only (default) — filter + rank on the NFDRS daily 1 PM BI mean
-#       over the window. The recommended cross-region equivalence
-#       metric: a "moderate" window is one whose characteristic daily
-#       afternoon load lands in the target band. The 97th-pct hourly
-#       peak is reported as descriptive metadata only.
-#   dual    — require BOTH peak_bi AND mean_daily_1pm_bi in band.
-#       Stricter; can be structurally empty in grass / high-diurnal-swing
-#       regions where the two metrics are systematically offset.
-#   peak_only — legacy 97th-pct-hourly filter.
-bi_filter_mode: mean_only
+#   mean_daily_peak (default) — filter + rank on the mean of the in-window
+#       daily *maxima* (mean_daily_peak_bi). The recommended cross-region
+#       equivalence metric: a "moderate" window is one whose typical daily
+#       peak fire behaviour lands in the target band. Calibrate bands with
+#       calibrate_bands.py, which uses the same daily-max statistic. The
+#       window 97th-pct peak and the NFDRS 1 PM mean are reported as
+#       diagnostics only.
+#   mean_1pm  — filter + rank on the NFDRS daily 1 PM BI mean
+#       (mean_daily_1pm_bi). Kept for NFDRS comparability.
+#   peak_only — filter + rank on the window-level 97th-pct hourly peak_bi.
+bi_filter_mode: mean_daily_peak
 
 # -------- Lull detection (qa E1/E2/E3) --------
 
@@ -64,6 +65,17 @@ scoring:
   bi_distance_weight: 1.0
   lulls_weight: 0.5
   lull_hours_weight: 0.05
+
+
+# -------- Wetness guard --------
+# Drop windows whose fuels are too wet to carry fire. Both checks are
+# wind-independent (read precipitation directly).
+
+wetness_guard:
+  enabled: true
+  antecedent_days: 10               # look-back before window start
+  max_antecedent_precip_in: 1.0     # reject if more rain than this at end of conditioning
+  max_daily_precip_in: 1.0          # reject if any in-window day soaks more than this
 
 
 # -------- Wind-height correction (qa B4) --------

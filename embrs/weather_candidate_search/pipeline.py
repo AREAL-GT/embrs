@@ -38,6 +38,7 @@ from embrs.weather_candidate_search.ranking import (
     score_windows,
     select_top_n,
 )
+from embrs.weather_candidate_search.wetness import evaluate_wetness
 from embrs.weather_candidate_search.windowing import (
     DEFAULT_REQUIRED_COLUMNS,
     Window,
@@ -262,6 +263,24 @@ def run_candidate_search(cfg: Config) -> int:
     lulls_by_window: Dict[str, List[Lull]] = {}
     for w in windows:
         lulls_by_window[w.window_id] = detect_lulls(w.df, cfg.lull)
+
+    # 10.5. Wetness guard — drop windows whose fuels are too wet to carry
+    # fire (heavy antecedent rain at end of conditioning, or a soaking
+    # in-window day). Wind-independent; reads precip directly.
+    wetness = evaluate_wetness(weather_df, windows, cfg.wetness_guard)
+    if cfg.wetness_guard.enabled:
+        wet_ids = [wid for wid, r in wetness.items() if not r.passed]
+        if wet_ids:
+            per_window = per_window.drop(index=wet_ids, errors="ignore")
+            logger.info(
+                "Wetness guard removed %d / %d windows (antecedent>%.2fin over %dd "
+                "or daily>%.2fin). %d remain.",
+                len(wet_ids), len(windows),
+                cfg.wetness_guard.max_antecedent_precip_in,
+                cfg.wetness_guard.antecedent_days,
+                cfg.wetness_guard.max_daily_precip_in,
+                len(per_window),
+            )
 
     # 11. Filter + score + select (per cfg.bi_filter_mode)
     filter_columns = columns_for_bi_filter_mode(cfg.bi_filter_mode)

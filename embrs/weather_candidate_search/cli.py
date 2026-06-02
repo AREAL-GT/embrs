@@ -16,6 +16,7 @@ from embrs.weather_candidate_search.config import (
     Config,
     LullConfig,
     ScoringConfig,
+    WetnessGuard,
     WindConversionConfig,
 )
 from embrs.weather_candidate_search.pipeline import run_candidate_search
@@ -97,6 +98,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable the 10 m → 20 ft log-profile wind correction (qa B4).",
     )
 
+    # Wetness guard
+    p.add_argument(
+        "--no-wetness-guard",
+        action="store_true",
+        help="Disable the wetness guard (too-wet windows are kept).",
+    )
+    p.add_argument("--antecedent-days", type=int, default=_SENTINEL)
+    p.add_argument("--max-antecedent-precip-in", type=float, default=_SENTINEL)
+    p.add_argument("--max-daily-precip-in", type=float, default=_SENTINEL)
+
     p.add_argument(
         "--log-level",
         default="INFO",
@@ -172,6 +183,31 @@ def _build_wind_conversion(yaml_section: dict, ns) -> WindConversionConfig:
         enabled=enabled,
         surface_roughness_m=float(
             yaml_section.get("surface_roughness_m", defaults.surface_roughness_m)
+        ),
+    )
+
+
+def _build_wetness_guard(yaml_section: dict, ns) -> WetnessGuard:
+    defaults = WetnessGuard()
+    if ns.no_wetness_guard:
+        enabled = False
+    else:
+        enabled = bool(yaml_section.get("enabled", defaults.enabled))
+    return WetnessGuard(
+        enabled=enabled,
+        antecedent_days=int(
+            _coalesce(ns.antecedent_days, yaml_section.get("antecedent_days"),
+                      defaults.antecedent_days)
+        ),
+        max_antecedent_precip_in=float(
+            _coalesce(ns.max_antecedent_precip_in,
+                      yaml_section.get("max_antecedent_precip_in"),
+                      defaults.max_antecedent_precip_in)
+        ),
+        max_daily_precip_in=float(
+            _coalesce(ns.max_daily_precip_in,
+                      yaml_section.get("max_daily_precip_in"),
+                      defaults.max_daily_precip_in)
         ),
     )
 
@@ -265,6 +301,9 @@ def config_from_namespace(ns: argparse.Namespace) -> Config:
         scoring=_build_scoring(yaml_cfg.get("scoring", {}) or {}),
         wind_conversion=_build_wind_conversion(
             yaml_cfg.get("wind_conversion", {}) or {}, ns
+        ),
+        wetness_guard=_build_wetness_guard(
+            yaml_cfg.get("wetness_guard", {}) or {}, ns
         ),
         bi=_build_bi_section(yaml_cfg.get("bi", {}) or {}),
     )

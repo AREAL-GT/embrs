@@ -471,6 +471,14 @@ def write_report_md(
         + ("on" if cfg.wind_conversion.enabled else "off")
         + f" (z0={cfg.wind_conversion.surface_roughness_m} m)"
     )
+    wg = cfg.wetness_guard
+    if wg.enabled:
+        lines.append(
+            f"- Wetness guard: on (antecedent ≤ {wg.max_antecedent_precip_in} in "
+            f"over {wg.antecedent_days} d; daily ≤ {wg.max_daily_precip_in} in)"
+        )
+    else:
+        lines.append("- Wetness guard: off")
     lines.append("")
     lines.append("## Search counts")
     lines.append(f"- Hours pulled: {pull_stats.get('n_hours', 'n/a')}")

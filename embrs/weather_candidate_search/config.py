@@ -64,6 +64,32 @@ class ScoringConfig:
 
 
 @dataclass(frozen=True)
+class WetnessGuard:
+    """Reject candidate windows whose fuels are too wet to carry fire.
+
+    Two precipitation checks (both wind-independent):
+
+    - **End of conditioning** — total precip over the ``antecedent_days``
+      before the window start must be <= ``max_antecedent_precip_in``. A
+      window opening right after heavy rain starts with wet fuels even if
+      the afternoon dead-fuel moisture later recovers, so the fire stalls
+      for the first days (observed in the Flint Hills July window: 2.2 in
+      of rain in the 10 days before start -> near-zero early spread).
+    - **During the scenario** — no single in-window calendar day may exceed
+      ``max_daily_precip_in`` of rain, so a soaking mid-scenario day cannot
+      silently kill the run.
+
+    Thresholds are in inches and region-tunable; ``enabled=False`` (or
+    ``--no-wetness-guard``) disables the filter entirely.
+    """
+
+    enabled: bool = True
+    antecedent_days: int = 10
+    max_antecedent_precip_in: float = 1.0
+    max_daily_precip_in: float = 1.0
+
+
+@dataclass(frozen=True)
 class WindConversionConfig:
     """Open-Meteo 10 m → NFDRS 20 ft log-profile correction (qa B4).
 
@@ -160,6 +186,7 @@ class Config:
     lull: LullConfig = field(default_factory=LullConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     wind_conversion: WindConversionConfig = field(default_factory=WindConversionConfig)
+    wetness_guard: WetnessGuard = field(default_factory=WetnessGuard)
     bi: BISection = field(default_factory=BISection)
 
     def __post_init__(self) -> None:

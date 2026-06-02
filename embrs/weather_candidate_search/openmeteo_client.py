@@ -293,6 +293,10 @@ def fetch_history(
         "end_date": spec.end_date.isoformat(),
         "hourly": list(OPEN_METEO_VARIABLES),
         "timezone": spec.timezone,
+        # Open-Meteo defaults wind_speed_10m to km/h; request m/s so the
+        # ``wind_mps`` canonical column is honest. Without this the wind is
+        # 3.6x too large all the way through to the .wxs (km/h read as m/s).
+        "wind_speed_unit": "ms",
     }
 
     t0 = time.monotonic()

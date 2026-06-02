@@ -84,15 +84,26 @@ _MPS_TO_MPH: float = 2.23693629
 
 
 def _default_breakpoints() -> Dict[str, Tuple[float, float]]:
-    """Defaults chosen to span 'quiet' / 'elevated' / 'top-tail' regimes.
+    """Defaults anchored to recognized fire-management percentile benchmarks.
 
-    Each entry is a percentile range; the emitted band is the BI values
-    at those two percentiles of the regional fortnight-mean distribution.
+    Each class is a narrow percentile band centred on a defensible anchor of
+    the regional fortnight-mean daily-max BI distribution:
+
+      - mild     ~p50  — the median fire-season fortnight (a typical, real
+                         fire week, not a quiet non-event).
+      - moderate ~p85  — clearly elevated / "high" fire danger.
+      - extreme  ~p97  — the standard "extreme fire weather" benchmark
+                         (~a once-per-two-seasons severe fortnight).
+
+    The cross-region equivalence is climatological rarity: the same
+    percentile rank = the same recurrence interval in each region's own
+    climate. Each entry is the (lo_pct, hi_pct) percentile band; the emitted
+    BI band is the values at those two percentiles.
     """
     return {
-        "mild": (20.0, 30.0),
-        "moderate": (55.0, 65.0),
-        "extreme": (90.0, 95.0),
+        "mild": (47.0, 53.0),
+        "moderate": (82.0, 88.0),
+        "extreme": (95.0, 99.0),
     }
 
 
@@ -160,7 +171,8 @@ class CalibrationConfig:
         conditioning_days: BI spin-up buffer pulled before each year's
             earliest in-season month. Default 30.
         percentile_breakpoints: ``{level: (lo_pct, hi_pct)}`` defining
-            each band. Default mild=20-30, moderate=55-65, extreme=90-95.
+            each band. Default mild=47-53 (~p50), moderate=82-88 (~p85),
+            extreme=95-99 (~p97).
         cache_dir: Where to cache Open-Meteo pulls and per-year BI
             trajectories. Default ``./.openmeteo_cache/``.
         output_yaml: Path for the bands YAML. Default ``bands.yaml``.
@@ -670,17 +682,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mild", type=_parse_breakpoint_pair, default=None,
         metavar="LO,HI",
-        help="Mild percentile range, e.g. '20,30'. Default 20,30.",
+        help="Mild percentile range, e.g. '47,53'. Default 47,53 (~p50).",
     )
     p.add_argument(
         "--moderate", type=_parse_breakpoint_pair, default=None,
         metavar="LO,HI",
-        help="Moderate percentile range, e.g. '55,65'. Default 55,65.",
+        help="Moderate percentile range, e.g. '82,88'. Default 82,88 (~p85).",
     )
     p.add_argument(
         "--extreme", type=_parse_breakpoint_pair, default=None,
         metavar="LO,HI",
-        help="Extreme percentile range, e.g. '90,95'. Default 90,95.",
+        help="Extreme percentile range, e.g. '95,99'. Default 95,99 (~p97).",
     )
     p.add_argument(
         "--avg-ann-precip-in", type=float, default=None,
