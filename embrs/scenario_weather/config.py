@@ -38,9 +38,11 @@ class RunConfig:
     moisture triplet that evolves toward equilibrium with the real RH.
 
     Attributes:
-        live_herb_mf: Live herbaceous moisture fraction (e.g. ``0.30`` for
-            cured grass). Values > 1 are treated as percent by the cfg loader.
-        live_woody_mf: Live woody moisture fraction.
+        live_herb_mf: Live herbaceous moisture **fraction** (e.g. ``0.30`` for
+            cured/dormant grass, ``0.90`` for greening). Always a fraction —
+            never a percent (``30``); the cfg loader rejects values > 3.
+        live_woody_mf: Live woody moisture **fraction** (e.g. ``0.60`` dormant,
+            ``1.20`` = 120% for green woody fuel).
         init_mf: Initial dead fuel moisture ``[1hr, 10hr, 100hr]`` (fractions).
         seed: Master/​spotting seed, pinned for reproducibility.
         model_spotting: Spotting on (``True``) per spec §3.
@@ -60,6 +62,17 @@ class RunConfig:
     t_step_s: int = 30
     solar_source: str = "offline"
     mesh_resolution: int = 250
+
+    def __post_init__(self):
+        # Live moisture is a fraction (0.30 = 30%, 1.20 = 120%). Catch the
+        # stale percent habit (e.g. 90, 120) early, before a sim is launched.
+        for name, val in (("live_herb_mf", self.live_herb_mf),
+                          ("live_woody_mf", self.live_woody_mf)):
+            if val > 3.0:
+                raise ValueError(
+                    f"{name}={val} looks like a percent; pass a fraction "
+                    f"(e.g. 0.90 for 90%, 1.20 for 120%)."
+                )
 
 
 @dataclass

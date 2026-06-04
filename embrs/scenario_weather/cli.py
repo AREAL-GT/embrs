@@ -70,8 +70,12 @@ def _wind_cfg(a) -> WindModelConfig:
 
 
 def _add_run_args(p):
-    p.add_argument("--live-herb", type=float, default=0.30)
-    p.add_argument("--live-woody", type=float, default=0.60)
+    p.add_argument("--live-herb", type=float, default=0.30,
+                   help="live herbaceous moisture FRACTION (0.30=30%%, 0.90=90%%); "
+                        "never a percent like 30")
+    p.add_argument("--live-woody", type=float, default=0.60,
+                   help="live woody moisture FRACTION (0.60=60%%, 1.20=120%%); "
+                        "never a percent like 120")
     p.add_argument("--init-mf", default="0.06,0.07,0.08")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--no-spotting", action="store_true")

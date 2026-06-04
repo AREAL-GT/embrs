@@ -30,8 +30,8 @@ def main():
     ap.add_argument("--temp", type=float, default=85)
     ap.add_argument("--hours", type=float, default=6)
     ap.add_argument("--wind-dir", type=float, default=180)   # from south -> head north
-    ap.add_argument("--live-herb", type=float, default=30)   # cured grass
-    ap.add_argument("--live-woody", type=float, default=60)
+    ap.add_argument("--live-herb", type=float, default=0.30)   # cured grass (fraction)
+    ap.add_argument("--live-woody", type=float, default=0.60)  # fraction
     ap.add_argument("--map", required=True)
     ap.add_argument("--workdir", required=True)
     a = ap.parse_args()

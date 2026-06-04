@@ -373,10 +373,18 @@ def load_sim_params(cfg_path: str) -> SimParams:
             live_w_mf = config["Weather"].getfloat("live_woody_mf", None)
             if live_h_mf is None or live_w_mf is None:
                 raise ValueError(f"Error in {cfg_path}: 'live_herb_mf' and 'live_woody_mf' must be specified when use_gsi is False.")
-            if live_h_mf > 1:
-                live_h_mf /= 100.0
-            if live_w_mf > 1:
-                live_w_mf /= 100.0
+            # Live fuel moisture is a FRACTION (0.30 = 30%, 1.20 = 120%), matching
+            # the GSI path's units (dormant 0.30/0.60 .. green 2.5/2.0). Realistic
+            # live moisture never exceeds ~2.5; a larger value is almost certainly
+            # a stale percent (e.g. 30, 120) which would silently suppress ignition,
+            # so fail loudly instead of dividing.
+            for _name, _val in (("live_herb_mf", live_h_mf), ("live_woody_mf", live_w_mf)):
+                if _val > 3.0:
+                    raise ValueError(
+                        f"Error in {cfg_path}: {_name}={_val} looks like a percent. "
+                        f"Live fuel moisture must be a fraction (e.g. 0.90 for 90%, "
+                        f"1.20 for 120%)."
+                    )
             fms_has_live = True
 
     write_logs = config["Simulation"].getboolean("write_logs", None)
