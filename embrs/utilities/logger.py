@@ -218,36 +218,33 @@ class Logger:
     def _merge_parquet_files(self, folder_path: str, output_file: str) -> None:
         """Merge multiple Parquet part files into a single file.
 
+        Part files are written batch-by-batch with per-batch type inference, so a
+        column can be inferred as ``null`` / ``list<null>`` in batches where it is
+        all-empty (e.g. action ``x_coords`` when an action has no geometry, or a
+        scalar like ``width`` that is None for a whole batch) and as a concrete type
+        elsewhere. Writing those mismatched parts to one file otherwise raises a
+        schema ``ValueError``. We unify the part-file schemas — promoting ``null`` to
+        the real type and widening ints to floats — and cast every part to that
+        unified schema so the merge can't clash.
+
         Args:
             folder_path (str): Folder containing part-*.parquet files.
             output_file (str): Path for the merged output file.
         """
         parquet_files = sorted(glob.glob(os.path.join(folder_path, "part-*.parquet")))
-        writer = None
+        if not parquet_files:
+            return
 
+        unified = pa.unify_schemas(
+            [pq.read_schema(f) for f in parquet_files],
+            promote_options="permissive",
+        )
+        writer = pq.ParquetWriter(output_file, unified, compression='brotli')
         for i, file in enumerate(parquet_files):
             print(f"Processing {i+1}/{len(parquet_files)}: {file}")
-            df = pd.read_parquet(file)
-
-            float_cols = [
-                "x", "y", "w_n_dead", "w_n_dead_start", "w_n_live",
-                "dfm_1hr", "dfm_10hr", "dfm_100hr",
-                "ros", "I_ss", "wind_speed", "wind_dir", "arrival_time"
-            ]
-
-            for col in float_cols:
-                if col in df.columns:
-                    df[col] = df[col].astype("float64")
-
-            table = pa.Table.from_pandas(df)
-
-            if writer is None:
-                writer = pq.ParquetWriter(output_file, table.schema, compression='brotli')
-            writer.write_table(table)
-
-        if writer:
-            writer.close()
-            print(f"Merged {len(parquet_files)} files to {output_file}")
+            writer.write_table(pq.read_table(file).cast(unified))
+        writer.close()
+        print(f"Merged {len(parquet_files)} files to {output_file}")
 
     def generate_session_folder(self) -> str:
         """Generate the session folder path based on current datetime.
