@@ -22,7 +22,7 @@ REPO = Path("/Users/rjdp3/Documents/Research/embrs")
 SRC = REPO / "embrs/scenario_weather/outputs"
 DST = REPO / "embrs/configs/thesis_eval"
 
-REGIONS = ["a_flint_hills", "b_front_range_foothills", "c_clearwater"]
+REGIONS = ["a_flint_hills", "b_front_range_foothills", "c_northern_sierra_nevada"]
 CLASSES = ["mild", "moderate", "extreme"]
 
 # --- Mac (local) absolute roots ------------------------------------------------
