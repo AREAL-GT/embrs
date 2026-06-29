@@ -1,0 +1,78 @@
+---------------------------------------
+Begin Slurm Prolog: Jun-28-2026 18:35:52
+Job ID:    10589298
+User ID:   rjdp3
+Account:   gts-jrogers8-paid
+Job name:  testset_classify
+Partition: cpu-small
+QOS:       inferno
+---------------------------------------
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+pkl_path: /storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/a_flint_hills/map_params.pkl
+Fire Simulation Initializing...
+Initializing fire sim backing array...
+Generating wind with WindNinja:   0%|          | 0/73 [00:00<?, ?it/s]Generating wind with WindNinja:   1%|▏         | 1/73 [00:03<04:26,  3.70s/it]Generating wind with WindNinja:   8%|▊         | 6/73 [00:03<00:32,  2.09it/s]Generating wind with WindNinja:  12%|█▏        | 9/73 [00:04<00:24,  2.58it/s]Generating wind with WindNinja:  15%|█▌        | 11/73 [00:05<00:23,  2.69it/s]Generating wind with WindNinja:  22%|██▏       | 16/73 [00:05<00:11,  5.17it/s]Generating wind with WindNinja:  27%|██▋       | 20/73 [00:05<00:07,  7.49it/s]Generating wind with WindNinja:  33%|███▎      | 24/73 [00:05<00:12,  4.05it/s]
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 113, in run_windninja_single
+    rename_windninja_outputs(output_path, task.index)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 247, in rename_windninja_outputs
+    for file_name in os.listdir(output_path):
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/37'
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 386, in <module>
+    main()
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 362, in main
+    phase_classify(args)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 272, in phase_classify
+    flame = _classify(inp, wxs, cell_dir / "_classify_work" / f"ns{c['noise_seed']}")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 149, in _classify
+    report = classify(
+             ^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/classifier.py", line 185, in classify
+    fire = build_fire(cfg_path)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/run_config.py", line 110, in build_fire
+    return FireSim(sim_params)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/fire_simulator/fire.py", line 62, in __init__
+    super().__init__(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 155, in __init__
+    self._parse_sim_params(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 658, in _parse_sim_params
+    raw_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 218, in run_windninja
+    for _ in tqdm(pool.imap_unordered(run_windninja_single, tasks), total = num_tasks, desc="Generating wind with WindNinja: "):
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/multiprocessing/pool.py", line 873, in next
+    raise value
+FileNotFoundError: [Errno 2] No such file or directory: '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/37'
+---------------------------------------
+Begin Slurm Epilog: Jun-28-2026 18:36:11
+Job ID:        10589298
+Array Job ID:  10589258_25
+User ID:       rjdp3
+Account:       gts-jrogers8-paid
+Job name:      testset_classify
+Resources:     cpu=24,mem=48G,node=1
+Rsrc Used:     cput=00:08:00,vmem=0,walltime=00:00:20,mem=1017312K,energy_used=0
+Partition:     cpu-small
+QOS:           inferno
+Nodes:         atl1-1-02-010-12-2
+---------------------------------------

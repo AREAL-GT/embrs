@@ -1,0 +1,45 @@
+---------------------------------------
+Begin Slurm Prolog: Jun-28-2026 20:32:05
+Job ID:    10590740
+User ID:   rjdp3
+Account:   gts-jrogers8-paid
+Job name:  testset_gen
+Partition: cpu-small
+QOS:       inferno
+---------------------------------------
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+=== a_flint_hills/mild === peak_scale=1.000 target=4.0ft prevailing_dir=195.7
+  generated 10 candidate streams
+=== a_flint_hills/moderate === peak_scale=6.612 target=6.0ft prevailing_dir=195.7
+  generated 10 candidate streams
+=== a_flint_hills/extreme === peak_scale=14.000 target=8.0ft prevailing_dir=195.7
+  generated 10 candidate streams
+=== b_front_range_foothills/mild === peak_scale=0.500 target=4.0ft prevailing_dir=105.7
+  generated 10 candidate streams
+=== b_front_range_foothills/moderate === peak_scale=8.000 target=6.0ft prevailing_dir=105.7
+  generated 10 candidate streams
+=== b_front_range_foothills/extreme === peak_scale=16.000 target=8.0ft prevailing_dir=105.7
+  generated 10 candidate streams
+=== c_northern_sierra_nevada/mild === peak_scale=0.500 target=4.0ft prevailing_dir=249.7
+  generated 10 candidate streams
+=== c_northern_sierra_nevada/moderate === peak_scale=10.000 target=6.0ft prevailing_dir=249.7
+  generated 10 candidate streams
+=== c_northern_sierra_nevada/extreme === peak_scale=16.000 target=8.0ft prevailing_dir=249.7
+  generated 10 candidate streams
+
+90 candidates -> /storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/candidates.json
+classify array size: 0-89
+---------------------------------------
+Begin Slurm Epilog: Jun-28-2026 20:32:24
+Job ID:        10590740
+User ID:       rjdp3
+Account:       gts-jrogers8-paid
+Job name:      testset_gen
+Resources:     cpu=24,mem=48G,node=1
+Rsrc Used:     cput=00:08:00,vmem=0,walltime=00:00:20,mem=509148K,energy_used=0
+Partition:     cpu-small
+QOS:           inferno
+Nodes:         atl1-1-02-005-2-1
+---------------------------------------

@@ -1,0 +1,8 @@
+{
+  "noise_seed": 104,
+  "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns104.wxs",
+  "flame_ft": 5.439603957906317,
+  "target_ft": 6.0,
+  "tolerance_ft": 0.3,
+  "in_band": false
+}

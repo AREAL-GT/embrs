@@ -1,0 +1,70 @@
+{
+  "region": "b_front_range_foothills",
+  "fire_class": "moderate",
+  "target_ft": 6.0,
+  "tolerance_ft": 0.3,
+  "peak_scale_ms": 8.0,
+  "prevailing_dir_deg": 105.71903607351523,
+  "canonical_start": "2022-06-09T00:00:00",
+  "duration_s": 345600.0,
+  "n_pool": 10,
+  "n_in_band_pool": 4,
+  "n_kept": 5,
+  "n_kept_in_band": 4,
+  "kept_flame_ft_mean": 5.737,
+  "kept_flame_ft_min": 5.666,
+  "kept_flame_ft_max": 5.883,
+  "kept_max_deviation_ft": 0.334,
+  "draws": [
+    {
+      "draw": 0,
+      "fire_seed": 50,
+      "noise_seed": 107,
+      "ignition_offset_hr": 0,
+      "achieved_flame_ft": 5.882752067277291,
+      "target_ft": 6.0,
+      "deviation_ft": -0.117,
+      "in_band": true
+    },
+    {
+      "draw": 1,
+      "fire_seed": 51,
+      "noise_seed": 103,
+      "ignition_offset_hr": 6,
+      "achieved_flame_ft": 5.720486641793569,
+      "target_ft": 6.0,
+      "deviation_ft": -0.28,
+      "in_band": true
+    },
+    {
+      "draw": 2,
+      "fire_seed": 52,
+      "noise_seed": 108,
+      "ignition_offset_hr": 11,
+      "achieved_flame_ft": 5.715878306720632,
+      "target_ft": 6.0,
+      "deviation_ft": -0.284,
+      "in_band": true
+    },
+    {
+      "draw": 3,
+      "fire_seed": 53,
+      "noise_seed": 109,
+      "ignition_offset_hr": 15,
+      "achieved_flame_ft": 5.702117351287047,
+      "target_ft": 6.0,
+      "deviation_ft": -0.298,
+      "in_band": true
+    },
+    {
+      "draw": 4,
+      "fire_seed": 54,
+      "noise_seed": 106,
+      "ignition_offset_hr": 20,
+      "achieved_flame_ft": 5.665607479966691,
+      "target_ft": 6.0,
+      "deviation_ft": -0.334,
+      "in_band": false
+    }
+  ]
+}

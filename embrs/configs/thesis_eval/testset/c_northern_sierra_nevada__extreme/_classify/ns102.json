@@ -1,0 +1,8 @@
+{
+  "noise_seed": 102,
+  "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns102.wxs",
+  "flame_ft": 8.887233769710091,
+  "target_ft": 8.0,
+  "tolerance_ft": 0.3,
+  "in_band": false
+}
