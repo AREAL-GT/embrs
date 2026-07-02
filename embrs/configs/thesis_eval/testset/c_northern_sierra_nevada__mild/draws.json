@@ -1,0 +1,70 @@
+{
+  "region": "c_northern_sierra_nevada",
+  "fire_class": "mild",
+  "target_ft": 4.0,
+  "tolerance_ft": 0.3,
+  "peak_scale_ms": 0.5,
+  "prevailing_dir_deg": 249.7190360735152,
+  "canonical_start": "2022-08-03T00:00:00",
+  "duration_s": 604800.0,
+  "n_pool": 10,
+  "n_in_band_pool": 0,
+  "n_kept": 5,
+  "n_kept_in_band": 0,
+  "kept_flame_ft_mean": 4.631,
+  "kept_flame_ft_min": 4.579,
+  "kept_flame_ft_max": 4.699,
+  "kept_max_deviation_ft": 0.699,
+  "draws": [
+    {
+      "draw": 0,
+      "fire_seed": 50,
+      "noise_seed": 104,
+      "ignition_offset_hr": 0,
+      "achieved_flame_ft": 4.579055272255073,
+      "target_ft": 4.0,
+      "deviation_ft": 0.579,
+      "in_band": false
+    },
+    {
+      "draw": 1,
+      "fire_seed": 51,
+      "noise_seed": 105,
+      "ignition_offset_hr": 6,
+      "achieved_flame_ft": 4.599681290436935,
+      "target_ft": 4.0,
+      "deviation_ft": 0.6,
+      "in_band": false
+    },
+    {
+      "draw": 2,
+      "fire_seed": 52,
+      "noise_seed": 100,
+      "ignition_offset_hr": 11,
+      "achieved_flame_ft": 4.630055028901727,
+      "target_ft": 4.0,
+      "deviation_ft": 0.63,
+      "in_band": false
+    },
+    {
+      "draw": 3,
+      "fire_seed": 53,
+      "noise_seed": 108,
+      "ignition_offset_hr": 15,
+      "achieved_flame_ft": 4.645590909756799,
+      "target_ft": 4.0,
+      "deviation_ft": 0.646,
+      "in_band": false
+    },
+    {
+      "draw": 4,
+      "fire_seed": 54,
+      "noise_seed": 107,
+      "ignition_offset_hr": 20,
+      "achieved_flame_ft": 4.699272266248825,
+      "target_ft": 4.0,
+      "deviation_ft": 0.699,
+      "in_band": false
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+---------------------------------------
+Begin Slurm Prolog: Jun-28-2026 18:34:51
+Job ID:    10589270
+User ID:   rjdp3
+Account:   gts-jrogers8-paid
+Job name:  testset_classify
+Partition: cpu-small
+QOS:       inferno
+---------------------------------------
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+pkl_path: /storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/a_flint_hills/map_params.pkl
+Fire Simulation Initializing...
+Initializing fire sim backing array...
+Generating wind with WindNinja:   0%|          | 0/73 [00:00<?, ?it/s]Generating wind with WindNinja:   1%|▏         | 1/73 [00:01<01:45,  1.46s/it]Generating wind with WindNinja:   8%|▊         | 6/73 [00:01<00:13,  4.87it/s]Generating wind with WindNinja:  12%|█▏        | 9/73 [00:01<00:09,  6.71it/s]Generating wind with WindNinja:  16%|█▋        | 12/73 [00:02<00:06,  8.75it/s]Generating wind with WindNinja:  22%|██▏       | 16/73 [00:02<00:04, 12.81it/s]Generating wind with WindNinja:  29%|██▉       | 21/73 [00:02<00:02, 17.97it/s]Generating wind with WindNinja:  33%|███▎      | 24/73 [00:03<00:05,  8.43it/s]Generating wind with WindNinja:  37%|███▋      | 27/73 [00:03<00:04, 10.11it/s]Generating wind with WindNinja:  41%|████      | 30/73 [00:03<00:04,  8.81it/s]Generating wind with WindNinja:  44%|████▍     | 32/73 [00:03<00:04,  9.64it/s]Generating wind with WindNinja:  47%|████▋     | 34/73 [00:04<00:04,  8.91it/s]Generating wind with WindNinja:  51%|█████     | 37/73 [00:04<00:03,  9.83it/s]Generating wind with WindNinja:  53%|█████▎    | 39/73 [00:04<00:04,  7.43it/s]Generating wind with WindNinja:  56%|█████▌    | 41/73 [00:05<00:04,  7.07it/s]Generating wind with WindNinja:  60%|██████    | 44/73 [00:05<00:03,  9.07it/s]Generating wind with WindNinja:  68%|██████▊   | 50/73 [00:05<00:01, 13.49it/s]Generating wind with WindNinja:  77%|███████▋  | 56/73 [00:05<00:00, 17.32it/s]Generating wind with WindNinja:  79%|███████▉  | 58/73 [00:06<00:01, 14.46it/s]Generating wind with WindNinja:  82%|████████▏ | 60/73 [00:06<00:01, 12.96it/s]Generating wind with WindNinja:  89%|████████▉ | 65/73 [00:06<00:00, 18.52it/s]Generating wind with WindNinja:  92%|█████████▏| 67/73 [00:06<00:00, 10.44it/s]
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 113, in run_windninja_single
+    rename_windninja_outputs(output_path, task.index)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 247, in rename_windninja_outputs
+    for file_name in os.listdir(output_path):
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/67'
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 386, in <module>
+    main()
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 362, in main
+    phase_classify(args)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 272, in phase_classify
+    flame = _classify(inp, wxs, cell_dir / "_classify_work" / f"ns{c['noise_seed']}")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 149, in _classify
+    report = classify(
+             ^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/classifier.py", line 185, in classify
+    fire = build_fire(cfg_path)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/run_config.py", line 110, in build_fire
+    return FireSim(sim_params)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/fire_simulator/fire.py", line 62, in __init__
+    super().__init__(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 155, in __init__
+    self._parse_sim_params(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 658, in _parse_sim_params
+    raw_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 218, in run_windninja
+    for _ in tqdm(pool.imap_unordered(run_windninja_single, tasks), total = num_tasks, desc="Generating wind with WindNinja: "):
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/multiprocessing/pool.py", line 873, in next
+    raise value
+FileNotFoundError: [Errno 2] No such file or directory: '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/67'
+Error running WindNinja CLI at step 65: Command '['/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/bin/WindNinja_cli', '--initialization_method', 'domainAverageInitialization', '--elevation_file', '/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/a_flint_hills/cropped_lcp.tif', '--output_path', '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/65', '--mesh_resolution', '250', '--units_mesh_resolution', 'm', '--time_zone', 'America/Chicago', '--uni_air_temp', '89.5', '--air_temp_units', 'F', '--uni_cloud_cover', '0.0', '--cloud_cover_units', 'percent', '--diurnal_winds', 'false', '--year', '2022', '--month', '9', '--day', '2', '--hour', '17', '--minute', '0', '--num_threads', '4', '--output_wind_height', '6.1', '--units_output_wind_height', 'm', '--output_speed_units', 'mps', '--input_speed', '2.6375360000000003', '--input_speed_units', 'mps', '--input_direction', '257.549582947689', '--input_wind_height', '6.1', '--units_input_wind_height', 'm', '--write_ascii_output', 'true', '--write_goog_output', 'true']' died with <Signals.SIGSEGV: 11>.
+Error running WindNinja CLI at step 60: Command '['/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/bin/WindNinja_cli', '--initialization_method', 'domainAverageInitialization', '--elevation_file', '/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/a_flint_hills/cropped_lcp.tif', '--output_path', '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/60', '--mesh_resolution', '250', '--units_mesh_resolution', 'm', '--time_zone', 'America/Chicago', '--uni_air_temp', '83.5', '--air_temp_units', 'F', '--uni_cloud_cover', '0.0', '--cloud_cover_units', 'percent', '--diurnal_winds', 'false', '--year', '2022', '--month', '9', '--day', '2', '--hour', '12', '--minute', '0', '--num_threads', '4', '--output_wind_height', '6.1', '--units_output_wind_height', 'm', '--output_speed_units', 'mps', '--input_speed', '2.7269439999999996', '--input_speed_units', 'mps', '--input_direction', '236.54958294768895', '--input_wind_height', '6.1', '--units_input_wind_height', 'm', '--write_ascii_output', 'true', '--write_goog_output', 'true']' died with <Signals.SIGSEGV: 11>.
+Error running WindNinja CLI at step 66: Command '['/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/bin/WindNinja_cli', '--initialization_method', 'domainAverageInitialization', '--elevation_file', '/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/a_flint_hills/cropped_lcp.tif', '--output_path', '/storage/home/hcoda1/0/rjdp3/scratch/windninja_temp/66', '--mesh_resolution', '250', '--units_mesh_resolution', 'm', '--time_zone', 'America/Chicago', '--uni_air_temp', '88.5', '--air_temp_units', 'F', '--uni_cloud_cover', '1.0', '--cloud_cover_units', 'percent', '--diurnal_winds', 'false', '--year', '2022', '--month', '9', '--day', '2', '--hour', '18', '--minute', '0', '--num_threads', '4', '--output_wind_height', '6.1', '--units_output_wind_height', 'm', '--output_speed_units', 'mps', '--input_speed', '2.101088', '--input_speed_units', 'mps', '--input_direction', '257.549582947689', '--input_wind_height', '6.1', '--units_input_wind_height', 'm', '--write_ascii_output', 'true', '--write_goog_output', 'true']' died with <Signals.SIGSEGV: 11>.
+---------------------------------------
+Begin Slurm Epilog: Jun-28-2026 18:35:09
+Job ID:        10589270
+Array Job ID:  10589258_1
+User ID:       rjdp3
+Account:       gts-jrogers8-paid
+Job name:      testset_classify
+Resources:     cpu=24,mem=48G,node=1
+Rsrc Used:     cput=00:08:00,vmem=0,walltime=00:00:20,mem=893376K,energy_used=0
+Partition:     cpu-small
+QOS:           inferno
+Nodes:         atl1-1-02-008-8-1
+---------------------------------------

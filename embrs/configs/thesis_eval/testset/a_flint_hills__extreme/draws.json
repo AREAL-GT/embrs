@@ -1,0 +1,70 @@
+{
+  "region": "a_flint_hills",
+  "fire_class": "extreme",
+  "target_ft": 8.0,
+  "tolerance_ft": 0.3,
+  "peak_scale_ms": 14.0,
+  "prevailing_dir_deg": 195.7190360735152,
+  "canonical_start": "2022-08-03T00:00:00",
+  "duration_s": 259200.0,
+  "n_pool": 10,
+  "n_in_band_pool": 1,
+  "n_kept": 5,
+  "n_kept_in_band": 1,
+  "kept_flame_ft_mean": 7.6,
+  "kept_flame_ft_min": 7.03,
+  "kept_flame_ft_max": 8.388,
+  "kept_max_deviation_ft": 0.97,
+  "draws": [
+    {
+      "draw": 0,
+      "fire_seed": 50,
+      "noise_seed": 100,
+      "ignition_offset_hr": 0,
+      "achieved_flame_ft": 8.133604162993892,
+      "target_ft": 8.0,
+      "deviation_ft": 0.134,
+      "in_band": true
+    },
+    {
+      "draw": 1,
+      "fire_seed": 51,
+      "noise_seed": 103,
+      "ignition_offset_hr": 6,
+      "achieved_flame_ft": 8.388103630047269,
+      "target_ft": 8.0,
+      "deviation_ft": 0.388,
+      "in_band": false
+    },
+    {
+      "draw": 2,
+      "fire_seed": 52,
+      "noise_seed": 108,
+      "ignition_offset_hr": 11,
+      "achieved_flame_ft": 7.375013374783538,
+      "target_ft": 8.0,
+      "deviation_ft": -0.625,
+      "in_band": false
+    },
+    {
+      "draw": 3,
+      "fire_seed": 53,
+      "noise_seed": 104,
+      "ignition_offset_hr": 15,
+      "achieved_flame_ft": 7.071798464320591,
+      "target_ft": 8.0,
+      "deviation_ft": -0.928,
+      "in_band": false
+    },
+    {
+      "draw": 4,
+      "fire_seed": 54,
+      "noise_seed": 101,
+      "ignition_offset_hr": 20,
+      "achieved_flame_ft": 7.029940097610242,
+      "target_ft": 8.0,
+      "deviation_ft": -0.97,
+      "in_band": false
+    }
+  ]
+}

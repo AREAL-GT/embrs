@@ -1,0 +1,8 @@
+{
+  "noise_seed": 101,
+  "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns101.wxs",
+  "flame_ft": 5.075477289863168,
+  "target_ft": 4.0,
+  "tolerance_ft": 0.3,
+  "in_band": false
+}

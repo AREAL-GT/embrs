@@ -1,0 +1,44 @@
+---------------------------------------
+Begin Slurm Prolog: Jun-28-2026 18:12:26
+Job ID:    10589066
+User ID:   rjdp3
+Account:   gts-jrogers8-paid
+Job name:  testset_gen
+Partition: cpu-small
+QOS:       inferno
+---------------------------------------
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 382, in <module>
+    main()
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 354, in main
+    phase_generate_pool(args)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 242, in phase_generate_pool
+    inp = _read_cell_inputs(region, fire_class, args.base_cfg_suffix)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 84, in _read_cell_inputs
+    tuning = json.loads((OUTPUTS / region / fire_class / "tuning_result.json").read_text())
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/rjdp3/Documents/Research/embrs/embrs/scenario_weather/outputs/a_flint_hills/mild/tuning_result.json'
+---------------------------------------
+Begin Slurm Epilog: Jun-28-2026 18:12:46
+Job ID:        10589066
+User ID:       rjdp3
+Account:       gts-jrogers8-paid
+Job name:      testset_gen
+Resources:     cpu=24,mem=48G,node=1
+Rsrc Used:     cput=00:08:24,vmem=0,walltime=00:00:21,mem=501644K,energy_used=0
+Partition:     cpu-small
+QOS:           inferno
+Nodes:         atl1-1-02-006-27-2
+---------------------------------------

@@ -1,0 +1,632 @@
+[
+  {
+    "index": 0,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns100.wxs"
+  },
+  {
+    "index": 1,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns101.wxs"
+  },
+  {
+    "index": 2,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns102.wxs"
+  },
+  {
+    "index": 3,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns103.wxs"
+  },
+  {
+    "index": 4,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns104.wxs"
+  },
+  {
+    "index": 5,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns105.wxs"
+  },
+  {
+    "index": 6,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns106.wxs"
+  },
+  {
+    "index": 7,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns107.wxs"
+  },
+  {
+    "index": 8,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns108.wxs"
+  },
+  {
+    "index": 9,
+    "region": "a_flint_hills",
+    "fire_class": "mild",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__mild/streams/ns109.wxs"
+  },
+  {
+    "index": 10,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns100.wxs"
+  },
+  {
+    "index": 11,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns101.wxs"
+  },
+  {
+    "index": 12,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns102.wxs"
+  },
+  {
+    "index": 13,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns103.wxs"
+  },
+  {
+    "index": 14,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns104.wxs"
+  },
+  {
+    "index": 15,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns105.wxs"
+  },
+  {
+    "index": 16,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns106.wxs"
+  },
+  {
+    "index": 17,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns107.wxs"
+  },
+  {
+    "index": 18,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns108.wxs"
+  },
+  {
+    "index": 19,
+    "region": "a_flint_hills",
+    "fire_class": "moderate",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__moderate/streams/ns109.wxs"
+  },
+  {
+    "index": 20,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns100.wxs"
+  },
+  {
+    "index": 21,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns101.wxs"
+  },
+  {
+    "index": 22,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns102.wxs"
+  },
+  {
+    "index": 23,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns103.wxs"
+  },
+  {
+    "index": 24,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns104.wxs"
+  },
+  {
+    "index": 25,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns105.wxs"
+  },
+  {
+    "index": 26,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns106.wxs"
+  },
+  {
+    "index": 27,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns107.wxs"
+  },
+  {
+    "index": 28,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns108.wxs"
+  },
+  {
+    "index": 29,
+    "region": "a_flint_hills",
+    "fire_class": "extreme",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/a_flint_hills__extreme/streams/ns109.wxs"
+  },
+  {
+    "index": 30,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns100.wxs"
+  },
+  {
+    "index": 31,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns101.wxs"
+  },
+  {
+    "index": 32,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns102.wxs"
+  },
+  {
+    "index": 33,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns103.wxs"
+  },
+  {
+    "index": 34,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns104.wxs"
+  },
+  {
+    "index": 35,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns105.wxs"
+  },
+  {
+    "index": 36,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns106.wxs"
+  },
+  {
+    "index": 37,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns107.wxs"
+  },
+  {
+    "index": 38,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns108.wxs"
+  },
+  {
+    "index": 39,
+    "region": "b_front_range_foothills",
+    "fire_class": "mild",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__mild/streams/ns109.wxs"
+  },
+  {
+    "index": 40,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns100.wxs"
+  },
+  {
+    "index": 41,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns101.wxs"
+  },
+  {
+    "index": 42,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns102.wxs"
+  },
+  {
+    "index": 43,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns103.wxs"
+  },
+  {
+    "index": 44,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns104.wxs"
+  },
+  {
+    "index": 45,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns105.wxs"
+  },
+  {
+    "index": 46,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns106.wxs"
+  },
+  {
+    "index": 47,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns107.wxs"
+  },
+  {
+    "index": 48,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns108.wxs"
+  },
+  {
+    "index": 49,
+    "region": "b_front_range_foothills",
+    "fire_class": "moderate",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__moderate/streams/ns109.wxs"
+  },
+  {
+    "index": 50,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns100.wxs"
+  },
+  {
+    "index": 51,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns101.wxs"
+  },
+  {
+    "index": 52,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns102.wxs"
+  },
+  {
+    "index": 53,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns103.wxs"
+  },
+  {
+    "index": 54,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns104.wxs"
+  },
+  {
+    "index": 55,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns105.wxs"
+  },
+  {
+    "index": 56,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns106.wxs"
+  },
+  {
+    "index": 57,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns107.wxs"
+  },
+  {
+    "index": 58,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns108.wxs"
+  },
+  {
+    "index": 59,
+    "region": "b_front_range_foothills",
+    "fire_class": "extreme",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/b_front_range_foothills__extreme/streams/ns109.wxs"
+  },
+  {
+    "index": 60,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns100.wxs"
+  },
+  {
+    "index": 61,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns101.wxs"
+  },
+  {
+    "index": 62,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns102.wxs"
+  },
+  {
+    "index": 63,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns103.wxs"
+  },
+  {
+    "index": 64,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns104.wxs"
+  },
+  {
+    "index": 65,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns105.wxs"
+  },
+  {
+    "index": 66,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns106.wxs"
+  },
+  {
+    "index": 67,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns107.wxs"
+  },
+  {
+    "index": 68,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns108.wxs"
+  },
+  {
+    "index": 69,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "mild",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__mild/streams/ns109.wxs"
+  },
+  {
+    "index": 70,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns100.wxs"
+  },
+  {
+    "index": 71,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns101.wxs"
+  },
+  {
+    "index": 72,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns102.wxs"
+  },
+  {
+    "index": 73,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns103.wxs"
+  },
+  {
+    "index": 74,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns104.wxs"
+  },
+  {
+    "index": 75,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns105.wxs"
+  },
+  {
+    "index": 76,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns106.wxs"
+  },
+  {
+    "index": 77,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns107.wxs"
+  },
+  {
+    "index": 78,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns108.wxs"
+  },
+  {
+    "index": 79,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "moderate",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__moderate/streams/ns109.wxs"
+  },
+  {
+    "index": 80,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 100,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns100.wxs"
+  },
+  {
+    "index": 81,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 101,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns101.wxs"
+  },
+  {
+    "index": 82,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 102,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns102.wxs"
+  },
+  {
+    "index": 83,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 103,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns103.wxs"
+  },
+  {
+    "index": 84,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 104,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns104.wxs"
+  },
+  {
+    "index": 85,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 105,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns105.wxs"
+  },
+  {
+    "index": 86,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 106,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns106.wxs"
+  },
+  {
+    "index": 87,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 107,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns107.wxs"
+  },
+  {
+    "index": 88,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 108,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns108.wxs"
+  },
+  {
+    "index": 89,
+    "region": "c_northern_sierra_nevada",
+    "fire_class": "extreme",
+    "noise_seed": 109,
+    "wxs": "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/configs/thesis_eval/testset/c_northern_sierra_nevada__extreme/streams/ns109.wxs"
+  }
+]

@@ -1,0 +1,63 @@
+---------------------------------------
+Begin Slurm Prolog: Jun-28-2026 18:38:27
+Job ID:    10589366
+User ID:   rjdp3
+Account:   gts-jrogers8-paid
+Job name:  testset_classify
+Partition: cpu-small
+QOS:       inferno
+---------------------------------------
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 386, in <module>
+    main()
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 362, in main
+    phase_classify(args)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 272, in phase_classify
+    flame = _classify(inp, wxs, cell_dir / "_classify_work" / f"ns{c['noise_seed']}")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/ra-cbba-core/applications/firefighting/tuning/make_testset.py", line 149, in _classify
+    report = classify(
+             ^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/classifier.py", line 185, in classify
+    fire = build_fire(cfg_path)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/scenario_weather/run_config.py", line 110, in build_fire
+    return FireSim(sim_params)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/fire_simulator/fire.py", line 62, in __init__
+    super().__init__(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 155, in __init__
+    self._parse_sim_params(sim_params)
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/base_classes/base_fire.py", line 658, in _parse_sim_params
+    raw_forecast = run_windninja(self._weather_stream, sim_params.map_params)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/storage/project/r-jrogers8-0/rjdp3/rui/embrs/embrs/models/wind_forecast.py", line 175, in run_windninja
+    shutil.rmtree(file_path)
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/shutil.py", line 752, in rmtree
+    _rmtree_safe_fd(fd, path, onerror)
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/shutil.py", line 703, in _rmtree_safe_fd
+    onerror(os.unlink, fullname, sys.exc_info())
+  File "/storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/conda/envs/embrs/lib/python3.11/shutil.py", line 701, in _rmtree_safe_fd
+    os.unlink(entry.name, dir_fd=topfd)
+FileNotFoundError: [Errno 2] No such file or directory: 'cloud_cover_152.prj'
+pkl_path: /storage/home/hcoda1/0/rjdp3/r-jrogers8-0/rui/embrs_data/maps/thesis_eval/c_northern_sierra_nevada/map_params.pkl
+Fire Simulation Initializing...
+Initializing fire sim backing array...
+---------------------------------------
+Begin Slurm Epilog: Jun-28-2026 18:38:36
+Job ID:        10589366
+Array Job ID:  10589258_73
+User ID:       rjdp3
+Account:       gts-jrogers8-paid
+Job name:      testset_classify
+Resources:     cpu=24,mem=48G,node=1
+Rsrc Used:     cput=00:04:00,vmem=0,walltime=00:00:10,mem=235244K,energy_used=0
+Partition:     cpu-small
+QOS:           inferno
+Nodes:         atl1-1-02-010-13-1
+---------------------------------------
