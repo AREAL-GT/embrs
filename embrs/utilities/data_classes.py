@@ -602,6 +602,12 @@ class PredictionOutput:
     breaches: dict
     active_fire_front: dict
     burnt_spread: dict
+    # Per ignited fireline (break) cell, the conditions the predictor used:
+    # (x, y) -> (fuel_model, dead_mf_1hr, I_ss_btu_ft_min, wind_m_s,
+    # slope_deg). Keyed like hold_probs / flame_len_m / breaches; lets
+    # consumers audit predicted fireline behavior (e.g. verify hold
+    # probabilities against configured break widths).
+    fireline_cell_diagnostics: Optional[dict] = None
     forecast_index: Optional[int] = None
 
 

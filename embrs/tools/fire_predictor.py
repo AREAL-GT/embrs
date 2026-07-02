@@ -284,6 +284,7 @@ class FirePredictor(BaseFireSim):
         self.all_crown_fire = {}
         self.hold_probs = {}
         self.breaches = {}
+        self.fireline_cell_diagnostics = {}
         self.active_fire_front = {}
         self.burnt_spread = {}
         self.burnt_locs = []
@@ -305,6 +306,7 @@ class FirePredictor(BaseFireSim):
             end_active_crown=self.end_active_crown,
             hold_probs=self.hold_probs,
             breaches=self.breaches,
+            fireline_cell_diagnostics=self.fireline_cell_diagnostics,
             active_fire_front=self.active_fire_front,
             burnt_spread=self.burnt_spread
         )
@@ -762,6 +764,32 @@ class FirePredictor(BaseFireSim):
 
                     self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
                     self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
+
+                    # Record the conditions the predictor used at this ignited
+                    # fireline cell, keyed like hold_probs / flame_len_m /
+                    # breaches. Consumers use these to audit predicted fireline
+                    # behavior against the parent simulation (e.g. verifying
+                    # hold probabilities against the configured break widths).
+                    # Stored as (fuel_model, dead_mf_1hr, I_ss_btu_ft_min,
+                    # wind_m_s, slope_deg).
+                    try:
+                        _fm = int(cell.fuel.model_num)
+                    except Exception:
+                        _fm = None
+                    try:
+                        _dmf = float(cell.fmois[0])
+                    except Exception:
+                        _dmf = None
+                    try:
+                        _iss = float(np.max(cell.I_ss))
+                    except Exception:
+                        _iss = None
+                    try:
+                        _ws = float(cell.curr_wind()[0])
+                    except Exception:
+                        _ws = None
+                    self.fireline_cell_diagnostics[(cell.x_pos, cell.y_pos)] = (
+                        _fm, _dmf, _iss, _ws, float(cell.slope_deg))
                 else:
                     cell.breached = True
 
@@ -843,6 +871,9 @@ class FirePredictor(BaseFireSim):
         Side Effects:
             - Resets all cells in-place to FUEL state via reset_to_fuel()
             - Points _cell_grid and _cell_dict to orig_grid and orig_dict
+            - Writes this member's dead_mf into every burnable cell's fmois
+              dead classes (per-member moisture from the particle filter /
+              IRPG sampling)
             - Resets _burnt_cells, _burning_cells, _updated_cells, and
               _scheduled_spot_fires
             - Fixes weak references in cells to point to self
@@ -858,6 +889,10 @@ class FirePredictor(BaseFireSim):
         # state with set_parent already called in __setstate__. Skip the expensive
         # reset loop (~1.1s on 105K-cell grids).
         if getattr(self, '_skip_first_reset', False):
+            # Template cells already carry _break_width from grid construction
+            # (BaseFireSim.__init__ applies fire breaks and roads). Re-applying
+            # them here would double every break width — _apply_firebreak does
+            # `+=` — pushing Mees hold probs to ~1 and silencing breach rolls.
             self._skip_first_reset = False
         else:
             # Reset all cells to initial FUEL state and fix weak references
@@ -865,8 +900,27 @@ class FirePredictor(BaseFireSim):
                 cell.reset_to_fuel()
                 cell.set_parent(self)
 
-        # Re-apply fire breaks (reset_to_fuel zeros _break_width on all cells)
-        self._set_firebreaks()
+            # Re-apply fire breaks and roads (reset_to_fuel zeros _break_width
+            # on all cells)
+            self._set_firebreaks()
+            self._set_roads()
+
+        # Apply this member's constant dead fuel moisture to all burnable
+        # cells. Cell fmois arrays are baked from sim_params.init_mf at grid
+        # construction (the base params' dead_mf) and reset_to_fuel restores
+        # that same template value, so without this write the per-member
+        # dead_mf set by _apply_member_params (particle filter / IRPG
+        # samples) never reaches the fire behavior calculations. Indices 0-3
+        # are the dead classes (1-hr, 10-hr, 100-hr, cured herb); only
+        # classes present in the fuel model are set, matching
+        # Cell._init_moisture().
+        dead_mf = getattr(self, 'dead_mf', None)
+        if dead_mf is not None:
+            for cell in self._cell_dict.values():
+                if not cell._fuel.burnable:
+                    continue
+                idx = cell._fuel.rel_indices
+                cell.fmois[idx[idx < 4]] = dead_mf
 
         self._burnt_cells = []
         self._burning_cells = []
@@ -1457,6 +1511,8 @@ class FirePredictor(BaseFireSim):
             self.hold_probs.clear()
         if hasattr(self, 'breaches'):
             self.breaches.clear()
+        if hasattr(self, 'fireline_cell_diagnostics'):
+            self.fireline_cell_diagnostics.clear()
         if hasattr(self, 'active_fire_front'):
             self.active_fire_front.clear()
         if hasattr(self, 'burnt_spread'):
