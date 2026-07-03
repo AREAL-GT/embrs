@@ -867,8 +867,16 @@ class Cell:
 
         Side Effects:
             - Updates the `_fuel` attribute with the specified fuel model.
+            - Recomputes the wind adjustment factor for the new fuel. Without
+              this, cells overwritten from urban to a burnable fuel (road
+              modelling, ``_overwrite_urban_fuel``) keep the non-burnable
+              WAF of 1.0 and burn with unadjusted 20-ft wind as their
+              midflame wind.
         """
         self._fuel = fuel_type
+
+        # WAF depends on fuel bed depth and burnability — invalidate on swap
+        self._set_wind_adj_factor()
 
         if self._fuel.burnable:
             self.set_arrays()
