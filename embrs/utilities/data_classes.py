@@ -472,6 +472,9 @@ class PredictorParams:
         wind_dir_bias (float): Wind direction bias in degrees.
         wind_uncertainty_factor (float): Wind uncertainty scaling factor.
         ros_bias (float): Rate of spread bias factor.
+        firebreaks_always_hold (bool): If True, fire breaks never breach
+            during spread; hold probabilities are still recorded so the
+            consumer can score breach risk analytically.
         max_wind_speed_bias (float): Maximum wind speed bias in m/s.
         max_wind_dir_bias (float): Maximum wind direction bias in degrees.
         base_wind_spd_std (float): Base wind speed std dev in m/s.
@@ -490,6 +493,12 @@ class PredictorParams:
     wind_dir_bias: float = 0
     wind_uncertainty_factor: float = 0
     ros_bias: float = 0
+    # When True, fire breaks never breach during spread (the fire is always
+    # held at the line). Hold probabilities are still computed and recorded
+    # per ignited fireline cell, so consumers can price breach risk
+    # analytically (e.g. task-rollout scoring) instead of relying on the
+    # Bernoulli breach roll. No breach RNG draws are consumed in this mode.
+    firebreaks_always_hold: bool = False
 
     max_wind_speed_bias: float = 2.5
     max_wind_dir_bias: float = 20.0

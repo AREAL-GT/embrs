@@ -222,3 +222,37 @@ class TestMemberMoistureApplied:
 
         assert np.array_equal(plain_cell._init_fmois, template)
         assert np.array_equal(plain_cell.fmois[4:], live_before)
+
+
+class TestStaleWindForecastCleared:
+    """Template cells carry a 1-entry zero wind forecast from the
+    prediction-mode placeholder wind field at grid construction.
+    Cell.curr_wind's lazy refresh (len(series) <= w_idx) never replaces a
+    1-entry series at w_idx=0, so _set_states must clear it on every path —
+    otherwise cells igniting in a member's first weather interval burn at
+    zero wind."""
+
+    def _seed_stale_forecast(self, cells):
+        for cell in cells:
+            cell.forecast_wind_speeds = np.zeros(1)
+            cell.forecast_wind_dirs = np.zeros(1)
+
+    def test_cleared_on_skip_path(self, predictor_with_cells):
+        predictor, break_cell, road_cell, plain_cell = predictor_with_cells
+        cells = (break_cell, road_cell, plain_cell)
+        self._seed_stale_forecast(cells)
+        predictor._skip_first_reset = True
+
+        predictor._set_states(_empty_estimate())
+
+        for cell in cells:
+            assert len(cell.forecast_wind_speeds) == 0
+            assert len(cell.forecast_wind_dirs) == 0
+
+    def test_cleared_on_reset_path(self, predictor_with_cells):
+        predictor, _, _, plain_cell = predictor_with_cells
+        self._seed_stale_forecast([plain_cell])
+
+        predictor._set_states(_empty_estimate())
+
+        assert len(plain_cell.forecast_wind_speeds) == 0

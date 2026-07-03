@@ -149,6 +149,9 @@ class FirePredictor(BaseFireSim):
         self.dead_mf = params.dead_mf
         self.live_mf = params.live_mf
 
+        # Fireline breach handling mode
+        self.firebreaks_always_hold = params.firebreaks_always_hold
+
         # Update relevant sim_params for prediction model for initialization
         sim_params = copy.deepcopy(self.fire._sim_params)
         sim_params.cell_size = params.cell_size_m
@@ -221,6 +224,9 @@ class FirePredictor(BaseFireSim):
         # Update fuel moisture
         self.dead_mf = params.dead_mf
         self.live_mf = params.live_mf
+
+        # Update fireline breach handling mode
+        self.firebreaks_always_hold = params.firebreaks_always_hold
 
         # Update spotting parameters
         self.model_spotting = params.model_spotting
@@ -757,13 +763,7 @@ class FirePredictor(BaseFireSim):
                 self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
 
                 if cell._break_width > 0:
-                    # Determine if fire will breach fireline contained within cell
-                    hold_prob = cell.calc_hold_prob(flame_len_m)
-                    rand = self._rng_breach.random()
-                    cell.breached = rand > hold_prob
-
-                    self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
-                    self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
+                    self._roll_breach(cell, flame_len_m)
 
                     # Record the conditions the predictor used at this ignited
                     # fireline cell, keyed like hold_probs / flame_len_m /
@@ -856,6 +856,32 @@ class FirePredictor(BaseFireSim):
 
         return True
 
+    def _roll_breach(self, cell, flame_len_m: float) -> None:
+        """Resolve whether an ignited fireline cell breaches its fire break.
+
+        Computes the Mees hold probability for the cell's break width and,
+        in the default mode, draws a Bernoulli sample against it. When
+        ``firebreaks_always_hold`` is set (task rollouts whose breach risk
+        the consumer prices analytically), the break never breaches and no
+        breach-RNG draw is consumed; the hold probability is still recorded.
+
+        Args:
+            cell (Cell): Newly ignited cell with ``_break_width > 0``.
+            flame_len_m (float): Flame length at the cell in meters.
+
+        Side Effects:
+            Sets ``cell.breached`` and records ``hold_probs`` /
+            ``breaches`` entries keyed by the cell's position.
+        """
+        hold_prob = cell.calc_hold_prob(flame_len_m)
+        if getattr(self, 'firebreaks_always_hold', False):
+            cell.breached = False
+        else:
+            cell.breached = self._rng_breach.random() > hold_prob
+
+        self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
+        self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
+
     def _set_states(self, state_estimate: StateEstimate = None) -> None:
         """Initialize prediction state from fire simulation or state estimate.
 
@@ -905,20 +931,32 @@ class FirePredictor(BaseFireSim):
             self._set_firebreaks()
             self._set_roads()
 
-        # Apply this member's constant dead fuel moisture to all burnable
-        # cells. Cell fmois arrays are baked from sim_params.init_mf at grid
-        # construction (the base params' dead_mf) and reset_to_fuel restores
-        # that same template value, so without this write the per-member
-        # dead_mf set by _apply_member_params (particle filter / IRPG
-        # samples) never reaches the fire behavior calculations. Indices 0-3
-        # are the dead classes (1-hr, 10-hr, 100-hr, cured herb); only
-        # classes present in the fuel model are set, matching
-        # Cell._init_moisture().
+        # Refresh the per-cell state the skip-first-reset path would otherwise
+        # inherit stale from the grid-construction template:
+        #
+        # - Wind forecast: template cells are seeded at construction from the
+        #   prediction-mode placeholder wind field (a single all-zero entry —
+        #   see the is_prediction() branch of BaseFireSim weather-manager
+        #   init), and Cell.curr_wind's lazy refresh (len(series) <= w_idx)
+        #   never replaces a 1-entry series at w_idx=0. Without clearing,
+        #   every cell that ignites during the first weather interval of a
+        #   member run burns at zero wind. Clearing forces the first
+        #   curr_wind() to pull from this member's assigned forecast.
+        #   (reset_to_fuel also clears these; repeating here keeps the skip
+        #   path equivalent.)
+        #
+        # - Dead fuel moisture: cell fmois arrays are baked from
+        #   sim_params.init_mf at grid construction (the base params'
+        #   dead_mf), so without this write the per-member dead_mf set by
+        #   _apply_member_params (particle filter / IRPG samples) never
+        #   reaches the fire behavior calculations. Indices 0-3 are the dead
+        #   classes (1-hr, 10-hr, 100-hr, cured herb); only classes present
+        #   in the fuel model are set, matching Cell._init_moisture().
         dead_mf = getattr(self, 'dead_mf', None)
-        if dead_mf is not None:
-            for cell in self._cell_dict.values():
-                if not cell._fuel.burnable:
-                    continue
+        for cell in self._cell_dict.values():
+            cell.forecast_wind_speeds = []
+            cell.forecast_wind_dirs = []
+            if dead_mf is not None and cell._fuel.burnable:
                 idx = cell._fuel.rel_indices
                 cell.fmois[idx[idx < 4]] = dead_mf
 
