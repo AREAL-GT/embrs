@@ -119,6 +119,42 @@ class TestFirebreaksAlwaysHold:
             cell.calc_hold_prob(FLAME_LEN_M))
 
 
+class TestResolveFirelineIgnition:
+    """_resolve_fireline_ignition: roll + diagnostics for ignited break cells.
+
+    Used by BOTH branches of _init_iteration. Starting cells (iters == 0)
+    previously bypassed the breach roll entirely — they kept the default
+    breached=True and propagated through the line unrolled and unscored."""
+
+    def _make_predictor(self, always_hold, rng):
+        predictor = _make_predictor(always_hold=always_hold, rng=rng)
+        predictor.fireline_cell_diagnostics = {}
+        return predictor
+
+    def test_records_hold_and_diagnostics(self):
+        cell = _make_break_cell()
+        predictor = self._make_predictor(always_hold=False, rng=_FixedRng(0.5))
+
+        predictor._resolve_fireline_ignition(cell, FLAME_LEN_M)
+
+        key = (cell.x_pos, cell.y_pos)
+        assert key in predictor.hold_probs
+        assert key in predictor.breaches
+        diag = predictor.fireline_cell_diagnostics[key]
+        assert diag[0] == 105          # fuel model
+        assert diag[1] == pytest.approx(0.08)  # dead_mf_1hr
+
+    def test_force_hold_never_breaches(self):
+        cell = _make_break_cell()
+        rng = _FixedRng(0.999)
+        predictor = self._make_predictor(always_hold=True, rng=rng)
+
+        predictor._resolve_fireline_ignition(cell, FLAME_LEN_M)
+
+        assert bool(cell.breached) is False
+        assert rng.n_draws == 0
+
+
 class TestParamsPlumbing:
     """firebreaks_always_hold flows through the member-params path."""
 

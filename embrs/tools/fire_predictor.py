@@ -736,6 +736,16 @@ class FirePredictor(BaseFireSim):
                 crown_fire(cell, self.fmc)
                 cell.has_steady_state = True
 
+                # Starting cells never pass through the iters>=1 branch
+                # (_new_ignitions is cleared at the end of this call), so a
+                # starting cell on a fire break must resolve its breach here
+                # — otherwise it keeps the default breached=True and
+                # propagates through the line unrolled and unscored.
+                if cell._break_width > 0:
+                    flame_len_m = ft_to_m(calc_flame_len(cell))
+                    self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
+                    self._resolve_fireline_ignition(cell, flame_len_m)
+
                 # Don't model fire acceleration in prediction model
                 cell.r_t = cell.r_ss * self.ros_bias_factor
                 cell.avg_ros = cell.r_ss * self.ros_bias_factor
@@ -763,33 +773,7 @@ class FirePredictor(BaseFireSim):
                 self.flame_len_m[(cell.x_pos, cell.y_pos)] = flame_len_m
 
                 if cell._break_width > 0:
-                    self._roll_breach(cell, flame_len_m)
-
-                    # Record the conditions the predictor used at this ignited
-                    # fireline cell, keyed like hold_probs / flame_len_m /
-                    # breaches. Consumers use these to audit predicted fireline
-                    # behavior against the parent simulation (e.g. verifying
-                    # hold probabilities against the configured break widths).
-                    # Stored as (fuel_model, dead_mf_1hr, I_ss_btu_ft_min,
-                    # wind_m_s, slope_deg).
-                    try:
-                        _fm = int(cell.fuel.model_num)
-                    except Exception:
-                        _fm = None
-                    try:
-                        _dmf = float(cell.fmois[0])
-                    except Exception:
-                        _dmf = None
-                    try:
-                        _iss = float(np.max(cell.I_ss))
-                    except Exception:
-                        _iss = None
-                    try:
-                        _ws = float(cell.curr_wind()[0])
-                    except Exception:
-                        _ws = None
-                    self.fireline_cell_diagnostics[(cell.x_pos, cell.y_pos)] = (
-                        _fm, _dmf, _iss, _ws, float(cell.slope_deg))
+                    self._resolve_fireline_ignition(cell, flame_len_m)
                 else:
                     cell.breached = True
 
@@ -881,6 +865,47 @@ class FirePredictor(BaseFireSim):
 
         self.hold_probs[(cell.x_pos, cell.y_pos)] = hold_prob
         self.breaches[(cell.x_pos, cell.y_pos)] = cell.breached
+
+    def _resolve_fireline_ignition(self, cell, flame_len_m: float) -> None:
+        """Resolve an ignited fire-break cell: breach roll plus diagnostics.
+
+        Called for every newly ignited cell with ``_break_width > 0``, from
+        both the starting-ignition branch (iters == 0) and the spread-driven
+        branch (iters >= 1) of ``_init_iteration``.
+
+        Args:
+            cell (Cell): Newly ignited cell with ``_break_width > 0``.
+            flame_len_m (float): Flame length at the cell in meters.
+
+        Side Effects:
+            Sets ``cell.breached``, records ``hold_probs`` / ``breaches``
+            entries, and records ``fireline_cell_diagnostics`` — the
+            conditions the predictor used at this cell, keyed like
+            ``hold_probs`` / ``flame_len_m``, stored as (fuel_model,
+            dead_mf_1hr, I_ss_btu_ft_min, wind_m_s, slope_deg). Consumers
+            use these to audit predicted fireline behavior against the
+            parent simulation.
+        """
+        self._roll_breach(cell, flame_len_m)
+
+        try:
+            _fm = int(cell.fuel.model_num)
+        except Exception:
+            _fm = None
+        try:
+            _dmf = float(cell.fmois[0])
+        except Exception:
+            _dmf = None
+        try:
+            _iss = float(np.max(cell.I_ss))
+        except Exception:
+            _iss = None
+        try:
+            _ws = float(cell.curr_wind()[0])
+        except Exception:
+            _ws = None
+        self.fireline_cell_diagnostics[(cell.x_pos, cell.y_pos)] = (
+            _fm, _dmf, _iss, _ws, float(cell.slope_deg))
 
     def _set_states(self, state_estimate: StateEstimate = None) -> None:
         """Initialize prediction state from fire simulation or state estimate.
