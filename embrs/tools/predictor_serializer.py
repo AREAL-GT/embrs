@@ -110,6 +110,9 @@ class PredictorSerializer:
             'burning_cell_polygons': UtilFuncs.get_cell_polygons(fire._burning_cells),
             'burnt_cell_polygons': (UtilFuncs.get_cell_polygons(fire._burnt_cells)
                                    if fire._burnt_cells else None),
+            # Completed fire breaks (scenario + constructed firelines) so
+            # worker predictors see firelines built during the simulation
+            'fire_breaks': list(fire.fire_breaks),
         }
 
         # Deep copy simulation parameters

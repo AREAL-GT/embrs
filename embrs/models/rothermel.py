@@ -134,8 +134,20 @@ def accelerate(cell: Cell, time_step: float):
     Side Effects:
         Updates ``cell.r_t``, ``cell.avg_ros``, and ``cell.I_t`` in-place.
     """
-    _accelerate_core(cell.r_t, cell.r_ss, cell.avg_ros, cell.I_t, cell.I_ss,
-                     cell.a_a, float(time_step))
+    factor = cell._retardant_factor
+    if factor != 1.0:
+        # Long-term retardant: scale the steady-state targets so the cell is
+        # clamped to the reduced rate (and intensity) while treated and
+        # re-accelerates along the curve once the retardant expires.
+        I_ss_eff = cell.I_ss * factor
+        _accelerate_core(cell.r_t, cell.r_ss * factor, cell.avg_ros, cell.I_t,
+                         I_ss_eff, cell.a_a, float(time_step))
+        # The core leaves I_t unchanged on the clamp branch; cap it so the
+        # intensity drops with the rate while the retardant is active.
+        np.minimum(cell.I_t, I_ss_eff, out=cell.I_t)
+    else:
+        _accelerate_core(cell.r_t, cell.r_ss, cell.avg_ros, cell.I_t, cell.I_ss,
+                         cell.a_a, float(time_step))
 
 def calc_vals_for_all_directions(cell: Cell, R_h: float, I_r: float, alpha: float,
                                  e: float, I_h: float = None) -> Tuple[np.ndarray, np.ndarray]:

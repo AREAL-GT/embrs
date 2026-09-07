@@ -827,6 +827,30 @@ class FirePredictor(BaseFireSim):
 
         return True
 
+    def _sync_fire_breaks_from_parent(self) -> None:
+        """Copy completed fire breaks from the parent fire into the predictor.
+
+        Firelines constructed by a strategy are appended to the parent
+        FireSim's control handler, not to the scenario data the predictor
+        grid was built from. Import every break whose id the predictor does
+        not yet hold so that ``_set_firebreaks`` re-applies it on this and
+        every later run. Firelines still under progressive construction
+        (``active_firelines``) are not carried forward. In worker processes
+        (``fire`` is None) the list serialized in ``fire_state`` is used.
+        """
+        if self.fire is not None:
+            source = self.fire.fire_breaks
+        else:
+            data = self._serialization_data or {}
+            source = data.get('fire_state', {}).get('fire_breaks', [])
+
+        handler = self._control_handler
+        for line, width, fb_id in source:
+            if fb_id in handler._fire_break_dict:
+                continue
+            handler._fire_breaks.append((line, width, fb_id))
+            handler._fire_break_dict[fb_id] = (line, width)
+
     def _set_states(self, state_estimate: StateEstimate = None) -> None:
         """Initialize prediction state from fire simulation or state estimate.
 
@@ -864,7 +888,10 @@ class FirePredictor(BaseFireSim):
                 cell.reset_to_fuel()
                 cell.set_parent(self)
 
-        # Re-apply fire breaks (reset_to_fuel zeros _break_width on all cells)
+        # Import fire breaks constructed in the parent simulation since the
+        # predictor was built (completed or stopped firelines), then re-apply
+        # all fire breaks (reset_to_fuel zeros _break_width on all cells)
+        self._sync_fire_breaks_from_parent()
         self._set_firebreaks()
 
         self._burnt_cells = []
